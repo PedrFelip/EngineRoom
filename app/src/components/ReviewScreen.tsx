@@ -1,4 +1,4 @@
-import { useEffect, useMemo, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type { ReviewConfig } from "../types";
 import { resultLabel } from "../lib/pgn";
 import { useReview } from "../lib/use-review";
@@ -6,6 +6,7 @@ import Board from "./Board";
 import EvalBar from "./EvalBar";
 import MoveList from "./MoveList";
 import ReviewSummary from "./ReviewSummary";
+import CandidateLines from "./CandidateLines";
 
 interface ReviewScreenProps {
   config: ReviewConfig;
@@ -20,17 +21,24 @@ function uciToSquares(uci: string): [string, string] | null {
 export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
   const review = useReview(config);
   const { result, status, error, currentPly, orientation } = review;
-
   const position = result?.positions[currentPly] ?? null;
   const lastMoveUci =
     currentPly > 0 ? result?.moves[currentPly - 1].uci ?? null : null;
   const opening = result?.moves.find((m) => m.eco)?.eco ?? null;
+
+  const [selectedMultipv, setSelectedMultipv] = useState(1);
+  useEffect(() => {
+    setSelectedMultipv(1);
+  }, [currentPly]);
+  const selectedLine =
+    position?.lines.find((l) => l.multipv === selectedMultipv) ?? position?.lines[0];
+
   const bestArrow = useMemo(() => {
-    const uci = position?.pv[0];
+    const uci = selectedLine?.pv[0];
     if (!uci) return null;
     const sq = uciToSquares(uci);
     return sq ? { from: sq[0], to: sq[1], brush: "green" as const } : null;
-  }, [position]);
+  }, [selectedLine]);
 
   useEffect(() => {
     if (!result) return;
@@ -108,6 +116,14 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
               )}
             </div>
           </div>
+
+          {position?.lines?.length ? (
+            <CandidateLines
+              lines={position.lines}
+              selectedMultipv={selectedMultipv}
+              onSelect={setSelectedMultipv}
+            />
+          ) : null}
 
           <div className="flex items-center justify-center gap-2 rounded-xl border border-edge bg-panel-2/60 p-2">
             <NavBtn onClick={review.first} disabled={!result}>

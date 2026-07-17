@@ -118,6 +118,31 @@ describe("buildReview", () => {
     expect(review.moves[1].eco).toBeNull();
     expect(review.accuracy.black).toBeLessThan(30);
   });
+
+  it("não pune o lance que dá xeque-mate (fora do livro)", () => {
+    const game = {
+      startFen: START_FEN,
+      moves: [
+        { ply: 1, color: "w" as const, san: "Qh5#", uci: "d1h5", fenBefore: START_FEN },
+      ],
+    };
+    const raw = [
+      { fen: START_FEN, cp: 0, depth: 20, pv: ["d1h5"] },
+      {
+        fen: "8k",
+        cp: -100000,
+        depth: 0,
+        pv: [],
+        lines: [{ multipv: 1, cp: -100000, pv: [] }],
+      },
+    ];
+
+    const review = buildReview(game, raw);
+
+    expect(review.moves[0].winPctLoss).toBe(0);
+    expect(review.moves[0].classification).toBe("melhor");
+    expect(review.positions[1].winPct).toBeCloseTo(100, 0);
+  });
 });
 
 function fakePort(
@@ -170,5 +195,48 @@ describe("analyzeGame", () => {
     expect(review.moves[0].winPctLoss).toBeCloseTo(36.3, 1);
     expect(review.moves[0].bestUci).toBe("e2e4");
     expect(review.moves[0].classification).toBe("livro");
+  });
+
+  it("coleta múltiplas linhas candidatas quando multipv > 1", async () => {
+    let lineCb: ((line: string) => void) | null = null;
+    const port: EnginePort = {
+      send(cmd: string) {
+        const c = cmd.trim();
+        if (c === "uci") lineCb?.("uciok");
+        else if (c === "isready") lineCb?.("readyok");
+        else if (c.startsWith("go")) {
+          lineCb?.("info depth 20 multipv 1 score cp 30 pv e2e4 e7e5");
+          lineCb?.("info depth 20 multipv 2 score cp 10 pv d2d4 d7d5");
+          lineCb?.("bestmove e2e4");
+        }
+      },
+      onLine(handler: (line: string) => void) {
+        lineCb = handler;
+        return () => {
+          lineCb = null;
+        };
+      },
+    };
+
+    const review = await analyzeGame("1. e4 e5", 20, port, 2);
+    const lines0 = review.positions[0].lines;
+
+    expect(lines0).toHaveLength(2);
+    expect(lines0[0].multipv).toBe(1);
+    expect(lines0[0].san).toBe("e4");
+    expect(lines0[1].multipv).toBe(2);
+    expect(lines0[1].san).toBe("d4");
+    expect(lines0[0].winPct).toBeGreaterThan(lines0[1].winPct);
+  });
+
+  it("resolve xeque-mate deterministicamente (sem depender da engine)", async () => {
+    const port = fakePort(() => ({ cp: 0, pv: [] }));
+    const review = await analyzeGame("1. f3 e5 2. g4 Qh4#", 20, port);
+
+    const last = review.positions[review.positions.length - 1];
+    expect(last.winPct).toBeCloseTo(0, 0);
+
+    const mateMove = review.moves[review.moves.length - 1];
+    expect(mateMove.winPctLoss).toBe(0);
   });
 });

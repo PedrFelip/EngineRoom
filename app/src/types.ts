@@ -27,6 +27,7 @@ export interface ReviewConfig {
   pgn: string;
   meta: PgnMeta;
   engine: EngineTier;
+  lines: number;
 }
 
 /** Classificação de um lance, no vocabulário pt-BR do projeto. */
@@ -44,6 +45,16 @@ export interface PositionAnalysis {
   ply: number;
   fen: string;
   depth: number;
+  cp: number;
+  winPct: number;
+  pv: string[];
+  lines: PvLine[];
+}
+
+/** Uma linha candidata (multipv) numa posição, normalizada p/ POV das brancas. */
+export interface PvLine {
+  multipv: number;
+  san: string | null;
   cp: number;
   winPct: number;
   pv: string[];

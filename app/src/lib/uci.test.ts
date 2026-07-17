@@ -126,6 +126,10 @@ describe("scoreToCp", () => {
     expect(scoreToCp({ kind: "mate", value: -3 })).toBe(-99997);
   });
 
+  it("trata mate 0 como derrota do lado a jogar (posição de xeque-mate)", () => {
+    expect(scoreToCp({ kind: "mate", value: 0 })).toBe(-100000);
+  });
+
   it("returns null when there is no score", () => {
     expect(scoreToCp(undefined)).toBeNull();
   });

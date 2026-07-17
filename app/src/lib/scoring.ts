@@ -76,3 +76,17 @@ export function gameAccuracy(winPctLosses: number[]): number {
   const sum = winPctLosses.reduce((acc, loss) => acc + moveAccuracy(loss), 0);
   return sum / winPctLosses.length;
 }
+
+/** Limiar acima do qual um cp é considerado xeque-mate (mate-in-N mapeado por scoreToCp). */
+const MATE_CP = 90000;
+
+/**
+ * Formata centipawns (POV das brancas) como string de avaliação: "+1.20" ou
+ * "#3" / "-#3" para mate. Usado na barra de candidatas.
+ */
+export function formatEval(cp: number): string {
+  if (cp >= MATE_CP) return `#${100000 - cp}`;
+  if (cp <= -MATE_CP) return `-#${100000 + cp}`;
+  const pawns = cp / 100;
+  return `${pawns >= 0 ? "+" : ""}${pawns.toFixed(2)}`;
+}

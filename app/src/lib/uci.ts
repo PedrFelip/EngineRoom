@@ -136,7 +136,8 @@ export function scoreToCp(score: InfoScore | undefined): number | null {
   if (!score) return null;
   if (score.kind === "cp") return score.value;
   // mate in N: convert to a big number keeping the sign.
-  const sign = score.value >= 0 ? 1 : -1;
+  // mate 0 = posição de xeque-mate (lado a jogar perdeu) → magnitude máxima negativa.
+  const sign = score.value > 0 ? 1 : -1;
   const magnitude = Math.abs(score.value);
   return sign * (100000 - magnitude);
 }

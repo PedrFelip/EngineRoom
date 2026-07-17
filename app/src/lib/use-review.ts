@@ -40,7 +40,7 @@ export function useReview(config: ReviewConfig): UseReview {
         );
         if (cancelled || !p) return;
         port = p;
-        const review = await analyzeGame(config.pgn, config.engine.depth, p);
+        const review = await analyzeGame(config.pgn, config.engine.depth, p, config.lines);
         if (cancelled) return;
         setResult(review);
         setCurrentPly(review.moves.length);

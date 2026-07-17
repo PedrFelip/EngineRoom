@@ -3,6 +3,7 @@ import {
   cpToWinPct,
   classifyMove,
   gameAccuracy,
+  formatEval,
   CLASSIFICATION_LABELS,
 } from "./scoring";
 
@@ -84,5 +85,20 @@ describe("CLASSIFICATION_LABELS", () => {
     expect(CLASSIFICATION_LABELS.erro).toBe("Erro");
     expect(CLASSIFICATION_LABELS.blunder).toBe("Blunder");
     expect(CLASSIFICATION_LABELS.livro).toBe("Livro");
+  });
+});
+
+describe("formatEval", () => {
+  it("formata centipawns em peões com sinal", () => {
+    expect(formatEval(0)).toBe("+0.00");
+    expect(formatEval(120)).toBe("+1.20");
+    expect(formatEval(-50)).toBe("-0.50");
+    expect(formatEval(1000)).toBe("+10.00");
+  });
+
+  it("formata mate em N (POV brancas)", () => {
+    expect(formatEval(99999)).toBe("#1");
+    expect(formatEval(99997)).toBe("#3");
+    expect(formatEval(-99997)).toBe("-#3");
   });
 });

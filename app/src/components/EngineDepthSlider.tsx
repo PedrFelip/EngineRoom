@@ -3,11 +3,17 @@ import { ENGINE_TIERS, type EngineTier, type EngineTierId } from "../types";
 interface Props {
   value: EngineTierId;
   onChange: (tier: EngineTier) => void;
+  lines: number;
+  onLinesChange: (lines: number) => void;
 }
 
-export default function EngineDepthSlider({ value, onChange }: Props) {
+const MIN_LINES = 1;
+const MAX_LINES = 5;
+
+export default function EngineDepthSlider({ value, onChange, lines, onLinesChange }: Props) {
   const activeIndex = ENGINE_TIERS.findIndex((t) => t.id === value);
   const active = ENGINE_TIERS[activeIndex];
+  const linesPct = ((lines - MIN_LINES) / (MAX_LINES - MIN_LINES)) * 100;
 
   return (
     <div className="rounded-xl border border-edge bg-panel-2/60 p-5">
@@ -66,6 +72,46 @@ export default function EngineDepthSlider({ value, onChange }: Props) {
       </div>
 
       <p className="mt-3 min-h-[1.25rem] text-center text-xs text-ink-dim">{active.hint}</p>
+
+      <div className="my-5 h-px bg-edge-soft" />
+
+      <div className="mb-4 flex items-baseline justify-between">
+        <div>
+          <h3 className="text-sm font-semibold uppercase tracking-wide text-ink-dim">
+            Linhas de análise
+          </h3>
+          <p className="mt-0.5 text-xs text-ink-faint">
+            Quantas linhas candidatas a engine retorna por lance
+          </p>
+        </div>
+        <span className="font-mono text-3xl font-bold tabular-nums text-brand">
+          {lines}
+        </span>
+      </div>
+
+      <input
+        type="range"
+        min={MIN_LINES}
+        max={MAX_LINES}
+        step={1}
+        value={lines}
+        onChange={(e) => onLinesChange(Number(e.currentTarget.value))}
+        aria-label="Linhas de análise"
+        className="engine-range w-full"
+        style={{
+          background: `linear-gradient(to right, var(--color-brand) 0%, var(--color-brand) ${linesPct}%, var(--color-panel-3) ${linesPct}%, var(--color-panel-3) 100%)`,
+        }}
+      />
+      <div className="mt-2 flex justify-between font-mono text-[11px] text-ink-faint">
+        {Array.from({ length: MAX_LINES }, (_, i) => i + 1).map((n) => (
+          <span key={n} className={n === lines ? "text-brand" : ""}>
+            {n}
+          </span>
+        ))}
+      </div>
+      <p className="mt-2 min-h-[1.25rem] text-center text-xs text-ink-dim">
+        {lines === 1 ? "Apenas a melhor linha (mais rápido)" : `${lines} linhas candidatas por lance`}
+      </p>
     </div>
   );
 }

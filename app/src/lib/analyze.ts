@@ -12,6 +12,7 @@ import type {
   AccuracyByColor,
   MoveAnalysis,
   PositionAnalysis,
+  PvLine,
   ReviewResult,
 } from "../types";
 import { classifyMove, cpToWinPct, gameAccuracy } from "./scoring";
@@ -24,11 +25,19 @@ export interface BookInfo {
   eco: EcoEntry | null;
 }
 
+export interface RawLine {
+  multipv: number;
+  cp: number;
+  pv: string[];
+  san?: string | null;
+}
+
 export interface RawPosition {
   fen: string;
   cp: number;
   depth: number;
   pv: string[];
+  lines?: RawLine[];
 }
 
 export interface PlayedMove {
@@ -64,6 +73,14 @@ export function buildReview(
   const positions: PositionAnalysis[] = raw.map((r, i) => {
     const stm = sideToMoveAt(game, i);
     const winPct = stm === "w" ? cpToWinPct(r.cp) : 100 - cpToWinPct(r.cp);
+    const rawLines = r.lines ?? [{ multipv: 1, cp: r.cp, pv: r.pv }];
+    const lines: PvLine[] = rawLines.map((l) => ({
+      multipv: l.multipv,
+      san: l.san ?? null,
+      cp: stm === "w" ? l.cp : -l.cp,
+      winPct: stm === "w" ? cpToWinPct(l.cp) : 100 - cpToWinPct(l.cp),
+      pv: l.pv,
+    }));
     return {
       ply: i,
       fen: r.fen,
@@ -71,6 +88,7 @@ export function buildReview(
       cp: r.cp,
       winPct,
       pv: r.pv,
+      lines,
     };
   });
 
@@ -154,44 +172,100 @@ function ask(port: EnginePort, cmd: string, done: (line: string) => boolean): Pr
   });
 }
 
+function uciToSan(fen: string, uci: string): string | null {
+  try {
+    const c = new Chess(fen);
+    const m = c.move({
+      from: uci.slice(0, 2),
+      to: uci.slice(2, 4),
+      promotion: uci[4],
+    });
+    return m ? m.san : null;
+  } catch {
+    return null;
+  }
+}
+
 async function evalPosition(
   port: EnginePort,
   fen: string,
   depth: number,
 ): Promise<RawPosition> {
-  let best: { depth: number; score?: InfoScore; pv: string[] } = {
-    depth: 0,
-    pv: [],
-  };
+  const byPv = new Map<number, { depth: number; score?: InfoScore; pv: string[] }>();
   await port.send(`position fen ${fen}`);
   await ask(port, `go depth ${depth}`, (line) => {
     const info = parseInfo(line);
-    if (info?.score && (info.multipv ?? 1) === 1 && (info.depth ?? 0) >= best.depth) {
-      best = { depth: info.depth ?? 0, score: info.score, pv: info.pv ?? [] };
+    if (info?.score) {
+      const idx = info.multipv ?? 1;
+      const prev = byPv.get(idx);
+      if (!prev || (info.depth ?? 0) >= prev.depth) {
+        byPv.set(idx, { depth: info.depth ?? 0, score: info.score, pv: info.pv ?? [] });
+      }
     }
     return line.trim().startsWith("bestmove");
   });
-  const cp = scoreToCp(best.score) ?? 0;
-  return { fen, cp, depth: best.depth, pv: best.pv };
+  const lines: RawLine[] = [...byPv.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([multipv, l]) => ({ multipv, cp: scoreToCp(l.score) ?? 0, pv: l.pv }));
+  const principal = lines.find((l) => l.multipv === 1) ?? lines[0];
+  return {
+    fen,
+    cp: principal?.cp ?? 0,
+    depth: byPv.get(1)?.depth ?? 0,
+    pv: principal?.pv ?? [],
+    lines,
+  };
+}
+
+function terminalCp(fen: string): number | null {
+  try {
+    const c = new Chess(fen);
+    if (c.isCheckmate()) return -100000;
+    if (c.isGameOver()) return 0;
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 /**
  * Aciona o engine posição a posição e devolve a revisão completa.
  * `port` abstrai o processo UCI (sidecar Tauri ou engine falso em testes).
+ * `multipv` define quantas linhas candidatas o engine retorna por posição.
+ * Posições terminais (xeque-mate/afogamento) são resolvidas sem chamar a engine.
  */
 export async function analyzeGame(
   pgn: string,
   depth: number,
   port: EnginePort,
+  multipv = 1,
 ): Promise<ReviewResult> {
   const { positionFens, moves } = extractGame(pgn);
 
   await ask(port, "uci", isUciOk);
   await ask(port, "isready", isReadyOk);
+  await port.send(`setoption name Multipv value ${Math.max(1, multipv)}`);
 
   const raw: RawPosition[] = [];
   for (let i = 0; i < positionFens.length; i++) {
-    raw.push(await evalPosition(port, positionFens[i], depth));
+    const fen = positionFens[i];
+    const term = terminalCp(fen);
+    let pos: RawPosition;
+    if (term !== null) {
+      pos = {
+        fen,
+        cp: term,
+        depth: 0,
+        pv: [],
+        lines: [{ multipv: 1, cp: term, pv: [] }],
+      };
+    } else {
+      pos = await evalPosition(port, fen, depth);
+      for (const l of pos.lines ?? []) {
+        l.san = l.pv[0] ? uciToSan(pos.fen, l.pv[0]) : null;
+      }
+    }
+    raw.push(pos);
   }
   await port.send("quit");
 

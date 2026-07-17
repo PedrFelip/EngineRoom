@@ -12,6 +12,7 @@ interface Props {
 export default function HomePage({ onStart }: Props) {
   const [pgn, setPgn] = useState("");
   const [tierId, setTierId] = useState<EngineTierId>("balanced");
+  const [lines, setLines] = useState(1);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   const parse = useMemo(() => parsePgn(pgn), [pgn]);
@@ -94,7 +95,12 @@ export default function HomePage({ onStart }: Props) {
 
           <div className="my-5 h-px bg-edge-soft" />
 
-          <EngineDepthSlider value={tierId} onChange={(t) => setTierId(t.id)} />
+          <EngineDepthSlider
+            value={tierId}
+            onChange={(t) => setTierId(t.id)}
+            lines={lines}
+            onLinesChange={setLines}
+          />
 
           <button
             type="button"
@@ -105,6 +111,7 @@ export default function HomePage({ onStart }: Props) {
                 pgn,
                 meta: parse.meta,
                 engine,
+                lines,
               })
             }
             className={`mt-5 flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold transition ${
