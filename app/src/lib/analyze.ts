@@ -232,6 +232,8 @@ function terminalCp(fen: string): number | null {
  * Aciona o engine posição a posição e devolve a revisão completa.
  * `port` abstrai o processo UCI (sidecar Tauri ou engine falso em testes).
  * `multipv` define quantas linhas candidatas o engine retorna por posição.
+ * `opts.threads` / `opts.hashMb` dimensionam a engine (Threads/Hash) para usar o
+ * máximo de CPU/RAM disponível. Omitir mantém os defaults do Stockfish.
  * Posições terminais (xeque-mate/afogamento) são resolvidas sem chamar a engine.
  */
 export async function analyzeGame(
@@ -239,11 +241,18 @@ export async function analyzeGame(
   depth: number,
   port: EnginePort,
   multipv = 1,
+  opts: { threads?: number; hashMb?: number } = {},
 ): Promise<ReviewResult> {
   const { positionFens, moves } = extractGame(pgn);
 
   await ask(port, "uci", isUciOk);
   await ask(port, "isready", isReadyOk);
+  if (opts.threads && opts.threads > 1) {
+    await port.send(`setoption name Threads value ${opts.threads}`);
+  }
+  if (opts.hashMb && opts.hashMb > 0) {
+    await port.send(`setoption name Hash value ${opts.hashMb}`);
+  }
   await port.send(`setoption name Multipv value ${Math.max(1, multipv)}`);
 
   const raw: RawPosition[] = [];

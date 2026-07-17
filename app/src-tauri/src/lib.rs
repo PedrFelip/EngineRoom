@@ -1,4 +1,5 @@
 mod engine;
+mod system;
 
 use engine::EngineState;
 
@@ -13,6 +14,7 @@ pub fn run() {
             engine::engine_spawn,
             engine::engine_send,
             engine::engine_stop,
+            system::system_resources,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

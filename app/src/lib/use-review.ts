@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { analyzeGame } from "./analyze";
 import { createTauriEnginePort } from "./engine-port";
+import { getSystemResources, recommendedHashMb } from "./system";
 import { useSettings } from "./settings-context";
 import type { ReviewConfig, ReviewResult } from "../types";
 
@@ -40,7 +41,27 @@ export function useReview(config: ReviewConfig): UseReview {
         );
         if (cancelled || !p) return;
         port = p;
-        const review = await analyzeGame(config.pgn, config.engine.depth, p, config.lines);
+
+        // Dimensiona a engine pra usar o máximo de CPU/RAM (Threads + Hash).
+        // Best-effort: se a detecção falhar, segue com os defaults do Stockfish.
+        let sizing: { threads?: number; hashMb?: number } = {};
+        try {
+          const r = await getSystemResources();
+          sizing = {
+            threads: r.threads,
+            hashMb: recommendedHashMb(r.memory_mb),
+          };
+        } catch {
+          /* fallback: defaults */
+        }
+
+        const review = await analyzeGame(
+          config.pgn,
+          config.engine.depth,
+          p,
+          config.lines,
+          sizing,
+        );
         if (cancelled) return;
         setResult(review);
         setCurrentPly(review.moves.length);
