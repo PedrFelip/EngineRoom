@@ -17,6 +17,12 @@ import type {
 import { classifyMove, cpToWinPct, gameAccuracy } from "./scoring";
 import { isReadyOk, isUciOk, parseInfo, scoreToCp } from "./uci";
 import type { InfoScore } from "./uci";
+import { lookupOpening, type EcoEntry } from "./eco";
+
+export interface BookInfo {
+  maxPly: number;
+  eco: EcoEntry | null;
+}
 
 export interface RawPosition {
   fen: string;
@@ -50,7 +56,11 @@ function sideToMoveAt(game: PlayedGame, ply: number): "w" | "b" {
  * `raw[i]` é a avaliação da posição após o i-ésimo ply (raw[0] = posição inicial).
  * O win% das posições é normalizado para o ponto de vista das brancas.
  */
-export function buildReview(game: PlayedGame, raw: RawPosition[]): ReviewResult {
+export function buildReview(
+  game: PlayedGame,
+  raw: RawPosition[],
+  book?: BookInfo,
+): ReviewResult {
   const positions: PositionAnalysis[] = raw.map((r, i) => {
     const stm = sideToMoveAt(game, i);
     const winPct = stm === "w" ? cpToWinPct(r.cp) : 100 - cpToWinPct(r.cp);
@@ -70,25 +80,30 @@ export function buildReview(game: PlayedGame, raw: RawPosition[]): ReviewResult 
     const winPctBefore = cpToWinPct(before.cp);
     const winPctAfter = 100 - cpToWinPct(after.cp);
     const winPctLoss = Math.max(0, winPctBefore - winPctAfter);
+    const isBook = !!book && m.ply <= book.maxPly;
     return {
       ply: m.ply,
       color: m.color,
       san: m.san,
       uci: m.uci,
       fenBefore: m.fenBefore,
-      classification: classifyMove(winPctLoss),
+      classification: classifyMove(winPctLoss, isBook),
       winPctBefore,
       winPctAfter,
       winPctLoss,
       bestUci: before.pv[0] ?? null,
-      isBook: false,
-      eco: null,
+      isBook,
+      eco: isBook && book?.eco ? { code: book.eco.code, name: book.eco.name } : null,
     };
   });
 
   const accuracy: AccuracyByColor = {
-    white: gameAccuracy(moves.filter((m) => m.color === "w").map((m) => m.winPctLoss)),
-    black: gameAccuracy(moves.filter((m) => m.color === "b").map((m) => m.winPctLoss)),
+    white: gameAccuracy(
+      moves.filter((m) => m.color === "w" && !m.isBook).map((m) => m.winPctLoss),
+    ),
+    black: gameAccuracy(
+      moves.filter((m) => m.color === "b" && !m.isBook).map((m) => m.winPctLoss),
+    ),
   };
 
   return { positions, moves, accuracy };
@@ -180,5 +195,10 @@ export async function analyzeGame(
   }
   await port.send("quit");
 
-  return buildReview({ startFen: positionFens[0], moves }, raw);
+  const opening = await lookupOpening(moves.map((m) => m.san));
+  const book: BookInfo | undefined = opening
+    ? { maxPly: opening.moves.length, eco: opening }
+    : undefined;
+
+  return buildReview({ startFen: positionFens[0], moves }, raw, book);
 }

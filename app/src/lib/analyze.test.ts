@@ -92,6 +92,32 @@ describe("buildReview", () => {
     expect(review.accuracy.black).toBeLessThan(30);
     expect(review.accuracy.white).toBe(100);
   });
+
+  it("marca lances de abertura como Livro e exclui da precisão", () => {
+    const game = {
+      startFen: START_FEN,
+      moves: [
+        { ply: 1, color: "w" as const, san: "e4", uci: "e2e4", fenBefore: START_FEN },
+        { ply: 2, color: "b" as const, san: "e5", uci: "e7e5", fenBefore: AFTER_E4 },
+      ],
+    };
+    const raw = [
+      { fen: START_FEN, cp: 0, depth: 20, pv: ["e2e4"] },
+      { fen: AFTER_E4, cp: 0, depth: 20, pv: ["e7e5"] },
+      { fen: AFTER_E5, cp: 500, depth: 20, pv: ["e4e5"] },
+    ];
+    const book = { maxPly: 1, eco: { code: "B00", name: "King's Pawn", moves: ["e4"] } };
+
+    const review = buildReview(game, raw, book);
+
+    expect(review.moves[0].classification).toBe("livro");
+    expect(review.moves[0].isBook).toBe(true);
+    expect(review.moves[0].eco).toEqual({ code: "B00", name: "King's Pawn" });
+    expect(review.moves[1].classification).toBe("blunder");
+    expect(review.moves[1].isBook).toBe(false);
+    expect(review.moves[1].eco).toBeNull();
+    expect(review.accuracy.black).toBeLessThan(30);
+  });
 });
 
 function fakePort(
@@ -127,11 +153,12 @@ describe("analyzeGame", () => {
 
     expect(review.positions).toHaveLength(3);
     expect(review.moves).toHaveLength(2);
-    expect(review.moves.every((m) => m.classification === "melhor")).toBe(true);
+    expect(review.positions.every((p) => Math.abs(p.winPct - 50) < 0.1)).toBe(true);
+    expect(review.moves.every((m) => m.winPctLoss === 0)).toBe(true);
     expect(review.accuracy).toEqual({ white: 100, black: 100 });
   });
 
-  it("propaga a avaliação por FEN até a classificação do lance", async () => {
+  it("propaga a avaliação por FEN até a perda de win% do lance", async () => {
     const port = fakePort((fen) =>
       fen === START_FEN
         ? { cp: 0, pv: ["e2e4"] }
@@ -140,8 +167,8 @@ describe("analyzeGame", () => {
     const review = await analyzeGame("1. e4", 20, port);
 
     expect(review.moves).toHaveLength(1);
-    expect(review.moves[0].classification).toBe("blunder");
+    expect(review.moves[0].winPctLoss).toBeCloseTo(36.3, 1);
     expect(review.moves[0].bestUci).toBe("e2e4");
-    expect(review.accuracy.white).toBeLessThan(30);
+    expect(review.moves[0].classification).toBe("livro");
   });
 });
