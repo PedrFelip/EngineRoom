@@ -28,3 +28,52 @@ export interface ReviewConfig {
   meta: PgnMeta;
   engine: EngineTier;
 }
+
+/** Classificação de um lance, no vocabulário pt-BR do projeto. */
+export type Classification =
+  | "livro"
+  | "melhor"
+  | "excelente"
+  | "bom"
+  | "imprecisao"
+  | "erro"
+  | "blunder";
+
+/** Resultado da análise do engine numa única posição. */
+export interface PositionAnalysis {
+  ply: number;
+  fen: string;
+  depth: number;
+  cp: number;
+  winPct: number;
+  pv: string[];
+}
+
+/** Lance jogado com sua avaliação e classificação. */
+export interface MoveAnalysis {
+  ply: number;
+  color: "w" | "b";
+  san: string;
+  uci: string;
+  fenBefore: string;
+  classification: Classification;
+  winPctBefore: number;
+  winPctAfter: number;
+  winPctLoss: number;
+  bestUci: string | null;
+  isBook: boolean;
+  eco: { code: string; name: string } | null;
+}
+
+/** Precisão agregada (0–100) por cor. */
+export interface AccuracyByColor {
+  white: number;
+  black: number;
+}
+
+/** Revisão completa de uma partida. */
+export interface ReviewResult {
+  positions: PositionAnalysis[];
+  moves: MoveAnalysis[];
+  accuracy: AccuracyByColor;
+}
