@@ -1,13 +1,29 @@
 <!doctype html>
-<html lang="en">
+<html lang="pt-BR">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>EngineRoom</title>
+    <style>
+      html { background-color: #1a1916; }
+      html.light { background-color: #f6f4f0; }
+    </style>
+    <script>
+      // Apply the saved theme before first paint to avoid a flash.
+      (function () {
+        try {
+          var raw = localStorage.getItem("engineroom.settings.v1");
+          var theme = raw ? JSON.parse(raw).theme : "dark";
+          if (theme !== "light") theme = "dark";
+          var el = document.documentElement;
+          el.classList.add(theme);
+          el.style.colorScheme = theme;
+        } catch (e) {}
+      })();
+    </script>
   </head>
 
-  <body style="background-color:#1a1916;">
+  <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
