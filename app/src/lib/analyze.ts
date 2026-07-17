@@ -232,8 +232,8 @@ function terminalCp(fen: string): number | null {
  * Aciona o engine posição a posição e devolve a revisão completa.
  * `port` abstrai o processo UCI (sidecar Tauri ou engine falso em testes).
  * `multipv` define quantas linhas candidatas o engine retorna por posição.
- * `opts.threads` / `opts.hashMb` dimensionam a engine (Threads/Hash) para usar o
- * máximo de CPU/RAM disponível. Omitir mantém os defaults do Stockfish.
+ * `opts.threads` / `opts.hashMb` dimensionam a engine (Threads/Hash) para o uso
+ * ideal de CPU/RAM. Omitir mantém os defaults do Stockfish.
  * Posições terminais (xeque-mate/afogamento) são resolvidas sem chamar a engine.
  */
 export async function analyzeGame(

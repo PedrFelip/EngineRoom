@@ -10,9 +10,11 @@ export function getSystemResources(): Promise<SystemResources> {
   return invoke<SystemResources>("system_resources");
 }
 
-/// Bounds the Stockfish hash table to ~70% of system RAM, clamped to a sane range
-/// (256 MB floor, 32 GB ceiling). More hash rarely helps and starving the OS hurts.
+/// Sizes the Stockfish hash table to ~20% of system RAM, clamped to a sane range
+/// (512 MB floor, 4 GB ceiling). For fixed-depth per-position analysis this is the
+/// sweet spot: enough to cache cross-position transpositions without starving the
+/// OS/webview. Beyond ~4 GB the returns flatten.
 export function recommendedHashMb(memoryMb: number): number {
-  const hash = Math.floor(memoryMb * 0.7);
-  return Math.min(Math.max(hash, 256), 32 * 1024);
+  const hash = Math.floor(memoryMb * 0.2);
+  return Math.min(Math.max(hash, 512), 4 * 1024);
 }
