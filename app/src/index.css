@@ -1,31 +1,81 @@
 @import "tailwindcss";
 
+/*
+ * Theme tokens are indirection variables: Tailwind utilities (bg-bg, text-ink, ...)
+ * resolve to var(--color-*) which in turn points to a runtime --* var that changes
+ * per theme. Dark is the default (:root), light overrides under :root.light.
+ */
 @theme {
-  /* Surfaces — chess.com inspired warm-dark palette */
-  --color-bg: #1a1916;
-  --color-panel: #262421;
-  --color-panel-2: #2f2d29;
-  --color-panel-3: #3a3733;
-  --color-edge: #413e39;
-  --color-edge-soft: #34312d;
+  --color-bg: var(--bg);
+  --color-panel: var(--panel);
+  --color-panel-2: var(--panel-2);
+  --color-panel-3: var(--panel-3);
+  --color-edge: var(--edge);
+  --color-edge-soft: var(--edge-soft);
 
-  /* Brand / accents */
-  --color-brand: #81b64c;
-  --color-brand-strong: #6a9c3e;
-  --color-ink: #ece9e4;
-  --color-ink-dim: #a3a09a;
-  --color-ink-faint: #6f6c67;
+  --color-brand: var(--brand);
+  --color-brand-strong: var(--brand-strong);
+  --color-ink: var(--ink);
+  --color-ink-dim: var(--ink-dim);
+  --color-ink-faint: var(--ink-faint);
 
-  /* Move-quality colors used later in review */
-  --color-good: #81b64c;
-  --color-book: #a88838;
-  --color-excellent: #81b64c;
-  --color-best: #2bb2e0;
-  --color-great: #6db5c4;
-  --color-mistake: #f0c419;
-  --color-blunder: #ca3431;
+  --color-good: var(--good);
+  --color-excellent: var(--excellent);
+  --color-best: var(--best);
+  --color-great: var(--great);
+  --color-book: var(--book);
+  --color-mistake: var(--mistake);
+  --color-blunder: var(--blunder);
 
   --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+/* ---------- Dark (default) ---------- */
+:root {
+  --bg: #1a1916;
+  --panel: #262421;
+  --panel-2: #2f2d29;
+  --panel-3: #3a3733;
+  --edge: #413e39;
+  --edge-soft: #34312d;
+
+  --brand: #81b64c;
+  --brand-strong: #6a9c3e;
+  --ink: #ece9e4;
+  --ink-dim: #a3a09a;
+  --ink-faint: #6f6c67;
+
+  --good: #81b64c;
+  --excellent: #81b64c;
+  --best: #2bb2e0;
+  --great: #6db5c4;
+  --book: #a88838;
+  --mistake: #f0c419;
+  --blunder: #ca3431;
+}
+
+/* ---------- Light ---------- */
+:root.light {
+  --bg: #f6f4f0;
+  --panel: #ffffff;
+  --panel-2: #efece5;
+  --panel-3: #e3dfd6;
+  --edge: #d8d3c8;
+  --edge-soft: #e8e4db;
+
+  --brand: #5f8a32;
+  --brand-strong: #4f762a;
+  --ink: #2b2a27;
+  --ink-dim: #6e6b64;
+  --ink-faint: #9a968d;
+
+  --good: #5f8a32;
+  --excellent: #5f8a32;
+  --best: #1f8fce;
+  --great: #3f8fa0;
+  --book: #8a6f2e;
+  --mistake: #b8860b;
+  --blunder: #b8312e;
 }
 
 @layer base {
@@ -37,36 +87,37 @@
 
   body {
     margin: 0;
-    background-color: var(--color-bg);
-    color: var(--color-ink);
+    background-color: var(--bg);
+    color: var(--ink);
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     user-select: none;
+    transition: background-color 0.18s ease, color 0.18s ease;
   }
 
   ::selection {
-    background: color-mix(in srgb, var(--color-brand) 40%, transparent);
+    background: color-mix(in srgb, var(--brand) 35%, transparent);
   }
 }
 
-/* Custom scrollbar */
+/* Scrollbar */
 * {
   scrollbar-width: thin;
-  scrollbar-color: var(--color-edge) transparent;
+  scrollbar-color: var(--edge) transparent;
 }
 *::-webkit-scrollbar {
   width: 10px;
   height: 10px;
 }
 *::-webkit-scrollbar-thumb {
-  background: var(--color-edge);
+  background: var(--edge);
   border-radius: 999px;
   border: 2px solid transparent;
   background-clip: content-box;
 }
 *::-webkit-scrollbar-thumb:hover {
-  background: var(--color-panel-3);
+  background: var(--panel-3);
   background-clip: content-box;
 }
 
@@ -85,8 +136,8 @@
   width: 20px;
   height: 20px;
   border-radius: 50%;
-  background: var(--color-ink);
-  border: 4px solid var(--color-brand);
+  background: var(--ink);
+  border: 4px solid var(--brand);
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
   cursor: pointer;
   transition: transform 0.1s ease;
@@ -98,8 +149,8 @@
   width: 20px;
   height: 20px;
   border-radius: 50%;
-  background: var(--color-ink);
-  border: 4px solid var(--color-brand);
+  background: var(--ink);
+  border: 4px solid var(--brand);
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
   cursor: pointer;
 }

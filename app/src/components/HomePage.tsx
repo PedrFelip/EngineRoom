@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import PgnImporter from "./PgnImporter";
 import EngineDepthSlider from "./EngineDepthSlider";
+import SettingsModal from "./SettingsModal";
 import { parsePgn, resultLabel } from "../lib/pgn";
 import { ENGINE_TIERS, type EngineTierId, type ReviewConfig } from "../types";
 
@@ -11,6 +12,7 @@ interface Props {
 export default function HomePage({ onStart }: Props) {
   const [pgn, setPgn] = useState("");
   const [tierId, setTierId] = useState<EngineTierId>("balanced");
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const parse = useMemo(() => parsePgn(pgn), [pgn]);
   const engine = ENGINE_TIERS.find((t) => t.id === tierId)!;
@@ -19,16 +21,30 @@ export default function HomePage({ onStart }: Props) {
   return (
     <div className="flex min-h-full flex-col items-center px-4 py-10">
       {/* Brand */}
-      <header className="mb-8 flex items-center gap-2.5 self-start">
-        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-brand text-bg">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M12 2l2.4 4.9 5.4.8-3.9 3.8.9 5.4L12 18.9 7.2 19.7l.9-5.4L4.2 10.5l5.4-.8L12 2z" />
+      <header className="mb-8 flex w-full max-w-xl items-center justify-between">
+        <div className="flex items-center gap-2.5">
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-brand text-bg">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 2l2.4 4.9 5.4.8-3.9 3.8.9 5.4L12 18.9 7.2 19.7l.9-5.4L4.2 10.5l5.4-.8L12 2z" />
+            </svg>
+          </div>
+          <div className="leading-tight">
+            <h1 className="text-lg font-bold tracking-tight text-ink">EngineRoom</h1>
+            <p className="text-[11px] text-ink-faint">Revisão de partidas com Stockfish</p>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={() => setSettingsOpen(true)}
+          className="rounded-lg border border-edge bg-panel-2/60 p-2 text-ink-dim transition hover:bg-panel-3 hover:text-ink"
+          aria-label="Configurações"
+          title="Configurações"
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="3" />
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
           </svg>
-        </div>
-        <div className="leading-tight">
-          <h1 className="text-lg font-bold tracking-tight text-ink">EngineRoom</h1>
-          <p className="text-[11px] text-ink-faint">Revisão de partidas com Stockfish</p>
-        </div>
+        </button>
       </header>
 
       <div className="w-full max-w-xl">
@@ -109,6 +125,8 @@ export default function HomePage({ onStart }: Props) {
           Toda a análise acontece localmente — seu PGN não sai do seu computador.
         </p>
       </div>
+
+      <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </div>
   );
 }
