@@ -4,6 +4,7 @@ import { resultLabel } from "../lib/pgn";
 import { useReview } from "../lib/use-review";
 import Board from "./Board";
 import EvalBar from "./EvalBar";
+import EvalGraph from "./EvalGraph";
 import MoveList from "./MoveList";
 import ReviewSummary from "./ReviewSummary";
 import CandidateLines from "./CandidateLines";
@@ -161,6 +162,24 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
           )}
         </aside>
       </div>
+
+      {result && (
+        <div className="rounded-xl border border-edge bg-panel-2/60 p-3">
+          <div className="mb-1.5 flex items-center justify-between px-1">
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
+              Avaliação
+            </span>
+            <span className="text-[11px] text-ink-faint">
+              clique para pular até o lance
+            </span>
+          </div>
+          <EvalGraph
+            winPcts={result.positions.map((p) => p.winPct)}
+            currentPly={currentPly}
+            onSelect={review.goTo}
+          />
+        </div>
+      )}
     </div>
   );
 }
