@@ -141,6 +141,24 @@ export interface EnginePort {
 }
 
 /**
+ * Como a engine deve buscar cada posição:
+ *  - `depth`: fixa em N ply (`go depth N`);
+ *  - `time`: fixa em N ms (`go movetime N`), estilo chess.com "Maximum Time".
+ */
+export type AnalyzeControl =
+  | { mode: 'depth'; depth: number }
+  | { mode: 'time'; movetimeMs: number }
+
+/**
+ * Valor escalar usado como chave de cache: o `depth` no modo profundidade,
+ * ou `movetimeMs` no modo tempo. A diferenciação por `mode` é adicionada
+ * em slice posterior — por ora a chave é só numérica.
+ */
+export function controlKeyValue(control: AnalyzeControl): number {
+  return control.mode === 'depth' ? control.depth : control.movetimeMs
+}
+
+/**
  * Cache de avaliações por posição, chaveado por (fen, depth, multipv).
  * `get` devolve null em caso de miss; `put` grava a avaliação alcançada.
  */
@@ -209,14 +227,18 @@ function uciToSan(fen: string, uci: string): string | null {
 async function evalPosition(
   port: EnginePort,
   fen: string,
-  depth: number,
+  control: AnalyzeControl,
 ): Promise<RawPosition> {
   const byPv = new Map<
     number,
     { depth: number; score?: InfoScore; pv: string[] }
   >()
   await port.send(`position fen ${fen}`)
-  await ask(port, `go depth ${depth}`, (line) => {
+  const goCmd =
+    control.mode === 'depth'
+      ? `go depth ${control.depth}`
+      : `go movetime ${control.movetimeMs}`
+  await ask(port, goCmd, (line) => {
     const info = parseInfo(line)
     if (info?.score) {
       const idx = info.multipv ?? 1
@@ -262,19 +284,23 @@ function terminalCp(fen: string): number | null {
 /**
  * Aciona o engine posição a posição e devolve a revisão completa.
  * `port` abstrai o processo UCI (sidecar Tauri ou engine falso em testes).
- * `multipv` define quantas linhas candidatas o engine retorna por posição.
+ * `control` define como a engine busca cada posição: profundidade fixa
+ * (`go depth N`) ou tempo fixo (`go movetime N`), este último no estilo
+ * "Maximum Time" do chess.com.
+ * `multipv` define quantas linhas candidatas o engine retorna por lance.
  * `opts.threads` / `opts.hashMb` dimensionam a engine (Threads/Hash) para o uso
  * ideal de CPU/RAM. Omitir mantém os defaults do Stockfish.
  * Posições terminais (xeque-mate/afogamento) são resolvidas sem chamar a engine.
  */
 export async function analyzeGame(
   pgn: string,
-  depth: number,
+  control: AnalyzeControl,
   port: EnginePort,
   multipv = 1,
   opts: { threads?: number; hashMb?: number; cache?: PositionCache } = {},
 ): Promise<ReviewResult> {
   const { positionFens, moves } = extractGame(pgn)
+  const keyValue = controlKeyValue(control)
 
   await ask(port, 'uci', isUciOk)
   await ask(port, 'isready', isReadyOk)
@@ -300,15 +326,15 @@ export async function analyzeGame(
         lines: [{ multipv: 1, cp: term, pv: [] }],
       }
     } else {
-      const cached = (await opts.cache?.get(fen, depth, multipv)) ?? null
+      const cached = (await opts.cache?.get(fen, keyValue, multipv)) ?? null
       if (cached) {
         pos = cached
       } else {
-        pos = await evalPosition(port, fen, depth)
+        pos = await evalPosition(port, fen, control)
         for (const l of pos.lines ?? []) {
           l.san = l.pv[0] ? uciToSan(pos.fen, l.pv[0]) : null
         }
-        await opts.cache?.put(pos, depth, multipv)
+        await opts.cache?.put(pos, keyValue, multipv)
       }
     }
     raw.push(pos)

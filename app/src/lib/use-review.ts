@@ -67,7 +67,7 @@ export function useReview(config: ReviewConfig): UseReview {
 
         const review = await analyzeGame(
           config.pgn,
-          config.engine.depth,
+          { mode: 'depth', depth: config.engine.depth },
           p,
           config.lines,
           { ...sizing, cache: createTauriPositionCache() },
