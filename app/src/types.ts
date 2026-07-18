@@ -28,6 +28,29 @@ export interface ReviewConfig {
   meta: PgnMeta;
   engine: EngineTier;
   lines: number;
+  /** Revisão já concluída (partida vinda do store) — pula a análise. */
+  initialResult?: ReviewResult;
+}
+
+/** Linha da lista de partidas analisadas (sem o peso do pgn/review). */
+export interface GameSummary {
+  id: number;
+  white: string;
+  black: string;
+  result: string;
+  plies: number;
+  engineTier: string;
+  depth: number;
+  multipv: number;
+  accuracyWhite: number;
+  accuracyBlack: number;
+  createdAt: string;
+}
+
+/** Partida completa no store, para reabertura instantânea. */
+export interface StoredGame extends GameSummary {
+  pgn: string;
+  reviewJson: string;
 }
 
 /** Classificação de um lance, no vocabulário pt-BR do projeto. */

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { analyzeGame } from "./analyze";
 import { createTauriPositionCache } from "./cache";
 import { createTauriEnginePort } from "./engine-port";
+import { saveReview } from "./games";
 import { getSystemResources, recommendedHashMb } from "./system";
 import { useSettings } from "./settings-context";
 import type { ReviewConfig, ReviewResult } from "../types";
@@ -31,6 +32,14 @@ export function useReview(config: ReviewConfig): UseReview {
   const [orientation, setOrientation] = useState<"white" | "black">("white");
 
   useEffect(() => {
+    // Partida vinda do store: reabertura instantânea, sem engine e sem regravar.
+    if (config.initialResult) {
+      setResult(config.initialResult);
+      setCurrentPly(config.initialResult.moves.length);
+      setStatus("done");
+      return;
+    }
+
     let cancelled = false;
     let port: { dispose: () => Promise<void> } | null = null;
 
@@ -67,6 +76,9 @@ export function useReview(config: ReviewConfig): UseReview {
         setResult(review);
         setCurrentPly(review.moves.length);
         setStatus("done");
+        void saveReview(config, review).catch((e) =>
+          console.warn("Falha ao salvar a partida no store:", e),
+        );
       } catch (e) {
         if (cancelled) return;
         setError(e instanceof Error ? e.message : String(e));
