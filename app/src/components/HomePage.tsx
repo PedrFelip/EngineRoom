@@ -250,6 +250,7 @@ export default function HomePage({ onStart }: Props) {
       <SettingsModal
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
+        onGamesCleared={() => setGames([])}
       />
     </div>
   )

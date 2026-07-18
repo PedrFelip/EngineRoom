@@ -2,6 +2,7 @@ import { open } from '@tauri-apps/plugin-dialog'
 import { useEffect, useState } from 'react'
 import { type ProbeResult, probeEngine } from '../lib/engine'
 import { clearGames } from '../lib/games'
+import type { Theme } from '../lib/settings'
 import { useSettings } from '../lib/settings-context'
 import {
   clearCache,
@@ -9,7 +10,6 @@ import {
   getStorageStats,
   type StorageStats,
 } from '../lib/storage'
-import type { Theme } from '../lib/settings'
 
 interface Props {
   open: boolean
