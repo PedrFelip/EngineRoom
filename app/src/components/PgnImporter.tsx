@@ -34,7 +34,7 @@ export default function PgnImporter({ value, onChange }: Props) {
 
   return (
     <div>
-      <div className='mb-3 inline-flex rounded-lg border border-edge bg-panel-2/60 p-1'>
+      <div className='mb-3 mx-auto flex w-fit rounded-lg border border-edge bg-panel-2/60 p-1'>
         {(['file', 'paste'] as Mode[]).map((m) => (
           <button
             key={m}
