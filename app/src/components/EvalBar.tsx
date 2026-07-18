@@ -19,7 +19,7 @@ export default function EvalBar({ winPct, orientation = "white", label }: EvalBa
   const labelColor = whiteAdv ? "#262421" : "#f0f0f0";
   return (
     <div
-      className="relative h-full w-5 shrink-0 overflow-hidden rounded-md border border-edge"
+      className="relative w-5 shrink-0 self-stretch overflow-hidden rounded-md border border-edge"
       style={{ backgroundColor: "#262421" }}
     >
       <div

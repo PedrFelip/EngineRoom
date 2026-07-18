@@ -107,26 +107,38 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
 
       <div className="grid flex-1 grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
         <div className="flex flex-col gap-3">
-          <div className="flex items-stretch gap-2">
-            <EvalBar
-              winPct={position?.winPct ?? 50}
-              orientation={orientation}
-              label={evalBarLabel}
+          <div className="flex flex-col gap-1">
+            <PlayerTag
+              name={orientation === "white" ? config.meta.black : config.meta.white}
+              elo={orientation === "white" ? config.meta.blackElo : config.meta.whiteElo}
+              color={orientation === "white" ? "b" : "w"}
             />
-            <div className="min-w-0 flex-1">
-              {position ? (
-                <Board
-                  fen={position.fen}
-                  orientation={orientation}
-                  lastMove={lastMoveUci ? uciToSquares(lastMoveUci) : null}
-                  arrows={bestArrow ? [bestArrow] : []}
-                />
-              ) : (
-                <div className="flex aspect-square w-full items-center justify-center rounded-lg border border-edge bg-panel-2/60 text-ink-dim">
-                  {status === "running" ? "Analisando…" : "—"}
-                </div>
-              )}
+            <div className="flex items-stretch gap-2">
+              <EvalBar
+                winPct={position?.winPct ?? 50}
+                orientation={orientation}
+                label={evalBarLabel}
+              />
+              <div className="min-w-0 flex-1">
+                {position ? (
+                  <Board
+                    fen={position.fen}
+                    orientation={orientation}
+                    lastMove={lastMoveUci ? uciToSquares(lastMoveUci) : null}
+                    arrows={bestArrow ? [bestArrow] : []}
+                  />
+                ) : (
+                  <div className="flex aspect-square w-full items-center justify-center rounded-lg border border-edge bg-panel-2/60 text-ink-dim">
+                    {status === "running" ? "Analisando…" : "—"}
+                  </div>
+                )}
+              </div>
             </div>
+            <PlayerTag
+              name={orientation === "white" ? config.meta.white : config.meta.black}
+              elo={orientation === "white" ? config.meta.whiteElo : config.meta.blackElo}
+              color={orientation === "white" ? "w" : "b"}
+            />
           </div>
 
           {position?.lines?.length ? (
@@ -213,5 +225,29 @@ function NavBtn({
     >
       {children}
     </button>
+  );
+}
+
+function PlayerTag({
+  name,
+  elo,
+  color,
+}: {
+  name: string;
+  elo: string | null;
+  color: "w" | "b";
+}) {
+  return (
+    <div className="flex items-center gap-2 px-1 text-sm">
+      <span
+        className={`inline-block h-3 w-3 shrink-0 rounded-full border border-edge ${
+          color === "w" ? "bg-white" : "bg-[#1a1916]"
+        }`}
+      />
+      <span className="font-medium text-ink">{name}</span>
+      {elo ? (
+        <span className="font-mono text-xs text-ink-dim">({elo})</span>
+      ) : null}
+    </div>
   );
 }
