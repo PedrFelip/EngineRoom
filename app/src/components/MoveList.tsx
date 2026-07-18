@@ -1,17 +1,17 @@
-import { useEffect, useRef } from "react";
-import type { MoveAnalysis } from "../types";
-import ClassificationBadge from "./ClassificationBadge";
+import { useEffect, useRef } from 'react'
+import type { MoveAnalysis } from '../types'
+import ClassificationBadge from './ClassificationBadge'
 
 interface MoveListProps {
-  moves: MoveAnalysis[];
-  currentPly: number;
-  onSelect: (ply: number) => void;
+  moves: MoveAnalysis[]
+  currentPly: number
+  onSelect: (ply: number) => void
 }
 
 interface Row {
-  num: number;
-  white?: MoveAnalysis;
-  black?: MoveAnalysis;
+  num: number
+  white?: MoveAnalysis
+  black?: MoveAnalysis
 }
 
 function MoveButton({
@@ -19,46 +19,52 @@ function MoveButton({
   active,
   onSelect,
 }: {
-  move: MoveAnalysis;
-  active: boolean;
-  onSelect: (ply: number) => void;
+  move: MoveAnalysis
+  active: boolean
+  onSelect: (ply: number) => void
 }) {
   return (
     <button
-      type="button"
-      data-active={active ? "true" : undefined}
+      type='button'
+      data-active={active ? 'true' : undefined}
       onClick={() => onSelect(move.ply)}
       className={`flex flex-1 items-center gap-1.5 rounded px-2 py-1 text-left font-mono text-sm transition ${
-        active ? "bg-brand/20 ring-1 ring-brand/50 text-ink" : "text-ink-dim hover:bg-panel-3/50"
+        active
+          ? 'bg-brand/20 ring-1 ring-brand/50 text-ink'
+          : 'text-ink-dim hover:bg-panel-3/50'
       }`}
     >
       <ClassificationBadge classification={move.classification} />
       <span>{move.san}</span>
     </button>
-  );
+  )
 }
 
-export default function MoveList({ moves, currentPly, onSelect }: MoveListProps) {
-  const rootRef = useRef<HTMLDivElement>(null);
+export default function MoveList({
+  moves,
+  currentPly,
+  onSelect,
+}: MoveListProps) {
+  const rootRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    const el = rootRef.current?.querySelector('[data-active="true"]');
-    el?.scrollIntoView({ block: "nearest" });
-  }, [currentPly]);
+    const el = rootRef.current?.querySelector('[data-active="true"]')
+    el?.scrollIntoView({ block: 'nearest' })
+  }, [currentPly])
 
-  const rows: Row[] = [];
+  const rows: Row[] = []
   moves.forEach((m) => {
-    const num = Math.ceil(m.ply / 2);
-    if (!rows[num - 1]) rows[num - 1] = { num };
-    if (m.color === "w") rows[num - 1].white = m;
-    else rows[num - 1].black = m;
-  });
+    const num = Math.ceil(m.ply / 2)
+    if (!rows[num - 1]) rows[num - 1] = { num }
+    if (m.color === 'w') rows[num - 1].white = m
+    else rows[num - 1].black = m
+  })
 
   return (
-    <div ref={rootRef} className="flex flex-col gap-0.5">
+    <div ref={rootRef} className='flex flex-col gap-0.5'>
       {rows.map((row) => (
-        <div key={row.num} className="flex items-center gap-1">
-          <span className="w-8 shrink-0 text-right font-mono text-xs text-ink-faint">
+        <div key={row.num} className='flex items-center gap-1'>
+          <span className='w-8 shrink-0 text-right font-mono text-xs text-ink-faint'>
             {row.num}.
           </span>
           {row.white ? (
@@ -68,7 +74,7 @@ export default function MoveList({ moves, currentPly, onSelect }: MoveListProps)
               onSelect={onSelect}
             />
           ) : (
-            <span className="flex-1" />
+            <span className='flex-1' />
           )}
           {row.black ? (
             <MoveButton
@@ -77,10 +83,10 @@ export default function MoveList({ moves, currentPly, onSelect }: MoveListProps)
               onSelect={onSelect}
             />
           ) : (
-            <span className="flex-1" />
+            <span className='flex-1' />
           )}
         </div>
       ))}
     </div>
-  );
+  )
 }

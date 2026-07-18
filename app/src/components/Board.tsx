@@ -1,49 +1,49 @@
-import { useEffect, useRef } from "react";
-import { Chessground } from "chessground";
-import type { Api } from "chessground/api";
-import type { Key } from "chessground/types";
-import "chessground/assets/chessground.base.css";
-import "chessground/assets/chessground.brown.css";
-import "chessground/assets/chessground.cburnett.css";
+import { useEffect, useRef } from 'react'
+import { Chessground } from 'chessground'
+import type { Api } from 'chessground/api'
+import type { Key } from 'chessground/types'
+import 'chessground/assets/chessground.base.css'
+import 'chessground/assets/chessground.brown.css'
+import 'chessground/assets/chessground.cburnett.css'
 
 export interface BoardArrow {
-  from: string;
-  to: string;
-  brush?: "green" | "red" | "blue" | "yellow";
+  from: string
+  to: string
+  brush?: 'green' | 'red' | 'blue' | 'yellow'
 }
 
 export interface BoardProps {
-  fen: string;
-  orientation?: "white" | "black";
-  lastMove?: [string, string] | null;
-  arrows?: BoardArrow[];
-  viewOnly?: boolean;
+  fen: string
+  orientation?: 'white' | 'black'
+  lastMove?: [string, string] | null
+  arrows?: BoardArrow[]
+  viewOnly?: boolean
 }
 
 function toKeys(pair: [string, string]): Key[] {
-  return [pair[0] as Key, pair[1] as Key];
+  return [pair[0] as Key, pair[1] as Key]
 }
 
 function shapesFrom(arrows: BoardArrow[]) {
   return arrows.map((a) => ({
     orig: a.from as Key,
     dest: a.to as Key,
-    brush: a.brush ?? "green",
-  }));
+    brush: a.brush ?? 'green',
+  }))
 }
 
 export default function Board({
   fen,
-  orientation = "white",
+  orientation = 'white',
   lastMove = null,
   arrows = [],
   viewOnly = true,
 }: BoardProps) {
-  const elRef = useRef<HTMLDivElement>(null);
-  const cgRef = useRef<Api | null>(null);
+  const elRef = useRef<HTMLDivElement>(null)
+  const cgRef = useRef<Api | null>(null)
 
   useEffect(() => {
-    if (!elRef.current) return;
+    if (!elRef.current) return
     cgRef.current = Chessground(elRef.current, {
       fen,
       orientation,
@@ -53,12 +53,12 @@ export default function Board({
       highlight: { lastMove: true, check: true },
       animation: { enabled: true, duration: 200 },
       drawable: { enabled: true, visible: true, shapes: shapesFrom(arrows) },
-    });
+    })
     return () => {
-      cgRef.current?.destroy();
-      cgRef.current = null;
-    };
-  }, []);
+      cgRef.current?.destroy()
+      cgRef.current = null
+    }
+  }, [])
 
   useEffect(() => {
     cgRef.current?.set({
@@ -67,8 +67,8 @@ export default function Board({
       lastMove: lastMove ? toKeys(lastMove) : undefined,
       viewOnly,
       drawable: { enabled: true, visible: true, shapes: shapesFrom(arrows) },
-    });
-  }, [fen, orientation, lastMove, arrows, viewOnly]);
+    })
+  }, [fen, orientation, lastMove, arrows, viewOnly])
 
-  return <div ref={elRef} className="aspect-square w-full" />;
+  return <div ref={elRef} className='aspect-square w-full' />
 }

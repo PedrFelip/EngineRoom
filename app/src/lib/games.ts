@@ -1,5 +1,5 @@
-import { invoke } from "@tauri-apps/api/core";
-import { parsePgn } from "./pgn";
+import { invoke } from '@tauri-apps/api/core'
+import { parsePgn } from './pgn'
 import {
   ENGINE_TIERS,
   type GameSummary,
@@ -7,28 +7,31 @@ import {
   type ReviewConfig,
   type ReviewResult,
   type StoredGame,
-} from "../types";
+} from '../types'
 
 /** Lista as partidas analisadas, da mais recente para a mais antiga. */
 export function listGames(): Promise<GameSummary[]> {
-  return invoke("games_list");
+  return invoke('games_list')
 }
 
 /** Busca a partida completa (pgn + revisão) para reabertura instantânea. */
 export function getGame(id: number): Promise<StoredGame | null> {
-  return invoke("games_get", { id });
+  return invoke('games_get', { id })
 }
 
 export function deleteGame(id: number): Promise<void> {
-  return invoke("games_delete", { id });
+  return invoke('games_delete', { id })
 }
 
 /**
  * Grava a revisão concluída no store. Reanálise da mesma partida com os
  * mesmos parâmetros (pgn, depth, multipv) substitui a entrada anterior.
  */
-export function saveReview(config: ReviewConfig, result: ReviewResult): Promise<number> {
-  return invoke("games_save", {
+export function saveReview(
+  config: ReviewConfig,
+  result: ReviewResult,
+): Promise<number> {
+  return invoke('games_save', {
     game: {
       pgn: config.pgn,
       white: config.meta.white,
@@ -42,7 +45,7 @@ export function saveReview(config: ReviewConfig, result: ReviewResult): Promise<
       accuracyBlack: result.accuracy.black,
       reviewJson: JSON.stringify(result),
     },
-  });
+  })
 }
 
 /**
@@ -55,9 +58,9 @@ export function storedToConfig(game: StoredGame): ReviewConfig {
   const engine =
     ENGINE_TIERS.find((t) => t.id === game.engineTier) ??
     ENGINE_TIERS.find((t) => t.depth === game.depth) ??
-    ENGINE_TIERS[1];
+    ENGINE_TIERS[1]
 
-  const parsed = parsePgn(game.pgn);
+  const parsed = parsePgn(game.pgn)
   const meta: PgnMeta = parsed.ok
     ? parsed.meta
     : {
@@ -68,7 +71,7 @@ export function storedToConfig(game: StoredGame): ReviewConfig {
         result: game.result,
         event: null,
         plies: game.plies,
-      };
+      }
 
   return {
     pgn: game.pgn,
@@ -76,5 +79,5 @@ export function storedToConfig(game: StoredGame): ReviewConfig {
     engine,
     lines: game.multipv,
     initialResult: JSON.parse(game.reviewJson) as ReviewResult,
-  };
+  }
 }
