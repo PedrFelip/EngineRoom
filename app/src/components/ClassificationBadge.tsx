@@ -1,5 +1,5 @@
-import type { Classification } from '../types'
 import { CLASSIFICATION_LABELS } from '../lib/scoring'
+import type { Classification } from '../types'
 
 const BADGE_COLOR: Record<Classification, string> = {
   livro: 'bg-book',

@@ -1,11 +1,11 @@
-import { describe, it, expect } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import {
   cpToMate,
+  evalLabel,
+  finalResultLabel,
   formatCp,
   formatMate,
-  finalResultLabel,
   sideToMoveAtPly,
-  evalLabel,
 } from './eval-label'
 
 describe('cpToMate', () => {

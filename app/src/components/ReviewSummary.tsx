@@ -1,5 +1,5 @@
-import type { Classification, ReviewResult } from '../types'
 import { CLASSIFICATION_LABELS } from '../lib/scoring'
+import type { Classification, ReviewResult } from '../types'
 
 const ORDER: Classification[] = [
   'livro',

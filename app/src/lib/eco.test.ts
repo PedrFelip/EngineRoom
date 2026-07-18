@@ -1,5 +1,5 @@
-import { describe, it, expect, vi } from 'vitest'
-import { lookupEco, type EcoEntry } from './eco'
+import { describe, expect, it, vi } from 'vitest'
+import { type EcoEntry, lookupEco } from './eco'
 
 const DS: EcoEntry[] = [
   { code: 'B00', name: "King's Pawn", moves: ['e4'] },

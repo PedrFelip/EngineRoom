@@ -15,10 +15,10 @@ import type {
   PvLine,
   ReviewResult,
 } from '../types'
+import { type EcoEntry, lookupOpening } from './eco'
 import { classifyMove, cpToWinPct, gameAccuracy } from './scoring'
-import { isReadyOk, isUciOk, parseInfo, scoreToCp } from './uci'
 import type { InfoScore } from './uci'
-import { lookupOpening, type EcoEntry } from './eco'
+import { isReadyOk, isUciOk, parseInfo, scoreToCp } from './uci'
 
 export interface BookInfo {
   maxPly: number

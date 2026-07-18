@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
-import { type UnlistenFn, listen } from '@tauri-apps/api/event'
+import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { isUciOk, parseIdName } from './uci'
 
 export const ENGINE_LINE_EVENT = 'engine://line'

@@ -1,6 +1,6 @@
-import type { PvLine } from '../types'
-import { formatEval } from '../lib/scoring'
 import { cpToMate } from '../lib/eval-label'
+import { formatEval } from '../lib/scoring'
+import type { PvLine } from '../types'
 
 interface CandidateLinesProps {
   lines: PvLine[]

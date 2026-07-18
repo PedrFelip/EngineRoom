@@ -1,16 +1,16 @@
 import { useEffect, useMemo, useState } from 'react'
-import PgnImporter from './PgnImporter'
-import EngineDepthSlider from './EngineDepthSlider'
-import SettingsModal from './SettingsModal'
-import ReviewedGamesList from './ReviewedGamesList'
-import { parsePgn, resultLabel } from '../lib/pgn'
 import { deleteGame, getGame, listGames, storedToConfig } from '../lib/games'
+import { parsePgn, resultLabel } from '../lib/pgn'
 import {
   ENGINE_TIERS,
   type EngineTierId,
   type GameSummary,
   type ReviewConfig,
 } from '../types'
+import EngineDepthSlider from './EngineDepthSlider'
+import PgnImporter from './PgnImporter'
+import ReviewedGamesList from './ReviewedGamesList'
+import SettingsModal from './SettingsModal'
 
 interface Props {
   onStart: (config: ReviewConfig) => void

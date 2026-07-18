@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useState } from 'react'
+import type { ReviewConfig, ReviewResult } from '../types'
 import { analyzeGame } from './analyze'
 import { createTauriPositionCache } from './cache'
 import { createTauriEnginePort } from './engine-port'
 import { saveReview } from './games'
-import { getSystemResources, recommendedHashMb } from './system'
 import { useSettings } from './settings-context'
-import type { ReviewConfig, ReviewResult } from '../types'
+import { getSystemResources, recommendedHashMb } from './system'
 
 export type ReviewStatus = 'running' | 'done' | 'error'
 

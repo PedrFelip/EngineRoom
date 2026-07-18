@@ -1,6 +1,6 @@
-import { describe, it, expect } from 'vitest'
-import { storedToConfig } from './games'
+import { describe, expect, it } from 'vitest'
 import type { ReviewResult, StoredGame } from '../types'
+import { storedToConfig } from './games'
 
 const REVIEW: ReviewResult = {
   positions: [],

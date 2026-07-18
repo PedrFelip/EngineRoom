@@ -1,10 +1,10 @@
-import { describe, it, expect } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import {
-  isUciOk,
   isReadyOk,
-  parseIdName,
-  parseIdAuthor,
+  isUciOk,
   parseBestMove,
+  parseIdAuthor,
+  parseIdName,
   parseInfo,
   scoreToCp,
 } from './uci'

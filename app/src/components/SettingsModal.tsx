@@ -1,8 +1,8 @@
-import { useState } from 'react'
 import { open } from '@tauri-apps/plugin-dialog'
-import { useSettings } from '../lib/settings-context'
-import { probeEngine, type ProbeResult } from '../lib/engine'
+import { useState } from 'react'
+import { type ProbeResult, probeEngine } from '../lib/engine'
 import type { Theme } from '../lib/settings'
+import { useSettings } from '../lib/settings-context'
 
 interface Props {
   open: boolean

@@ -1,14 +1,14 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import type { ReviewConfig } from '../types'
-import { resultLabel } from '../lib/pgn'
+import { type ReactNode, useEffect, useMemo, useState } from 'react'
 import { evalLabel, sideToMoveAtPly } from '../lib/eval-label'
+import { resultLabel } from '../lib/pgn'
 import { useReview } from '../lib/use-review'
+import type { ReviewConfig } from '../types'
 import Board from './Board'
+import CandidateLines from './CandidateLines'
 import EvalBar from './EvalBar'
 import EvalGraph from './EvalGraph'
 import MoveList from './MoveList'
 import ReviewSummary from './ReviewSummary'
-import CandidateLines from './CandidateLines'
 
 interface ReviewScreenProps {
   config: ReviewConfig

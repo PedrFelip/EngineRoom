@@ -1,17 +1,17 @@
 import {
   createContext,
+  type ReactNode,
   useCallback,
   useContext,
   useEffect,
   useMemo,
   useState,
-  type ReactNode,
 } from 'react'
 import {
   DEFAULT_SETTINGS,
   loadSettings,
-  saveSettings,
   type Settings,
+  saveSettings,
   type Theme,
 } from './settings'
 

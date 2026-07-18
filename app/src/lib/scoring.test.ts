@@ -1,10 +1,10 @@
-import { describe, it, expect } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import {
-  cpToWinPct,
-  classifyMove,
-  gameAccuracy,
-  formatEval,
   CLASSIFICATION_LABELS,
+  classifyMove,
+  cpToWinPct,
+  formatEval,
+  gameAccuracy,
 } from './scoring'
 
 describe('cpToWinPct', () => {

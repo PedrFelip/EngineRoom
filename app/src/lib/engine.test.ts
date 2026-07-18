@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 // hoisted so the mocked modules can reference them without TDZ issues.
 const mocks = vi.hoisted(() => ({
@@ -9,7 +9,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@tauri-apps/api/core', () => ({ invoke: mocks.invoke }))
 vi.mock('@tauri-apps/api/event', () => ({ listen: mocks.listen }))
 
-import { probeEngine, engineStart, engineSend, engineStop } from './engine'
+import { engineSend, engineStart, engineStop, probeEngine } from './engine'
 
 type LineHandler = (event: { payload: string }) => void
 

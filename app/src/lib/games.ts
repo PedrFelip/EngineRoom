@@ -1,5 +1,4 @@
 import { invoke } from '@tauri-apps/api/core'
-import { parsePgn } from './pgn'
 import {
   ENGINE_TIERS,
   type GameSummary,
@@ -8,6 +7,7 @@ import {
   type ReviewResult,
   type StoredGame,
 } from '../types'
+import { parsePgn } from './pgn'
 
 /** Lista as partidas analisadas, da mais recente para a mais antiga. */
 export function listGames(): Promise<GameSummary[]> {
