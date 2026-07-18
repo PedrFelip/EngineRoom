@@ -26,11 +26,11 @@ function tierLabel(game: GameSummary): string {
 
 export default function ReviewedGamesList({ games, onOpen, onDelete, onReanalyze }: Props) {
   return (
-    <section className="mt-8 w-full max-w-xl">
+    <section className="w-full min-w-0 flex-1">
       <h2 className="mb-3 text-sm font-semibold tracking-wide text-ink-dim uppercase">
         Partidas analisadas
       </h2>
-      <ul className="flex flex-col gap-2">
+      <ul className="flex max-h-[32rem] flex-col gap-2 overflow-y-auto pr-1">
         {games.map((g) => (
           <li key={g.id}>
             <div

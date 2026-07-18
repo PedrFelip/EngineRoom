@@ -31,11 +31,18 @@ let cachedEntries: EcoEntry[] | null = null;
 /**
  * Lookup sobre o dataset ECO offline (lichess chess-openings, A00–E99).
  * Carregado sob demanda (dynamic import) para não pesar o chunk principal.
+ * Se o dataset falhar ao carregar, devolve null — abertura é enriquecimento,
+ * não pode derrubar a análise. O cache só é preenchido em caso de sucesso,
+ * então uma falha transitória é tentada de novo na próxima análise.
  */
 export async function lookupOpening(played: string[]): Promise<EcoEntry | null> {
   if (!cachedEntries) {
-    const mod = await import("../data/eco.json");
-    cachedEntries = (mod.default as EcoEntry[]).slice();
+    try {
+      const mod = await import("../data/eco.json");
+      cachedEntries = (mod.default as EcoEntry[]).slice();
+    } catch {
+      return null;
+    }
   }
   return lookupEco(played, cachedEntries);
 }

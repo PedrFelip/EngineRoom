@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { lookupEco, type EcoEntry } from "./eco";
 
 const DS: EcoEntry[] = [
@@ -28,5 +28,21 @@ describe("lookupEco", () => {
 
   it("ignora linhas mais longas que o jogo jogado", () => {
     expect(lookupEco(["e4", "e5", "Nf3"], DS).code).toBe("C20");
+  });
+});
+
+describe("lookupOpening", () => {
+  it("devolve null (sem livro) quando o dataset falha ao carregar", async () => {
+    vi.resetModules();
+    vi.doMock("../data/eco.json", () => {
+      throw new Error("Importing a module script failed.");
+    });
+    try {
+      const { lookupOpening } = await import("./eco");
+
+      await expect(lookupOpening(["e4", "e5"])).resolves.toBeNull();
+    } finally {
+      vi.doUnmock("../data/eco.json");
+    }
   });
 });
