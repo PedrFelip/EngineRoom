@@ -19,6 +19,8 @@ interface SettingsContextValue {
   settings: Settings
   setTheme: (theme: Theme) => void
   setEnginePath: (path: string) => void
+  setSoundEnabled: (enabled: boolean) => void
+  setSoundVolume: (volume: number) => void
   reset: () => void
 }
 
@@ -47,11 +49,37 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     (path: string) => setSettings((s) => ({ ...s, enginePath: path })),
     [],
   )
+  const setSoundEnabled = useCallback(
+    (enabled: boolean) => setSettings((s) => ({ ...s, soundEnabled: enabled })),
+    [],
+  )
+  const setSoundVolume = useCallback(
+    (volume: number) =>
+      setSettings((s) => ({
+        ...s,
+        soundVolume: Math.max(0, Math.min(1, volume)),
+      })),
+    [],
+  )
   const reset = useCallback(() => setSettings({ ...DEFAULT_SETTINGS }), [])
 
   const value = useMemo<SettingsContextValue>(
-    () => ({ settings, setTheme, setEnginePath, reset }),
-    [settings, setTheme, setEnginePath, reset],
+    () => ({
+      settings,
+      setTheme,
+      setEnginePath,
+      setSoundEnabled,
+      setSoundVolume,
+      reset,
+    }),
+    [
+      settings,
+      setTheme,
+      setEnginePath,
+      setSoundEnabled,
+      setSoundVolume,
+      reset,
+    ],
   )
 
   return (
