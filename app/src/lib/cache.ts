@@ -13,21 +13,23 @@ interface CachedPositionDto {
  */
 export function createTauriPositionCache(): PositionCache {
   return {
-    async get(fen, depth, multipv) {
+    async get(fen, mode, value, multipv) {
       const hit = await invoke<CachedPositionDto | null>('cache_get', {
         fen,
-        depth,
+        mode,
+        depth: value,
         multipv,
       })
       if (!hit) return null
       const lines = JSON.parse(hit.linesJson) as RawLine[]
       const principal = lines.find((l) => l.multipv === 1) ?? lines[0]
-      return { fen, cp: hit.cp, depth, pv: principal?.pv ?? [], lines }
+      return { fen, cp: hit.cp, depth: value, pv: principal?.pv ?? [], lines }
     },
-    async put(pos, depth, multipv) {
+    async put(pos, mode, value, multipv) {
       await invoke('cache_put', {
         fen: pos.fen,
-        depth,
+        mode,
+        depth: value,
         multipv,
         cp: pos.cp,
         linesJson: JSON.stringify(pos.lines ?? []),

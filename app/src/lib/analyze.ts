@@ -151,20 +151,35 @@ export type AnalyzeControl =
 
 /**
  * Valor escalar usado como chave de cache: o `depth` no modo profundidade,
- * ou `movetimeMs` no modo tempo. A diferenciação por `mode` é adicionada
- * em slice posterior — por ora a chave é só numérica.
+ * ou `movetimeMs` no modo tempo. A diferenciação entre modos é feita pelo
+ * campo `mode` (também parte da chave), evitando colisão entre
+ * `depth=20` e `movetimeMs=20`, por exemplo.
  */
 export function controlKeyValue(control: AnalyzeControl): number {
   return control.mode === 'depth' ? control.depth : control.movetimeMs
 }
 
+/** Modo de análise: por profundidade fixa ou por tempo fixo por lance. */
+export type EngineMode = AnalyzeControl['mode']
+
 /**
- * Cache de avaliações por posição, chaveado por (fen, depth, multipv).
+ * Cache de avaliações por posição, chaveado por (fen, mode, value, multipv),
+ * onde `value` é `depth` (modo profundidade) ou `movetimeMs` (modo tempo).
  * `get` devolve null em caso de miss; `put` grava a avaliação alcançada.
  */
 export interface PositionCache {
-  get(fen: string, depth: number, multipv: number): Promise<RawPosition | null>
-  put(pos: RawPosition, depth: number, multipv: number): Promise<void>
+  get(
+    fen: string,
+    mode: EngineMode,
+    value: number,
+    multipv: number,
+  ): Promise<RawPosition | null>
+  put(
+    pos: RawPosition,
+    mode: EngineMode,
+    value: number,
+    multipv: number,
+  ): Promise<void>
 }
 
 interface ExtractedGame {
@@ -326,7 +341,8 @@ export async function analyzeGame(
         lines: [{ multipv: 1, cp: term, pv: [] }],
       }
     } else {
-      const cached = (await opts.cache?.get(fen, keyValue, multipv)) ?? null
+      const cached =
+        (await opts.cache?.get(fen, control.mode, keyValue, multipv)) ?? null
       if (cached) {
         pos = cached
       } else {
@@ -334,7 +350,7 @@ export async function analyzeGame(
         for (const l of pos.lines ?? []) {
           l.san = l.pv[0] ? uciToSan(pos.fen, l.pv[0]) : null
         }
-        await opts.cache?.put(pos, keyValue, multipv)
+        await opts.cache?.put(pos, control.mode, keyValue, multipv)
       }
     }
     raw.push(pos)

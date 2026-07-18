@@ -341,7 +341,6 @@ describe('analyzeGame', () => {
     }
 
     const review = await analyzeGame('1. e4 e5', { mode: 'depth', depth: 20 }, port, 1, { cache })
-
     expect(gos).toBe(0)
     expect(review.moves).toHaveLength(2)
     expect(review.moves.every((m) => m.winPctLoss === 0)).toBe(true)
@@ -349,13 +348,18 @@ describe('analyzeGame', () => {
 
   it('avalia no engine e grava no cache a posição ainda não cacheada', async () => {
     const port = fakePort(() => ({ cp: 0, pv: ['e2e4'] }))
-    const gravadas: { fen: string; depth: number; multipv: number }[] = []
+    const gravadas: {
+      fen: string
+      mode: string
+      value: number
+      multipv: number
+    }[] = []
     const cache: PositionCache = {
       async get() {
         return null
       },
-      async put(pos, depth, multipv) {
-        gravadas.push({ fen: pos.fen, depth, multipv })
+      async put(pos, mode, value, multipv) {
+        gravadas.push({ fen: pos.fen, mode, value, multipv })
       },
     }
 
@@ -367,7 +371,9 @@ describe('analyzeGame', () => {
       'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1',
       'rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2',
     ])
-    expect(gravadas.every((g) => g.depth === 18 && g.multipv === 2)).toBe(true)
+    expect(
+      gravadas.every((g) => g.mode === 'depth' && g.value === 18 && g.multipv === 2),
+    ).toBe(true)
     expect(review.moves).toHaveLength(2)
   })
 
