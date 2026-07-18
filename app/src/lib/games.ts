@@ -23,6 +23,11 @@ export function deleteGame(id: number): Promise<void> {
   return invoke('games_delete', { id })
 }
 
+/** Esvazia todo o histórico de partidas revisadas (não toca no cache). */
+export function clearGames(): Promise<void> {
+  return invoke('games_clear')
+}
+
 /**
  * Grava a revisão concluída no store. Reanálise da mesma partida com os
  * mesmos parâmetros (pgn, mode, depth/movetimeMs, multipv) substitui a
