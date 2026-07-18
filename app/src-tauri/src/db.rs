@@ -15,6 +15,7 @@ pub struct DbState(pub Mutex<Connection>);
 /// Avaliação cacheada de uma posição. A chave (fen, depth, multipv) é conhecida
 /// por quem consulta, então só o payload volta.
 #[derive(Debug, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CachedPosition {
     pub cp: i32,
     pub lines_json: String,

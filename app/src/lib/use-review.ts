@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { analyzeGame } from "./analyze";
+import { createTauriPositionCache } from "./cache";
 import { createTauriEnginePort } from "./engine-port";
 import { getSystemResources, recommendedHashMb } from "./system";
 import { useSettings } from "./settings-context";
@@ -60,7 +61,7 @@ export function useReview(config: ReviewConfig): UseReview {
           config.engine.depth,
           p,
           config.lines,
-          sizing,
+          { ...sizing, cache: createTauriPositionCache() },
         );
         if (cancelled) return;
         setResult(review);

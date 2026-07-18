@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildReview, analyzeGame, type EnginePort } from "./analyze";
+import { buildReview, analyzeGame, type EnginePort, type PositionCache } from "./analyze";
 
 const START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 const AFTER_E4 = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1";
@@ -238,5 +238,71 @@ describe("analyzeGame", () => {
 
     const mateMove = review.moves[review.moves.length - 1];
     expect(mateMove.winPctLoss).toBe(0);
+  });
+
+  it("usa o cache de posições em vez de acionar o engine", async () => {
+    let gos = 0;
+    let lineCb: ((line: string) => void) | null = null;
+    const port: EnginePort = {
+      send(cmd: string) {
+        const c = cmd.trim();
+        if (c === "uci") lineCb?.("uciok");
+        else if (c === "isready") lineCb?.("readyok");
+        else if (c.startsWith("go")) {
+          gos++;
+          lineCb?.("bestmove e2e4");
+        }
+      },
+      onLine(handler: (line: string) => void) {
+        lineCb = handler;
+        return () => {
+          lineCb = null;
+        };
+      },
+    };
+    const cache: PositionCache = {
+      async get(fen) {
+        return {
+          fen,
+          cp: 0,
+          depth: 20,
+          pv: ["e2e4"],
+          lines: [{ multipv: 1, cp: 0, pv: ["e2e4"], san: "e4" }],
+        };
+      },
+      async put() {
+        throw new Error("cache cheio não deveria gravar");
+      },
+    };
+
+    const review = await analyzeGame("1. e4 e5", 20, port, 1, { cache });
+
+    expect(gos).toBe(0);
+    expect(review.moves).toHaveLength(2);
+    expect(review.moves.every((m) => m.winPctLoss === 0)).toBe(true);
+  });
+
+  it("avalia no engine e grava no cache a posição ainda não cacheada", async () => {
+    const port = fakePort(() => ({ cp: 0, pv: ["e2e4"] }));
+    const gravadas: { fen: string; depth: number; multipv: number }[] = [];
+    const cache: PositionCache = {
+      async get() {
+        return null;
+      },
+      async put(pos, depth, multipv) {
+        gravadas.push({ fen: pos.fen, depth, multipv });
+      },
+    };
+
+    const review = await analyzeGame("1. e4 e5", 18, port, 2, { cache });
+
+    expect(gravadas).toHaveLength(3);
+    expect(gravadas.map((g) => g.fen)).toEqual([
+      START_FEN,
+      "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1",
+      "rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2",
+    ]);
+    expect(gravadas.every((g) => g.depth === 18 && g.multipv === 2)).toBe(true);
+    expect(review.moves).toHaveLength(2);
   });
 });

@@ -133,6 +133,15 @@ export interface EnginePort {
   onLine(handler: (line: string) => void): () => void;
 }
 
+/**
+ * Cache de avaliações por posição, chaveado por (fen, depth, multipv).
+ * `get` devolve null em caso de miss; `put` grava a avaliação alcançada.
+ */
+export interface PositionCache {
+  get(fen: string, depth: number, multipv: number): Promise<RawPosition | null>;
+  put(pos: RawPosition, depth: number, multipv: number): Promise<void>;
+}
+
 interface ExtractedGame {
   positionFens: string[];
   moves: PlayedMove[];
@@ -241,7 +250,7 @@ export async function analyzeGame(
   depth: number,
   port: EnginePort,
   multipv = 1,
-  opts: { threads?: number; hashMb?: number } = {},
+  opts: { threads?: number; hashMb?: number; cache?: PositionCache } = {},
 ): Promise<ReviewResult> {
   const { positionFens, moves } = extractGame(pgn);
 
@@ -269,9 +278,15 @@ export async function analyzeGame(
         lines: [{ multipv: 1, cp: term, pv: [] }],
       };
     } else {
-      pos = await evalPosition(port, fen, depth);
-      for (const l of pos.lines ?? []) {
-        l.san = l.pv[0] ? uciToSan(pos.fen, l.pv[0]) : null;
+      const cached = (await opts.cache?.get(fen, depth, multipv)) ?? null;
+      if (cached) {
+        pos = cached;
+      } else {
+        pos = await evalPosition(port, fen, depth);
+        for (const l of pos.lines ?? []) {
+          l.san = l.pv[0] ? uciToSan(pos.fen, l.pv[0]) : null;
+        }
+        await opts.cache?.put(pos, depth, multipv);
       }
     }
     raw.push(pos);
