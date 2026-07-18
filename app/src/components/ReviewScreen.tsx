@@ -1,4 +1,5 @@
 import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
+import { formatEngineTag } from '../lib/engine-tag'
 import { evalLabel, sideToMoveAtPly } from '../lib/eval-label'
 import { resultLabel } from '../lib/pgn'
 import { useSettings } from '../lib/settings-context'
@@ -103,8 +104,15 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
           </h1>
           <p className='text-sm text-ink-dim'>
             {resultLabel(config.meta.result)} ·{' '}
-            {Math.ceil(config.meta.plies / 2)} lances · engine d
-            {config.engine.depth}
+            {Math.ceil(config.meta.plies / 2)} lances ·{' '}
+            {formatEngineTag({
+              mode: config.mode,
+              depth:
+                config.mode === 'time'
+                  ? (config.movetimeMs ?? 0)
+                  : config.engine.depth,
+              engineTier: config.engine.id,
+            })}
             {opening ? ` · ${opening.code} ${opening.name}` : ''}
           </p>
         </div>

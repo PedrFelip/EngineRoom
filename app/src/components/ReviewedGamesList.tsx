@@ -1,5 +1,6 @@
+import { formatEngineTag } from '../lib/engine-tag'
 import { resultLabel } from '../lib/pgn'
-import { ENGINE_TIERS, type GameSummary } from '../types'
+import type { GameSummary } from '../types'
 
 interface Props {
   games: GameSummary[]
@@ -20,8 +21,11 @@ function formatDate(createdAt: string): string {
 }
 
 function tierLabel(game: GameSummary): string {
-  const tier = ENGINE_TIERS.find((t) => t.id === game.engineTier)
-  return tier ? tier.label : `d${game.depth}`
+  return formatEngineTag({
+    mode: game.mode ?? 'depth',
+    depth: game.depth,
+    engineTier: game.engineTier,
+  })
 }
 
 export default function ReviewedGamesList({
@@ -64,9 +68,7 @@ export default function ReviewedGamesList({
                   <span className='text-ink-faint/60'>·</span>
                   <span>{Math.ceil(g.plies / 2)} lances</span>
                   <span className='text-ink-faint/60'>·</span>
-                  <span>
-                    {tierLabel(g)} d{g.depth}
-                  </span>
+                  <span>{tierLabel(g)}</span>
                   <span className='text-ink-faint/60'>·</span>
                   <span>{formatDate(g.createdAt)}</span>
                 </div>
