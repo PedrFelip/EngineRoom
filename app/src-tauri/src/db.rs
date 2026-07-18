@@ -157,41 +157,45 @@ fn store_game(conn: &Connection, game: &NewGame) -> Result<i64, String> {
     Ok(conn.last_insert_rowid())
 }
 
+const SUMMARY_COLS: &str = "id, white, black, result, plies, engine_tier, depth, multipv,
+        accuracy_white, accuracy_black, created_at";
+
+/// Mapeia as 11 primeiras colunas (ordem de SUMMARY_COLS) para GameSummary.
+fn summary_from_row(row: &rusqlite::Row<'_>) -> Result<GameSummary, String> {
+    Ok(GameSummary {
+        id: row.get(0).map_err(|e| e.to_string())?,
+        white: row.get(1).map_err(|e| e.to_string())?,
+        black: row.get(2).map_err(|e| e.to_string())?,
+        result: row.get(3).map_err(|e| e.to_string())?,
+        plies: row.get(4).map_err(|e| e.to_string())?,
+        engine_tier: row.get(5).map_err(|e| e.to_string())?,
+        depth: row.get(6).map_err(|e| e.to_string())?,
+        multipv: row.get(7).map_err(|e| e.to_string())?,
+        accuracy_white: row.get(8).map_err(|e| e.to_string())?,
+        accuracy_black: row.get(9).map_err(|e| e.to_string())?,
+        created_at: row.get(10).map_err(|e| e.to_string())?,
+    })
+}
+
 fn list_games(conn: &Connection) -> Result<Vec<GameSummary>, String> {
     let mut stmt = conn
-        .prepare(
-            "SELECT id, white, black, result, plies, engine_tier, depth, multipv,
-                    accuracy_white, accuracy_black, created_at
-             FROM games ORDER BY created_at DESC, id DESC",
-        )
+        .prepare(&format!(
+            "SELECT {SUMMARY_COLS} FROM games ORDER BY created_at DESC, id DESC"
+        ))
         .map_err(|e| e.to_string())?;
     let mut rows = stmt.query(()).map_err(|e| e.to_string())?;
     let mut out = Vec::new();
     while let Some(row) = rows.next().map_err(|e| e.to_string())? {
-        out.push(GameSummary {
-            id: row.get(0).map_err(|e| e.to_string())?,
-            white: row.get(1).map_err(|e| e.to_string())?,
-            black: row.get(2).map_err(|e| e.to_string())?,
-            result: row.get(3).map_err(|e| e.to_string())?,
-            plies: row.get(4).map_err(|e| e.to_string())?,
-            engine_tier: row.get(5).map_err(|e| e.to_string())?,
-            depth: row.get(6).map_err(|e| e.to_string())?,
-            multipv: row.get(7).map_err(|e| e.to_string())?,
-            accuracy_white: row.get(8).map_err(|e| e.to_string())?,
-            accuracy_black: row.get(9).map_err(|e| e.to_string())?,
-            created_at: row.get(10).map_err(|e| e.to_string())?,
-        });
+        out.push(summary_from_row(row)?);
     }
     Ok(out)
 }
 
 fn lookup_game(conn: &Connection, id: i64) -> Result<Option<StoredGame>, String> {
     let mut stmt = conn
-        .prepare(
-            "SELECT id, white, black, result, plies, engine_tier, depth, multipv,
-                    accuracy_white, accuracy_black, created_at, pgn, review_json
-             FROM games WHERE id = ?1",
-        )
+        .prepare(&format!(
+            "SELECT {SUMMARY_COLS}, pgn, review_json FROM games WHERE id = ?1"
+        ))
         .map_err(|e| e.to_string())?;
     let mut rows = stmt.query((id,)).map_err(|e| e.to_string())?;
     match rows.next().map_err(|e| e.to_string())? {
@@ -232,19 +236,7 @@ pub fn games_delete(state: tauri::State<'_, DbState>, id: i64) -> Result<(), Str
 
 fn stored_from_row(row: &rusqlite::Row<'_>) -> Result<StoredGame, String> {
     Ok(StoredGame {
-        summary: GameSummary {
-            id: row.get(0).map_err(|e| e.to_string())?,
-            white: row.get(1).map_err(|e| e.to_string())?,
-            black: row.get(2).map_err(|e| e.to_string())?,
-            result: row.get(3).map_err(|e| e.to_string())?,
-            plies: row.get(4).map_err(|e| e.to_string())?,
-            engine_tier: row.get(5).map_err(|e| e.to_string())?,
-            depth: row.get(6).map_err(|e| e.to_string())?,
-            multipv: row.get(7).map_err(|e| e.to_string())?,
-            accuracy_white: row.get(8).map_err(|e| e.to_string())?,
-            accuracy_black: row.get(9).map_err(|e| e.to_string())?,
-            created_at: row.get(10).map_err(|e| e.to_string())?,
-        },
+        summary: summary_from_row(row)?,
         pgn: row.get(11).map_err(|e| e.to_string())?,
         review_json: row.get(12).map_err(|e| e.to_string())?,
     })
