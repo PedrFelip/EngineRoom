@@ -28,8 +28,9 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
   const { settings } = useSettings()
   const { result, status, error, currentPly, orientation } = review
   const position = result?.positions[currentPly] ?? null
-  const lastMoveUci =
-    currentPly > 0 ? (result?.moves[currentPly - 1].uci ?? null) : null
+  const currentMove =
+    currentPly > 0 ? (result?.moves[currentPly - 1] ?? null) : null
+  const lastMoveUci = currentMove?.uci ?? null
   const opening = result?.moves.find((m) => m.eco)?.eco ?? null
 
   const evalBarLabel =
@@ -158,6 +159,7 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
                     orientation={orientation}
                     lastMove={lastMoveUci ? uciToSquares(lastMoveUci) : null}
                     arrows={bestArrow ? [bestArrow] : []}
+                    lastMoveClassification={currentMove?.classification ?? null}
                   />
                 ) : (
                   <div className='flex aspect-square w-full items-center justify-center rounded-lg border border-edge bg-panel-2/60 text-ink-dim'>
