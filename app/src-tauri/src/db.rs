@@ -156,6 +156,34 @@ fn store_game(conn: &Connection, game: &NewGame) -> Result<i64, String> {
     Ok(conn.last_insert_rowid())
 }
 
+fn list_games(conn: &Connection) -> Result<Vec<GameSummary>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, white, black, result, plies, engine_tier, depth, multipv,
+                    accuracy_white, accuracy_black, created_at
+             FROM games ORDER BY created_at DESC, id DESC",
+        )
+        .map_err(|e| e.to_string())?;
+    let mut rows = stmt.query(()).map_err(|e| e.to_string())?;
+    let mut out = Vec::new();
+    while let Some(row) = rows.next().map_err(|e| e.to_string())? {
+        out.push(GameSummary {
+            id: row.get(0).map_err(|e| e.to_string())?,
+            white: row.get(1).map_err(|e| e.to_string())?,
+            black: row.get(2).map_err(|e| e.to_string())?,
+            result: row.get(3).map_err(|e| e.to_string())?,
+            plies: row.get(4).map_err(|e| e.to_string())?,
+            engine_tier: row.get(5).map_err(|e| e.to_string())?,
+            depth: row.get(6).map_err(|e| e.to_string())?,
+            multipv: row.get(7).map_err(|e| e.to_string())?,
+            accuracy_white: row.get(8).map_err(|e| e.to_string())?,
+            accuracy_black: row.get(9).map_err(|e| e.to_string())?,
+            created_at: row.get(10).map_err(|e| e.to_string())?,
+        });
+    }
+    Ok(out)
+}
+
 fn lookup_game(conn: &Connection, id: i64) -> Result<Option<StoredGame>, String> {
     let mut stmt = conn
         .prepare(
@@ -310,5 +338,23 @@ mod tests {
         assert_eq!(game.summary.accuracy_white, 98.5);
         assert_eq!(game.pgn, "1. e4 e5");
         assert_eq!(game.review_json, r#"{"positions":[],"moves":[]}"#);
+    }
+
+    #[test]
+    fn lista_devolve_mais_recentes_primeiro() {
+        let conn = open_memory().unwrap();
+        let mut antiga = partida_exemplo();
+        antiga.white = "Antiga".to_string();
+        store_game(&conn, &antiga).unwrap();
+        let mut recente = partida_exemplo();
+        recente.pgn = "1. d4 d5".to_string();
+        recente.white = "Recente".to_string();
+        store_game(&conn, &recente).unwrap();
+
+        let lista = list_games(&conn).unwrap();
+
+        assert_eq!(lista.len(), 2);
+        assert_eq!(lista[0].white, "Recente");
+        assert_eq!(lista[1].white, "Antiga");
     }
 }
