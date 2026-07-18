@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type { ReviewConfig } from "../types";
 import { resultLabel } from "../lib/pgn";
+import { evalLabel, sideToMoveAtPly } from "../lib/eval-label";
 import { useReview } from "../lib/use-review";
 import Board from "./Board";
 import EvalBar from "./EvalBar";
@@ -26,6 +27,15 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
   const lastMoveUci =
     currentPly > 0 ? result?.moves[currentPly - 1].uci ?? null : null;
   const opening = result?.moves.find((m) => m.eco)?.eco ?? null;
+
+  const evalBarLabel =
+    position && result
+      ? evalLabel(
+          position.cp,
+          position.fen,
+          sideToMoveAtPly(result.moves, currentPly),
+        )
+      : undefined;
 
   const [selectedMultipv, setSelectedMultipv] = useState(1);
   useEffect(() => {
@@ -101,6 +111,7 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
             <EvalBar
               winPct={position?.winPct ?? 50}
               orientation={orientation}
+              label={evalBarLabel}
             />
             <div className="min-w-0 flex-1">
               {position ? (

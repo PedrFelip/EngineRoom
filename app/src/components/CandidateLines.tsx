@@ -1,5 +1,6 @@
 import type { PvLine } from "../types";
 import { formatEval } from "../lib/scoring";
+import { cpToMate } from "../lib/eval-label";
 
 interface CandidateLinesProps {
   lines: PvLine[];
@@ -21,6 +22,7 @@ export default function CandidateLines({
       <div className="flex flex-col gap-0.5">
         {lines.map((l) => {
           const active = l.multipv === selectedMultipv;
+          const mate = cpToMate(l.cp);
           return (
             <button
               key={l.multipv}
@@ -39,9 +41,11 @@ export default function CandidateLines({
               <span className="font-mono text-xs tabular-nums text-ink-dim">
                 {formatEval(l.cp)}
               </span>
-              <span className="ml-auto font-mono text-xs tabular-nums text-ink-faint">
-                {l.winPct.toFixed(1)}%
-              </span>
+              {mate === null && (
+                <span className="ml-auto font-mono text-xs tabular-nums text-ink-faint">
+                  {l.winPct.toFixed(1)}%
+                </span>
+              )}
             </button>
           );
         })}
