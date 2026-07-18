@@ -1,3 +1,4 @@
+mod db;
 mod engine;
 mod system;
 
@@ -9,8 +10,18 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
+        .setup(|app| {
+            use tauri::Manager;
+            let dir = app.path().app_data_dir()?;
+            std::fs::create_dir_all(&dir)?;
+            let conn = db::open_file(&dir.join("engineroom.db"))?;
+            app.manage(db::DbState(std::sync::Mutex::new(conn)));
+            Ok(())
+        })
         .manage(EngineState::default())
         .invoke_handler(tauri::generate_handler![
+            db::cache_get,
+            db::cache_put,
             engine::engine_spawn,
             engine::engine_send,
             engine::engine_stop,
