@@ -42,6 +42,7 @@ export default function Board({
   const elRef = useRef<HTMLDivElement>(null)
   const cgRef = useRef<Api | null>(null)
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: monta o Chessground uma única vez; updates vão via .set() no effect abaixo
   useEffect(() => {
     if (!elRef.current) return
     cgRef.current = Chessground(elRef.current, {

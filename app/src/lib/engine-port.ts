@@ -27,7 +27,9 @@ export async function createTauriEnginePort(
   }
   const handlers = new Set<(line: string) => void>()
   const unlisten = await onEngineLine((line) => {
-    handlers.forEach((h) => h(line))
+    handlers.forEach((h) => {
+      h(line)
+    })
   })
   if (isCancelled()) {
     unlisten()

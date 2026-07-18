@@ -10,7 +10,7 @@ interface Props {
 
 /** "2026-07-17 20:00:00" (UTC do SQLite) → "17/07 17:00" (local). */
 function formatDate(createdAt: string): string {
-  const d = new Date(createdAt.replace(' ', 'T') + 'Z')
+  const d = new Date(`${createdAt.replace(' ', 'T')}Z`)
   if (Number.isNaN(d.getTime())) return createdAt
   const dd = String(d.getDate()).padStart(2, '0')
   const mm = String(d.getMonth() + 1).padStart(2, '0')
@@ -37,14 +37,17 @@ export default function ReviewedGamesList({
       </h2>
       <ul className='flex max-h-[32rem] flex-col gap-2 overflow-y-auto pr-1'>
         {games.map((g) => (
-          <li key={g.id}>
-            <div
-              role='button'
-              tabIndex={0}
+          <li
+            key={g.id}
+            className='group relative overflow-hidden rounded-xl border border-edge bg-panel/80 transition hover:border-brand/60 hover:bg-panel-2'
+          >
+            <button
+              type='button'
               onClick={() => onOpen(g.id)}
-              onKeyDown={(e) => e.key === 'Enter' && onOpen(g.id)}
-              className='group flex w-full cursor-pointer items-center gap-3 rounded-xl border border-edge bg-panel/80 px-4 py-3 text-left transition hover:border-brand/60 hover:bg-panel-2'
-            >
+              className='absolute inset-0 h-full w-full cursor-pointer'
+              aria-label={`Abrir partida: ${g.white} vs ${g.black}`}
+            />
+            <div className='relative z-10 flex w-full items-center gap-3 px-4 py-3 text-left'>
               <div className='min-w-0 flex-1'>
                 <div className='flex flex-wrap items-baseline gap-x-2 truncate text-sm'>
                   <span className='font-semibold text-ink'>{g.white}</span>
@@ -89,6 +92,7 @@ export default function ReviewedGamesList({
                     strokeWidth='2'
                     strokeLinecap='round'
                     strokeLinejoin='round'
+                    aria-hidden='true'
                   >
                     <polyline points='23 4 23 10 17 10' />
                     <path d='M20.49 15a9 9 0 1 1-2.12-9.36L23 10' />
@@ -113,6 +117,7 @@ export default function ReviewedGamesList({
                     strokeWidth='2'
                     strokeLinecap='round'
                     strokeLinejoin='round'
+                    aria-hidden='true'
                   >
                     <polyline points='3 6 5 6 21 6' />
                     <path d='M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2' />

@@ -21,6 +21,7 @@ export default function ClassificationBadge({
   const label = CLASSIFICATION_LABELS[classification]
   return (
     <span
+      role='img'
       className={`inline-block h-2.5 w-2.5 shrink-0 rounded-full ${BADGE_COLOR[classification]}`}
       title={label}
       aria-label={label}

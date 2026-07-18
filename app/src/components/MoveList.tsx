@@ -47,6 +47,7 @@ export default function MoveList({
 }: MoveListProps) {
   const rootRef = useRef<HTMLDivElement>(null)
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: o efeito precisa re-rodar quando currentPly muda para rolar até o lance ativo, mesmo sem usar o valor diretamente no body
   useEffect(() => {
     const el = rootRef.current?.querySelector('[data-active="true"]')
     el?.scrollIntoView({ block: 'nearest' })

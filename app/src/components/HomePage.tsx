@@ -24,7 +24,7 @@ export default function HomePage({ onStart }: Props) {
   const [games, setGames] = useState<GameSummary[]>([])
 
   const parse = useMemo(() => parsePgn(pgn), [pgn])
-  const engine = ENGINE_TIERS.find((t) => t.id === tierId)!
+  const engine = ENGINE_TIERS.find((t) => t.id === tierId) ?? ENGINE_TIERS[0]
   const canStart = parse.ok && pgn.trim().length > 0
 
   useEffect(() => {
@@ -73,7 +73,13 @@ export default function HomePage({ onStart }: Props) {
       >
         <div className='flex items-center gap-2.5'>
           <div className='flex h-9 w-9 items-center justify-center rounded-lg bg-brand text-bg'>
-            <svg width='20' height='20' viewBox='0 0 24 24' fill='currentColor'>
+            <svg
+              width='20'
+              height='20'
+              viewBox='0 0 24 24'
+              fill='currentColor'
+              aria-hidden='true'
+            >
               <path d='M12 2l2.4 4.9 5.4.8-3.9 3.8.9 5.4L12 18.9 7.2 19.7l.9-5.4L4.2 10.5l5.4-.8L12 2z' />
             </svg>
           </div>
@@ -102,6 +108,7 @@ export default function HomePage({ onStart }: Props) {
             strokeWidth='1.8'
             strokeLinecap='round'
             strokeLinejoin='round'
+            aria-hidden='true'
           >
             <circle cx='12' cy='12' r='3' />
             <path d='M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z' />
@@ -162,6 +169,7 @@ export default function HomePage({ onStart }: Props) {
                     strokeWidth='2'
                     strokeLinecap='round'
                     strokeLinejoin='round'
+                    aria-hidden='true'
                   >
                     <circle cx='12' cy='12' r='10' />
                     <line x1='12' y1='8' x2='12' y2='12' />
@@ -209,6 +217,7 @@ export default function HomePage({ onStart }: Props) {
                 strokeWidth='2.5'
                 strokeLinecap='round'
                 strokeLinejoin='round'
+                aria-hidden='true'
               >
                 <line x1='5' y1='12' x2='19' y2='12' />
                 <polyline points='12 5 19 12 12 19' />

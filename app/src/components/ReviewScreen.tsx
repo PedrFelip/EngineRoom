@@ -38,6 +38,7 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
       : undefined
 
   const [selectedMultipv, setSelectedMultipv] = useState(1)
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reseta a linha selecionada sempre que o usuário navega para outro lance
   useEffect(() => {
     setSelectedMultipv(1)
   }, [currentPly])

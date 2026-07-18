@@ -52,66 +52,71 @@ export default function PgnImporter({ value, onChange }: Props) {
       </div>
 
       {mode === 'file' ? (
-        <div
-          onDragOver={(e) => {
-            e.preventDefault()
-            setDragActive(true)
-          }}
-          onDragLeave={() => setDragActive(false)}
-          onDrop={(e) => {
-            e.preventDefault()
-            setDragActive(false)
-            const file = e.dataTransfer.files?.[0]
-            if (file) void handleFile(file)
-          }}
-          onClick={() => inputRef.current?.click()}
-          className={`flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed px-6 py-10 text-center transition ${
-            dragActive
-              ? 'border-brand bg-brand/10'
-              : 'border-edge bg-panel-2/40 hover:border-ink-faint hover:bg-panel-2/70'
-          }`}
-        >
-          <svg
-            width='36'
-            height='36'
-            viewBox='0 0 24 24'
-            fill='none'
-            stroke='currentColor'
-            strokeWidth='1.6'
-            strokeLinecap='round'
-            strokeLinejoin='round'
-            className='mb-3 text-ink-faint'
+        <div className='relative'>
+          <button
+            type='button'
+            onDragOver={(e) => {
+              e.preventDefault()
+              setDragActive(true)
+            }}
+            onDragLeave={() => setDragActive(false)}
+            onDrop={(e) => {
+              e.preventDefault()
+              setDragActive(false)
+              const file = e.dataTransfer.files?.[0]
+              if (file) void handleFile(file)
+            }}
+            onClick={() => inputRef.current?.click()}
+            className={`flex w-full cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed px-6 py-10 text-center transition ${
+              dragActive
+                ? 'border-brand bg-brand/10'
+                : 'border-edge bg-panel-2/40 hover:border-ink-faint hover:bg-panel-2/70'
+            }`}
           >
-            <path d='M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4' />
-            <polyline points='17 8 12 3 7 8' />
-            <line x1='12' y1='3' x2='12' y2='15' />
-          </svg>
+            <svg
+              width='36'
+              height='36'
+              viewBox='0 0 24 24'
+              fill='none'
+              stroke='currentColor'
+              strokeWidth='1.6'
+              strokeLinecap='round'
+              strokeLinejoin='round'
+              className='mb-3 text-ink-faint'
+              aria-hidden='true'
+            >
+              <path d='M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4' />
+              <polyline points='17 8 12 3 7 8' />
+              <line x1='12' y1='3' x2='12' y2='15' />
+            </svg>
 
-          <p className='text-sm text-ink'>
-            Arraste um arquivo{' '}
-            <span className='font-semibold text-brand'>.pgn</span>
-          </p>
-          <p className='mt-0.5 text-xs text-ink-faint'>
-            ou clique para procurar
-          </p>
+            <p className='text-sm text-ink'>
+              Arraste um arquivo{' '}
+              <span className='font-semibold text-brand'>.pgn</span>
+            </p>
+            <p className='mt-0.5 text-xs text-ink-faint'>
+              ou clique para procurar
+            </p>
 
-          {fileName && (
-            <span className='mt-3 inline-flex items-center gap-1.5 rounded-md bg-panel-3 px-2.5 py-1 text-xs text-ink-dim'>
-              <svg
-                width='12'
-                height='12'
-                viewBox='0 0 24 24'
-                fill='none'
-                stroke='currentColor'
-                strokeWidth='2.5'
-                strokeLinecap='round'
-                strokeLinejoin='round'
-              >
-                <polyline points='20 6 9 17 4 12' />
-              </svg>
-              {fileName}
-            </span>
-          )}
+            {fileName && (
+              <span className='mt-3 inline-flex items-center gap-1.5 rounded-md bg-panel-3 px-2.5 py-1 text-xs text-ink-dim'>
+                <svg
+                  width='12'
+                  height='12'
+                  viewBox='0 0 24 24'
+                  fill='none'
+                  stroke='currentColor'
+                  strokeWidth='2.5'
+                  strokeLinecap='round'
+                  strokeLinejoin='round'
+                  aria-hidden='true'
+                >
+                  <polyline points='20 6 9 17 4 12' />
+                </svg>
+                {fileName}
+              </span>
+            )}
+          </button>
 
           <input
             ref={inputRef}

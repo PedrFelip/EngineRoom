@@ -41,7 +41,7 @@ export default function EvalGraph({
     ? `M ${x(0).toFixed(1)},${mid} L ${curvePts.join(' L ')} L ${x(n - 1).toFixed(1)},${mid} Z`
     : ''
 
-  const handleClick = (e: React.MouseEvent<SVGSVGElement>) => {
+  const handleClick = (e: React.MouseEvent<HTMLButtonElement>) => {
     if (n <= 1) return
     const rect = e.currentTarget.getBoundingClientRect()
     const ratio = (e.clientX - rect.left) / rect.width
@@ -55,54 +55,60 @@ export default function EvalGraph({
   return (
     <div ref={ref} className='w-full'>
       {ready && (
-        <svg
-          width={w}
-          height={HEIGHT}
+        <button
+          type='button'
           onClick={handleClick}
-          className='block cursor-pointer select-none'
-          role='img'
+          className='block w-full cursor-pointer select-none'
           aria-label='Gráfico de avaliação'
         >
-          <defs>
-            <clipPath id='eval-top'>
-              <rect x={0} y={0} width={w} height={mid} />
-            </clipPath>
-            <clipPath id='eval-bottom'>
-              <rect x={0} y={mid} width={w} height={mid} />
-            </clipPath>
-          </defs>
+          <svg
+            width={w}
+            height={HEIGHT}
+            role='img'
+            aria-hidden='true'
+            className='block'
+          >
+            <defs>
+              <clipPath id='eval-top'>
+                <rect x={0} y={0} width={w} height={mid} />
+              </clipPath>
+              <clipPath id='eval-bottom'>
+                <rect x={0} y={mid} width={w} height={mid} />
+              </clipPath>
+            </defs>
 
-          <line
-            x1={0}
-            y1={mid}
-            x2={w}
-            y2={mid}
-            stroke='var(--color-edge)'
-            strokeWidth={1}
-          />
+            <line
+              x1={0}
+              y1={mid}
+              x2={w}
+              y2={mid}
+              stroke='var(--color-edge)'
+              strokeWidth={1}
+            />
 
-          <path d={ribbonPath} fill='#e9e6e0' clipPath='url(#eval-top)' />
-          <path d={ribbonPath} fill='#3c3935' clipPath='url(#eval-bottom)' />
+            <path d={ribbonPath} fill='#e9e6e0' clipPath='url(#eval-top)' />
+            <path d={ribbonPath} fill='#3c3935' clipPath='url(#eval-bottom)' />
 
-          <path
-            d={linePath}
-            fill='none'
-            stroke='var(--color-ink-dim)'
-            strokeWidth={1.5}
-            strokeLinejoin='round'
-            strokeLinecap='round'
-          />
+            <path
+              d={linePath}
+              fill='none'
+              stroke='var(--color-ink-dim)'
+              strokeWidth={1.5}
+              strokeLinejoin='round'
+              strokeLinecap='round'
+            />
 
-          <line
-            x1={cx}
-            y1={0}
-            x2={cx}
-            y2={HEIGHT}
-            stroke='var(--color-brand)'
-            strokeWidth={1.5}
-          />
-          <circle cx={cx} cy={cy} r={3.5} fill='var(--color-brand)' />
-        </svg>
+            <line
+              x1={cx}
+              y1={0}
+              x2={cx}
+              y2={HEIGHT}
+              stroke='var(--color-brand)'
+              strokeWidth={1.5}
+            />
+            <circle cx={cx} cy={cy} r={3.5} fill='var(--color-brand)' />
+          </svg>
+        </button>
       )}
     </div>
   )

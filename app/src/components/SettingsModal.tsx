@@ -36,17 +36,24 @@ export default function SettingsModal({ open: isOpen, onClose }: Props) {
   }
 
   return (
-    <div
-      className='fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4'
-      onClick={onClose}
-    >
+    <div className='fixed inset-0 z-50 flex items-center justify-center p-4'>
+      <button
+        type='button'
+        aria-label='Fechar'
+        onClick={onClose}
+        className='absolute inset-0 cursor-default bg-black/60'
+      />
       <div
-        className='w-full max-w-lg overflow-hidden rounded-2xl border border-edge bg-panel shadow-2xl'
-        onClick={(e) => e.stopPropagation()}
+        role='dialog'
+        aria-modal='true'
+        aria-labelledby='settings-title'
+        className='relative z-10 w-full max-w-lg overflow-hidden rounded-2xl border border-edge bg-panel shadow-2xl'
       >
         {/* Header */}
         <div className='flex items-center justify-between border-b border-edge-soft px-5 py-4'>
-          <h2 className='text-base font-bold text-ink'>Configurações</h2>
+          <h2 id='settings-title' className='text-base font-bold text-ink'>
+            Configurações
+          </h2>
           <button
             type='button'
             onClick={onClose}
@@ -62,6 +69,7 @@ export default function SettingsModal({ open: isOpen, onClose }: Props) {
               strokeWidth='2'
               strokeLinecap='round'
               strokeLinejoin='round'
+              aria-hidden='true'
             >
               <line x1='18' y1='6' x2='6' y2='18' />
               <line x1='6' y1='6' x2='18' y2='18' />
@@ -99,6 +107,7 @@ export default function SettingsModal({ open: isOpen, onClose }: Props) {
                         strokeWidth='2'
                         strokeLinecap='round'
                         strokeLinejoin='round'
+                        aria-hidden='true'
                       >
                         <path d='M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z' />
                       </svg>
@@ -112,6 +121,7 @@ export default function SettingsModal({ open: isOpen, onClose }: Props) {
                         strokeWidth='2'
                         strokeLinecap='round'
                         strokeLinejoin='round'
+                        aria-hidden='true'
                       >
                         <circle cx='12' cy='12' r='5' />
                         <line x1='12' y1='1' x2='12' y2='3' />
@@ -218,6 +228,7 @@ export default function SettingsModal({ open: isOpen, onClose }: Props) {
                       strokeWidth='2.5'
                       strokeLinecap='round'
                       strokeLinejoin='round'
+                      aria-hidden='true'
                     >
                       <polyline points='20 6 9 17 4 12' />
                     </svg>
@@ -231,6 +242,7 @@ export default function SettingsModal({ open: isOpen, onClose }: Props) {
                       strokeWidth='2'
                       strokeLinecap='round'
                       strokeLinejoin='round'
+                      aria-hidden='true'
                     >
                       <circle cx='12' cy='12' r='10' />
                       <line x1='12' y1='8' x2='12' y2='12' />
