@@ -11,7 +11,13 @@ describe('formatEngineTag', () => {
   it('cai para d{depth} quando o tier é desconhecido', () => {
     expect(
       formatEngineTag({ mode: 'depth', depth: 18, engineTier: 'legado' }),
-    ).toBe('d18 · d18')
+    ).toBe('d18')
+  })
+
+  it('mostra apenas d{depth} para tier custom (depth não-preset)', () => {
+    expect(
+      formatEngineTag({ mode: 'depth', depth: 17, engineTier: 'custom' }),
+    ).toBe('d17')
   })
 
   it('mostra segundos por lance no modo tempo', () => {

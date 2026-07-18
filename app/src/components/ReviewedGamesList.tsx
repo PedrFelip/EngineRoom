@@ -39,42 +39,54 @@ export default function ReviewedGamesList({
       <h2 className='mb-3 text-sm font-semibold tracking-wide text-ink-dim uppercase'>
         Partidas analisadas
       </h2>
-      <ul className='flex max-h-[32rem] flex-col gap-2 overflow-y-auto pr-1'>
+      <ul className='@container flex max-h-[26rem] flex-col gap-2 overflow-y-auto pr-1 md:max-h-[32rem] xl:max-h-[40rem]'>
         {games.map((g) => (
           <li
             key={g.id}
-            className='group relative overflow-hidden rounded-xl border border-edge bg-panel/80 transition hover:border-brand/60 hover:bg-panel-2'
+            className='relative overflow-hidden rounded-xl border border-edge bg-panel/80 transition hover:border-brand/60 hover:bg-panel-2'
           >
             <button
               type='button'
               onClick={() => onOpen(g.id)}
-              className='absolute inset-0 h-full w-full cursor-pointer'
+              className='absolute inset-0 z-20 h-full w-full cursor-pointer'
               aria-label={`Abrir partida: ${g.white} vs ${g.black}`}
             />
-            <div className='relative z-10 flex w-full items-center gap-3 px-4 py-3 text-left'>
+            <div className='flex w-full items-center gap-2 px-3 py-2.5 text-left @sm:gap-3 @sm:px-4 @sm:py-3'>
               <div className='min-w-0 flex-1'>
-                <div className='flex flex-wrap items-baseline gap-x-2 truncate text-sm'>
-                  <span className='font-semibold text-ink'>{g.white}</span>
-                  <span className='text-ink-faint'>vs</span>
-                  <span className='font-semibold text-ink'>{g.black}</span>
-                  <span className='text-ink-dim'>·</span>
-                  <span className='text-good'>{resultLabel(g.result)}</span>
+                <div className='flex items-baseline gap-x-2 text-sm'>
+                  <span className='truncate font-semibold text-ink'>
+                    {g.white}
+                  </span>
+                  <span className='text-ink-faint shrink-0'>vs</span>
+                  <span className='truncate font-semibold text-ink'>
+                    {g.black}
+                  </span>
+                  <span className='text-ink-dim shrink-0'>·</span>
+                  <span className='text-good shrink-0'>
+                    {resultLabel(g.result)}
+                  </span>
                 </div>
                 <div className='mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-ink-faint'>
-                  <span>
+                  <span className='whitespace-nowrap'>
                     prec. {Math.round(g.accuracyWhite)}% /{' '}
                     {Math.round(g.accuracyBlack)}%
                   </span>
-                  <span className='text-ink-faint/60'>·</span>
-                  <span>{Math.ceil(g.plies / 2)} lances</span>
-                  <span className='text-ink-faint/60'>·</span>
-                  <span>{tierLabel(g)}</span>
-                  <span className='text-ink-faint/60'>·</span>
-                  <span>{formatDate(g.createdAt)}</span>
+                  <span className='hidden @sm:inline text-ink-faint/60'>·</span>
+                  <span className='hidden @sm:inline whitespace-nowrap'>
+                    {Math.ceil(g.plies / 2)} lances
+                  </span>
+                  <span className='hidden @md:inline text-ink-faint/60'>·</span>
+                  <span className='hidden @md:inline whitespace-nowrap'>
+                    {tierLabel(g)}
+                  </span>
+                  <span className='hidden @sm:inline text-ink-faint/60'>·</span>
+                  <span className='hidden @sm:inline whitespace-nowrap'>
+                    {formatDate(g.createdAt)}
+                  </span>
                 </div>
               </div>
 
-              <div className='flex items-center gap-1 opacity-0 transition group-hover:opacity-100'>
+              <div className='relative z-30 flex shrink-0 items-center gap-1'>
                 <button
                   type='button'
                   onClick={(e) => {

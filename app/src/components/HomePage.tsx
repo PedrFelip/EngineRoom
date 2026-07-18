@@ -65,11 +65,9 @@ export default function HomePage({ onStart }: Props) {
   const hasGames = games.length > 0
 
   return (
-    <div className='flex min-h-full flex-col items-center px-4 py-10'>
+    <div className='flex min-h-full flex-col items-center overflow-x-hidden px-4 py-8 md:px-6 md:py-10 lg:px-8'>
       {/* Brand */}
-      <header
-        className={`mb-8 flex w-full items-center justify-between ${hasGames ? 'max-w-5xl' : 'max-w-xl'}`}
-      >
+      <header className='mb-8 flex w-full max-w-xl items-center justify-between md:max-w-6xl'>
         <div className='flex items-center gap-2.5'>
           <div className='flex h-9 w-9 items-center justify-center rounded-lg bg-brand text-bg'>
             <svg
@@ -115,10 +113,8 @@ export default function HomePage({ onStart }: Props) {
         </button>
       </header>
 
-      <div
-        className={`flex w-full flex-col gap-10 ${hasGames ? 'max-w-5xl lg:flex-row' : 'max-w-xl'}`}
-      >
-        <div className='w-full max-w-xl shrink-0'>
+      <div className='flex w-full max-w-xl flex-col gap-8 md:max-w-6xl md:flex-row md:gap-10'>
+        <div className='w-full max-w-xl shrink-0 md:max-w-md lg:max-w-xl'>
           <h2 className='mb-1 text-2xl font-bold text-ink'>Revisar partida</h2>
           <p className='mb-6 text-sm text-ink-dim'>
             Importe um PGN e ajuste a qualidade da análise da engine.
@@ -230,20 +226,84 @@ export default function HomePage({ onStart }: Props) {
               </svg>
             </button>
           </div>
-
-          <p className='mt-4 text-center text-xs text-ink-faint'>
-            Toda a análise acontece localmente — seu PGN não sai do seu
-            computador.
-          </p>
         </div>
 
-        {hasGames && (
+        {hasGames ? (
           <ReviewedGamesList
             games={games}
             onOpen={openStored}
             onDelete={removeStored}
             onReanalyze={reanalyzeStored}
           />
+        ) : (
+          <aside className='w-full min-w-0 flex-1'>
+            <h2 className='mb-3 text-sm font-semibold tracking-wide text-ink-dim uppercase'>
+              Como funciona
+            </h2>
+            <div className='rounded-2xl border border-edge bg-panel/80 p-5 shadow-xl shadow-black/30'>
+              <ol className='flex flex-col gap-4'>
+                <li className='flex gap-3'>
+                  <span className='flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brand/15 font-mono text-sm font-bold text-brand'>
+                    1
+                  </span>
+                  <div>
+                    <p className='text-sm font-semibold text-ink'>
+                      Importe um PGN
+                    </p>
+                    <p className='mt-0.5 text-xs text-ink-dim'>
+                      Arraste um arquivo .pgn ou cole a notação diretamente.
+                    </p>
+                  </div>
+                </li>
+                <li className='flex gap-3'>
+                  <span className='flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brand/15 font-mono text-sm font-bold text-brand'>
+                    2
+                  </span>
+                  <div>
+                    <p className='text-sm font-semibold text-ink'>
+                      Ajuste a engine
+                    </p>
+                    <p className='mt-0.5 text-xs text-ink-dim'>
+                      Escolha profundidade, tempo por lance e linhas candidatas.
+                    </p>
+                  </div>
+                </li>
+                <li className='flex gap-3'>
+                  <span className='flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brand/15 font-mono text-sm font-bold text-brand'>
+                    3
+                  </span>
+                  <div>
+                    <p className='text-sm font-semibold text-ink'>
+                      Receba a revisão
+                    </p>
+                    <p className='mt-0.5 text-xs text-ink-dim'>
+                      Cada lance é classificado com precisão e win% estimado.
+                    </p>
+                  </div>
+                </li>
+              </ol>
+              <div className='mt-5 flex items-start gap-2 border-t border-edge-soft pt-4 text-xs text-ink-faint'>
+                <svg
+                  width='14'
+                  height='14'
+                  viewBox='0 0 24 24'
+                  fill='none'
+                  stroke='currentColor'
+                  strokeWidth='2'
+                  strokeLinecap='round'
+                  strokeLinejoin='round'
+                  className='mt-0.5 shrink-0'
+                  aria-hidden='true'
+                >
+                  <path d='M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z' />
+                </svg>
+                <span>
+                  Toda a análise acontece localmente — seu PGN não sai do seu
+                  computador.
+                </span>
+              </div>
+            </div>
+          </aside>
         )}
       </div>
 

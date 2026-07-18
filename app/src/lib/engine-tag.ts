@@ -9,7 +9,8 @@ export interface EngineTagInput {
 
 /**
  * Rótulo curto do modo de análise usado na revisão, para listas e cabeçalhos.
- *  - Profundidade: "Equilibrado · d20" (tier label + depth).
+ *  - Profundidade (tier conhecido): "Equilibrado · d20".
+ *  - Profundidade (tier desconhecido): "d17".
  *  - Tempo: "Tempo · 5s/lance" (milissegundos → segundos).
  */
 export function formatEngineTag({
@@ -22,6 +23,6 @@ export function formatEngineTag({
     return `Tempo · ${seconds}s/lance`
   }
   const tier = ENGINE_TIERS.find((t) => t.id === engineTier)
-  const label = tier?.label ?? `d${depth}`
-  return `${label} · d${depth}`
+  if (!tier) return `d${depth}`
+  return `${tier.label} · d${depth}`
 }
