@@ -23,6 +23,19 @@ pub struct CachedPosition {
     pub lines_json: String,
 }
 
+/// Totais de armazenamento usados pelas tabelas do app, expostos ao
+/// frontend para o painel de "Armazenamento" nas Configurações.
+/// `db_bytes` é o tamanho do arquivo `engineroom.db` em disco (0 em testes
+/// in-memory); `cache_bytes` e `games_bytes` são a soma dos comprimentos das
+/// colunas de texto de cada tabela.
+#[derive(Debug, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StorageStats {
+    pub cache_bytes: u64,
+    pub games_bytes: u64,
+    pub db_bytes: u64,
+}
+
 fn migrate(conn: &Connection) -> Result<(), String> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS position_cache (
@@ -315,6 +328,45 @@ fn remove_game(conn: &Connection, id: i64) -> Result<(), String> {
     Ok(())
 }
 
+fn clear_cache(conn: &Connection) -> Result<(), String> {
+    conn.execute("DELETE FROM position_cache", [])
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+fn clear_games(conn: &Connection) -> Result<(), String> {
+    conn.execute("DELETE FROM games", []).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+fn storage_stats(conn: &Connection) -> Result<StorageStats, String> {
+    let cache_bytes: u64 = conn
+        .query_row(
+            "SELECT COALESCE(SUM(LENGTH(fen) + LENGTH(mode) + LENGTH(lines_json)), 0)
+             FROM position_cache",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    let games_bytes: u64 = conn
+        .query_row(
+            "SELECT COALESCE(
+                SUM(LENGTH(pgn) + LENGTH(white) + LENGTH(black) + LENGTH(result)
+                    + LENGTH(engine_tier) + LENGTH(mode) + LENGTH(review_json)),
+                0
+             )
+             FROM games",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(StorageStats {
+        cache_bytes,
+        games_bytes,
+        db_bytes: 0,
+    })
+}
+
 #[tauri::command]
 pub fn games_save(state: tauri::State<'_, DbState>, game: NewGame) -> Result<i64, String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
@@ -337,6 +389,39 @@ pub fn games_get(state: tauri::State<'_, DbState>, id: i64) -> Result<Option<Sto
 pub fn games_delete(state: tauri::State<'_, DbState>, id: i64) -> Result<(), String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
     remove_game(&conn, id)
+}
+
+#[tauri::command]
+pub fn cache_clear(state: tauri::State<'_, DbState>) -> Result<(), String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    clear_cache(&conn)
+}
+
+#[tauri::command]
+pub fn games_clear(state: tauri::State<'_, DbState>) -> Result<(), String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    clear_games(&conn)
+}
+
+/// Estatísticas de armazenamento para o painel de Configurações.
+/// `db_bytes` é o tamanho do arquivo `engineroom.db` em disco (resolvido via
+/// `app_data_dir`); `cache_bytes` e `games_bytes` somam os comprimentos das
+/// colunas de texto — aproximam o quanto cada tabela "pesa" sem depender de
+/// detalhes de paginação do SQLite.
+#[tauri::command]
+pub fn storage_stats(
+    state: tauri::State<'_, DbState>,
+    app: tauri::AppHandle,
+) -> Result<StorageStats, String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let mut stats = storage_stats(&conn)?;
+    use tauri::Manager;
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let db_bytes = std::fs::metadata(&dir.join("engineroom.db"))
+        .map(|m| m.len())
+        .unwrap_or(0);
+    stats.db_bytes = db_bytes;
+    Ok(stats)
 }
 
 fn stored_from_row(row: &rusqlite::Row<'_>) -> Result<StoredGame, String> {
@@ -637,5 +722,75 @@ mod tests {
 
         assert_eq!(lookup_game(&conn, id).unwrap(), None);
         assert!(list_games(&conn).unwrap().is_empty());
+    }
+
+    #[test]
+    fn clear_cache_esvazia_tabela_de_posicoes() {
+        let conn = open_memory().unwrap();
+        cache_store(&conn, FEN, "depth", 20, 1, 35, LINES).unwrap();
+        cache_store(&conn, FEN, "time", 5000, 1, 35, LINES).unwrap();
+        assert_eq!(
+            cache_lookup(&conn, FEN, "depth", 20, 1).unwrap().is_some(),
+            true,
+            "pré-condição: cache populado"
+        );
+
+        clear_cache(&conn).unwrap();
+
+        assert_eq!(
+            cache_lookup(&conn, FEN, "depth", 20, 1).unwrap(),
+            None,
+            "entrada depth removida"
+        );
+        assert_eq!(
+            cache_lookup(&conn, FEN, "time", 5000, 1).unwrap(),
+            None,
+            "entrada time removida"
+        );
+    }
+
+    #[test]
+    fn clear_games_esvazia_store_de_partidas() {
+        let conn = open_memory().unwrap();
+        store_game(&conn, &partida_exemplo()).unwrap();
+        let mut outra = partida_exemplo();
+        outra.pgn = "1. d4 d5".to_string();
+        store_game(&conn, &outra).unwrap();
+        assert_eq!(list_games(&conn).unwrap().len(), 2, "pré-condição");
+
+        clear_games(&conn).unwrap();
+
+        assert!(list_games(&conn).unwrap().is_empty());
+    }
+
+    #[test]
+    fn storage_stats_reporta_bytes_das_tabelas() {
+        let conn = open_memory().unwrap();
+        let vazio = storage_stats(&conn).unwrap();
+        assert_eq!(
+            vazio.cache_bytes, 0,
+            "banco vazio: cache em zero bytes"
+        );
+        assert_eq!(
+            vazio.games_bytes, 0,
+            "banco vazio: games em zero bytes"
+        );
+
+        cache_store(&conn, FEN, "depth", 20, 1, 35, LINES).unwrap();
+        store_game(&conn, &partida_exemplo()).unwrap();
+
+        let populado = storage_stats(&conn).unwrap();
+        assert!(
+            populado.cache_bytes >= (FEN.len() + LINES.len()) as u64,
+            "cache_bytes deve refletir ao menos fen + lines_json: got {}",
+            populado.cache_bytes
+        );
+        assert!(
+            populado.games_bytes
+                >= "1. e4 e5".len() as u64
+                    + r#"{"positions":[],"moves":[]}"#.len() as u64,
+            "games_bytes deve refletir ao menos pgn + review_json: got {}",
+            populado.games_bytes
+        );
     }
 }

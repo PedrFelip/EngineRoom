@@ -22,10 +22,13 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             db::cache_get,
             db::cache_put,
+            db::cache_clear,
             db::games_save,
             db::games_list,
             db::games_get,
             db::games_delete,
+            db::games_clear,
+            db::storage_stats,
             engine::engine_spawn,
             engine::engine_send,
             engine::engine_stop,
