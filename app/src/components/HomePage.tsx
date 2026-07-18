@@ -1,13 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
+import { resolveEngineTier } from '../lib/engine-tier'
 import { deleteGame, getGame, listGames, storedToConfig } from '../lib/games'
 import { parsePgn, resultLabel } from '../lib/pgn'
-import {
-  ENGINE_TIERS,
-  type EngineMode,
-  type EngineTierId,
-  type GameSummary,
-  type ReviewConfig,
-} from '../types'
+import type { EngineMode, GameSummary, ReviewConfig } from '../types'
 import EngineTierSelector, { DEFAULT_TIME_MS } from './EngineTierSelector'
 import PgnImporter from './PgnImporter'
 import ReviewedGamesList from './ReviewedGamesList'
@@ -19,7 +14,7 @@ interface Props {
 
 export default function HomePage({ onStart }: Props) {
   const [pgn, setPgn] = useState('')
-  const [tierId, setTierId] = useState<EngineTierId>('balanced')
+  const [depth, setDepth] = useState(20)
   const [mode, setMode] = useState<EngineMode>('depth')
   const [movetimeMs, setMovetimeMs] = useState<number>(DEFAULT_TIME_MS)
   const [lines, setLines] = useState(1)
@@ -27,7 +22,7 @@ export default function HomePage({ onStart }: Props) {
   const [games, setGames] = useState<GameSummary[]>([])
 
   const parse = useMemo(() => parsePgn(pgn), [pgn])
-  const engine = ENGINE_TIERS.find((t) => t.id === tierId) ?? ENGINE_TIERS[0]
+  const engine = useMemo(() => resolveEngineTier(depth), [depth])
   const canStart = parse.ok && pgn.trim().length > 0
   const plies = parse.ok ? parse.meta.plies : 0
 
@@ -188,12 +183,12 @@ export default function HomePage({ onStart }: Props) {
 
             <EngineTierSelector
               mode={mode}
-              tierId={tierId}
+              depth={depth}
               movetimeMs={movetimeMs}
               lines={lines}
               plies={plies}
               onModeChange={setMode}
-              onTierChange={(t) => setTierId(t.id)}
+              onDepthChange={setDepth}
               onMovetimeChange={setMovetimeMs}
               onLinesChange={setLines}
             />

@@ -1,18 +1,14 @@
-import {
-  ENGINE_TIERS,
-  type EngineMode,
-  type EngineTier,
-  type EngineTierId,
-} from '../types'
+import { MAX_DEPTH, MIN_DEPTH } from '../lib/engine-tier'
+import { ENGINE_TIERS, type EngineMode } from '../types'
 
 interface Props {
   mode: EngineMode
-  tierId: EngineTierId
+  depth: number
   movetimeMs: number
   lines: number
   plies: number
   onModeChange: (mode: EngineMode) => void
-  onTierChange: (tier: EngineTier) => void
+  onDepthChange: (depth: number) => void
   onMovetimeChange: (ms: number) => void
   onLinesChange: (lines: number) => void
 }
@@ -20,7 +16,7 @@ interface Props {
 const MIN_LINES = 1
 const MAX_LINES = 5
 const MIN_SECONDS = 1
-const MAX_SECONDS = 30
+const MAX_SECONDS = 10
 const DEFAULT_TIME_MS = 5000
 
 /**
@@ -41,18 +37,22 @@ function formatEta(seconds: number): string {
 
 export default function EngineTierSelector({
   mode,
-  tierId,
+  depth,
   movetimeMs,
   lines,
   plies,
   onModeChange,
-  onTierChange,
+  onDepthChange,
   onMovetimeChange,
   onLinesChange,
 }: Props) {
-  const activeIndex = ENGINE_TIERS.findIndex((t) => t.id === tierId)
-  const active = ENGINE_TIERS[activeIndex] ?? ENGINE_TIERS[1]
   const linesPct = ((lines - MIN_LINES) / (MAX_LINES - MIN_LINES)) * 100
+  const clampedDepth = Math.max(
+    MIN_DEPTH,
+    Math.min(MAX_DEPTH, Math.round(depth)),
+  )
+  const depthPct = ((clampedDepth - MIN_DEPTH) / (MAX_DEPTH - MIN_DEPTH)) * 100
+  const matchedTier = ENGINE_TIERS.find((t) => t.depth === clampedDepth)
   const seconds = Math.max(
     MIN_SECONDS,
     Math.min(MAX_SECONDS, Math.round(movetimeMs / 1000)),
@@ -98,55 +98,56 @@ export default function EngineTierSelector({
               Qualidade da engine
             </h3>
             <span className='font-mono text-3xl font-bold tabular-nums text-brand'>
-              d{active.depth}
+              d{clampedDepth}
             </span>
           </div>
           <input
             type='range'
-            min={0}
-            max={ENGINE_TIERS.length - 1}
+            min={MIN_DEPTH}
+            max={MAX_DEPTH}
             step={1}
-            value={activeIndex}
-            onChange={(e) =>
-              onTierChange(ENGINE_TIERS[Number(e.currentTarget.value)])
-            }
+            value={clampedDepth}
+            onChange={(e) => onDepthChange(Number(e.currentTarget.value))}
             aria-label='Profundidade'
             className='engine-range w-full'
             style={{
-              background: `linear-gradient(to right, var(--color-brand) 0%, var(--color-brand) ${
-                (activeIndex / (ENGINE_TIERS.length - 1)) * 100
-              }%, var(--color-panel-3) ${
-                (activeIndex / (ENGINE_TIERS.length - 1)) * 100
-              }%, var(--color-panel-3) 100%)`,
+              background: `linear-gradient(to right, var(--color-brand) 0%, var(--color-brand) ${depthPct}%, var(--color-panel-3) ${depthPct}%, var(--color-panel-3) 100%)`,
             }}
           />
+          <div className='mt-2 flex justify-between font-mono text-[11px] text-ink-faint'>
+            <span>d{MIN_DEPTH}</span>
+            <span>d{MAX_DEPTH}</span>
+          </div>
           <div className='mt-3 grid grid-cols-3 gap-1'>
-            {ENGINE_TIERS.map((tier, i) => (
-              <button
-                key={tier.id}
-                type='button'
-                onClick={() => onTierChange(tier)}
-                className={`rounded-lg px-2 py-2 text-center transition ${
-                  i === activeIndex
-                    ? 'bg-brand/15 ring-1 ring-brand/50'
-                    : 'hover:bg-panel-3/50'
-                }`}
-              >
-                <div
-                  className={`text-sm font-semibold ${
-                    i === activeIndex ? 'text-brand' : 'text-ink'
+            {ENGINE_TIERS.map((tier) => {
+              const activeTier = tier.depth === clampedDepth
+              return (
+                <button
+                  key={tier.id}
+                  type='button'
+                  onClick={() => onDepthChange(tier.depth)}
+                  className={`rounded-lg px-2 py-2 text-center transition ${
+                    activeTier
+                      ? 'bg-brand/15 ring-1 ring-brand/50'
+                      : 'hover:bg-panel-3/50'
                   }`}
                 >
-                  {tier.label}
-                </div>
-                <div className='font-mono text-[11px] text-ink-faint'>
-                  d{tier.depth}
-                </div>
-              </button>
-            ))}
+                  <div
+                    className={`text-sm font-semibold ${
+                      activeTier ? 'text-brand' : 'text-ink'
+                    }`}
+                  >
+                    {tier.label}
+                  </div>
+                  <div className='font-mono text-[11px] text-ink-faint'>
+                    d{tier.depth}
+                  </div>
+                </button>
+              )
+            })}
           </div>
           <p className='mt-3 min-h-[1.25rem] text-center text-xs text-ink-dim'>
-            {active.hint}
+            {matchedTier?.hint ?? `Profundidade fixa em d${clampedDepth}.`}
           </p>
         </>
       ) : (

@@ -1,12 +1,12 @@
 import { invoke } from '@tauri-apps/api/core'
-import {
-  ENGINE_TIERS,
-  type GameSummary,
-  type PgnMeta,
-  type ReviewConfig,
-  type ReviewResult,
-  type StoredGame,
+import type {
+  GameSummary,
+  PgnMeta,
+  ReviewConfig,
+  ReviewResult,
+  StoredGame,
 } from '../types'
+import { resolveEngineTier } from './engine-tier'
 import { parsePgn } from './pgn'
 
 /** Lista as partidas analisadas, da mais recente para a mais antiga. */
@@ -62,11 +62,7 @@ export function storedToConfig(game: StoredGame): ReviewConfig {
   const mode = game.mode ?? 'depth'
   const movetimeMs = mode === 'time' ? game.depth : undefined
   const engine =
-    mode === 'depth'
-      ? (ENGINE_TIERS.find((t) => t.id === game.engineTier) ??
-        ENGINE_TIERS.find((t) => t.depth === game.depth) ??
-        ENGINE_TIERS[1])
-      : (ENGINE_TIERS.find((t) => t.id === game.engineTier) ?? ENGINE_TIERS[1])
+    mode === 'depth' ? resolveEngineTier(game.depth) : resolveEngineTier(20)
 
   const parsed = parsePgn(game.pgn)
   const meta: PgnMeta = parsed.ok

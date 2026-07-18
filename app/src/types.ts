@@ -1,4 +1,4 @@
-export type EngineTierId = 'fast' | 'balanced' | 'deep'
+export type EngineTierId = 'fast' | 'balanced' | 'deep' | 'custom'
 
 /** Modo de análise: profundidade fixa ou tempo fixo por lance. */
 export type EngineMode = 'depth' | 'time'
