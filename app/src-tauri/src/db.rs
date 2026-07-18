@@ -1,9 +1,11 @@
 //! Persistência SQLite: cache de posições avaliadas pelo engine e store de
 //! partidas revisadas.
 //!
-//! O cache é chaveado por (fen, depth, multipv) — chave exata: uma análise só
-//! reutiliza uma posição se os três parâmetros baterem. `lines_json` guarda as
-//! linhas candidatas no formato do frontend (`[{multipv, cp, pv, san}]`).
+//! O cache é chaveado por (fen, mode, depth, multipv) — chave exata: uma
+//! análise só reutiliza uma posição se os quatro parâmetros baterem. `mode`
+//! é `"depth"` (profundidade fixa, `depth` = ply alvo) ou `"time"` (tempo
+//! fixo por lance, `depth` = milissegundos). `lines_json` guarda as linhas
+//! candidatas no formato do frontend (`[{multipv, cp, pv, san}]`).
 
 use rusqlite::Connection;
 use std::path::Path;
@@ -25,11 +27,12 @@ fn migrate(conn: &Connection) -> Result<(), String> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS position_cache (
             fen TEXT NOT NULL,
+            mode TEXT NOT NULL DEFAULT 'depth',
             depth INTEGER NOT NULL,
             multipv INTEGER NOT NULL,
             cp INTEGER NOT NULL,
             lines_json TEXT NOT NULL,
-            PRIMARY KEY (fen, depth, multipv)
+            PRIMARY KEY (fen, mode, depth, multipv)
         );
         CREATE TABLE IF NOT EXISTS games (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -47,6 +50,49 @@ fn migrate(conn: &Connection) -> Result<(), String> {
             created_at TEXT NOT NULL DEFAULT (datetime('now')),
             UNIQUE (pgn, depth, multipv)
         );",
+    )
+    .map_err(|e| e.to_string())?;
+    migrate_position_cache_mode(conn)
+}
+
+/// Migração do `position_cache` para incluir a coluna `mode` (depth | time) na
+/// chave primária. Idempotente: detecta (via `PRAGMA table_info`) se a coluna
+/// já existe; se não, recria a tabela com o novo esquema copiando as linhas
+/// antigas (que recebem `mode='depth'` por herança do DEFAULT).
+fn migrate_position_cache_mode(conn: &Connection) -> Result<(), String> {
+    let has_mode = {
+        let mut stmt = conn
+            .prepare("PRAGMA table_info(position_cache)")
+            .map_err(|e| e.to_string())?;
+        let mut rows = stmt.query(()).map_err(|e| e.to_string())?;
+        let mut found = false;
+        while let Some(row) = rows.next().map_err(|e| e.to_string())? {
+            let name: String = row.get(1).map_err(|e| e.to_string())?;
+            if name == "mode" {
+                found = true;
+                break;
+            }
+        }
+        found
+    };
+    if has_mode {
+        return Ok(());
+    }
+
+    conn.execute_batch(
+        "ALTER TABLE position_cache RENAME TO position_cache_old;
+         CREATE TABLE position_cache (
+            fen TEXT NOT NULL,
+            mode TEXT NOT NULL DEFAULT 'depth',
+            depth INTEGER NOT NULL,
+            multipv INTEGER NOT NULL,
+            cp INTEGER NOT NULL,
+            lines_json TEXT NOT NULL,
+            PRIMARY KEY (fen, mode, depth, multipv)
+         );
+         INSERT INTO position_cache (fen, mode, depth, multipv, cp, lines_json)
+            SELECT fen, 'depth', depth, multipv, cp, lines_json FROM position_cache_old;
+         DROP TABLE position_cache_old;",
     )
     .map_err(|e| e.to_string())
 }
@@ -69,24 +115,26 @@ pub fn open_file(path: &Path) -> Result<Connection, String> {
 pub fn cache_get(
     state: tauri::State<'_, DbState>,
     fen: &str,
+    mode: String,
     depth: u32,
     multipv: u32,
 ) -> Result<Option<CachedPosition>, String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
-    cache_lookup(&conn, fen, depth, multipv)
+    cache_lookup(&conn, fen, &mode, depth, multipv)
 }
 
 #[tauri::command]
 pub fn cache_put(
     state: tauri::State<'_, DbState>,
     fen: &str,
+    mode: String,
     depth: u32,
     multipv: u32,
     cp: i32,
     lines_json: &str,
 ) -> Result<(), String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
-    cache_store(&conn, fen, depth, multipv, cp, lines_json)
+    cache_store(&conn, fen, &mode, depth, multipv, cp, lines_json)
 }
 
 /// Partida revisada a gravar (payload do frontend, sem id/created_at).
@@ -245,15 +293,16 @@ fn stored_from_row(row: &rusqlite::Row<'_>) -> Result<StoredGame, String> {
 fn cache_store(
     conn: &Connection,
     fen: &str,
+    mode: &str,
     depth: u32,
     multipv: u32,
     cp: i32,
     lines_json: &str,
 ) -> Result<(), String> {
     conn.execute(
-        "INSERT OR REPLACE INTO position_cache (fen, depth, multipv, cp, lines_json)
-         VALUES (?1, ?2, ?3, ?4, ?5)",
-        (fen, depth, multipv, cp, lines_json),
+        "INSERT OR REPLACE INTO position_cache (fen, mode, depth, multipv, cp, lines_json)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        (fen, mode, depth, multipv, cp, lines_json),
     )
     .map_err(|e| e.to_string())?;
     Ok(())
@@ -262,13 +311,16 @@ fn cache_store(
 fn cache_lookup(
     conn: &Connection,
     fen: &str,
+    mode: &str,
     depth: u32,
     multipv: u32,
 ) -> Result<Option<CachedPosition>, String> {
     let mut stmt = conn
-        .prepare("SELECT cp, lines_json FROM position_cache WHERE fen = ?1 AND depth = ?2 AND multipv = ?3")
+        .prepare("SELECT cp, lines_json FROM position_cache WHERE fen = ?1 AND mode = ?2 AND depth = ?3 AND multipv = ?4")
         .map_err(|e| e.to_string())?;
-    let mut rows = stmt.query((fen, depth, multipv)).map_err(|e| e.to_string())?;
+    let mut rows = stmt
+        .query((fen, mode, depth, multipv))
+        .map_err(|e| e.to_string())?;
     match rows.next().map_err(|e| e.to_string())? {
         Some(row) => Ok(Some(CachedPosition {
             cp: row.get(0).map_err(|e| e.to_string())?,
@@ -288,9 +340,9 @@ mod tests {
     #[test]
     fn cache_put_depois_get_devolve_posicao_armazenada() {
         let conn = open_memory().unwrap();
-        cache_store(&conn, FEN, 20, 1, 35, LINES).unwrap();
+        cache_store(&conn, FEN, "depth", 20, 1, 35, LINES).unwrap();
 
-        let hit = cache_lookup(&conn, FEN, 20, 1).unwrap();
+        let hit = cache_lookup(&conn, FEN, "depth", 20, 1).unwrap();
 
         assert_eq!(
             hit,
@@ -305,29 +357,74 @@ mod tests {
     fn cache_get_em_posicao_desconhecida_devolve_none() {
         let conn = open_memory().unwrap();
 
-        assert_eq!(cache_lookup(&conn, FEN, 20, 1).unwrap(), None);
+        assert_eq!(cache_lookup(&conn, FEN, "depth", 20, 1).unwrap(), None);
     }
 
     #[test]
     fn cache_so_reutiliza_com_depth_e_multipv_exatos() {
         let conn = open_memory().unwrap();
-        cache_store(&conn, FEN, 20, 1, 35, LINES).unwrap();
+        cache_store(&conn, FEN, "depth", 20, 1, 35, LINES).unwrap();
 
-        assert_eq!(cache_lookup(&conn, FEN, 15, 1).unwrap(), None, "depth menor");
-        assert_eq!(cache_lookup(&conn, FEN, 25, 1).unwrap(), None, "depth maior");
-        assert_eq!(cache_lookup(&conn, FEN, 20, 3).unwrap(), None, "multipv diferente");
+        assert_eq!(
+            cache_lookup(&conn, FEN, "depth", 15, 1).unwrap(),
+            None,
+            "depth menor"
+        );
+        assert_eq!(
+            cache_lookup(&conn, FEN, "depth", 25, 1).unwrap(),
+            None,
+            "depth maior"
+        );
+        assert_eq!(
+            cache_lookup(&conn, FEN, "depth", 20, 3).unwrap(),
+            None,
+            "multipv diferente"
+        );
     }
 
     #[test]
     fn cache_put_repetido_sobrescreve_entrada() {
         let conn = open_memory().unwrap();
-        cache_store(&conn, FEN, 20, 1, 35, LINES).unwrap();
-        cache_store(&conn, FEN, 20, 1, 42, "[]").unwrap();
+        cache_store(&conn, FEN, "depth", 20, 1, 35, LINES).unwrap();
+        cache_store(&conn, FEN, "depth", 20, 1, 42, "[]").unwrap();
 
-        let hit = cache_lookup(&conn, FEN, 20, 1).unwrap().unwrap();
+        let hit = cache_lookup(&conn, FEN, "depth", 20, 1).unwrap().unwrap();
 
         assert_eq!(hit.cp, 42);
         assert_eq!(hit.lines_json, "[]");
+    }
+
+    #[test]
+    fn cache_store_com_mode_time_faz_round_trip() {
+        let conn = open_memory().unwrap();
+        cache_store(&conn, FEN, "time", 5000, 1, 35, LINES).unwrap();
+
+        let hit = cache_lookup(&conn, FEN, "time", 5000, 1).unwrap();
+
+        assert_eq!(
+            hit,
+            Some(CachedPosition {
+                cp: 35,
+                lines_json: LINES.to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn cache_nao_cruza_modos_mesmo_com_mesmo_valor_numerico() {
+        let conn = open_memory().unwrap();
+        cache_store(&conn, FEN, "depth", 20, 1, 35, LINES).unwrap();
+
+        // Mesma FEN, mesmo valor numérico (20), mas mode='time' → miss.
+        let cruzado = cache_lookup(&conn, FEN, "time", 20, 1).unwrap();
+        assert_eq!(cruzado, None);
+
+        // E vice-versa: gravar em 'time' não polui 'depth'.
+        cache_store(&conn, FEN, "time", 20, 1, 42, "[]").unwrap();
+        let depth_hit = cache_lookup(&conn, FEN, "depth", 20, 1).unwrap().unwrap();
+        assert_eq!(depth_hit.cp, 35, "depth preservado");
+        let time_hit = cache_lookup(&conn, FEN, "time", 20, 1).unwrap().unwrap();
+        assert_eq!(time_hit.cp, 42, "time gravado separadamente");
     }
 
     fn partida_exemplo() -> NewGame {
