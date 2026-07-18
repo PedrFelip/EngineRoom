@@ -1,9 +1,11 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import PgnImporter from "./PgnImporter";
 import EngineDepthSlider from "./EngineDepthSlider";
 import SettingsModal from "./SettingsModal";
+import ReviewedGamesList from "./ReviewedGamesList";
 import { parsePgn, resultLabel } from "../lib/pgn";
-import { ENGINE_TIERS, type EngineTierId, type ReviewConfig } from "../types";
+import { deleteGame, getGame, listGames, storedToConfig } from "../lib/games";
+import { ENGINE_TIERS, type EngineTierId, type GameSummary, type ReviewConfig } from "../types";
 
 interface Props {
   onStart: (config: ReviewConfig) => void;
@@ -14,10 +16,45 @@ export default function HomePage({ onStart }: Props) {
   const [tierId, setTierId] = useState<EngineTierId>("balanced");
   const [lines, setLines] = useState(1);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [games, setGames] = useState<GameSummary[]>([]);
 
   const parse = useMemo(() => parsePgn(pgn), [pgn]);
   const engine = ENGINE_TIERS.find((t) => t.id === tierId)!;
   const canStart = parse.ok && pgn.trim().length > 0;
+
+  useEffect(() => {
+    let cancelled = false;
+    listGames()
+      .then((g) => !cancelled && setGames(g))
+      .catch((e) => console.warn("Falha ao listar partidas analisadas:", e));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const openStored = async (id: number) => {
+    const game = await getGame(id).catch((e) => {
+      console.warn("Falha ao abrir partida:", e);
+      return null;
+    });
+    if (game) onStart(storedToConfig(game));
+  };
+
+  const removeStored = async (id: number) => {
+    await deleteGame(id).catch((e) => console.warn("Falha ao excluir partida:", e));
+    setGames((prev) => prev.filter((g) => g.id !== id));
+  };
+
+  const reanalyzeStored = async (id: number) => {
+    const game = await getGame(id).catch((e) => {
+      console.warn("Falha ao carregar partida:", e);
+      return null;
+    });
+    if (game) {
+      setPgn(game.pgn);
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  };
 
   return (
     <div className="flex min-h-full flex-col items-center px-4 py-10">
