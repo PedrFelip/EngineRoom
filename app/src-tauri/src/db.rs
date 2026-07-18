@@ -339,7 +339,7 @@ fn clear_games(conn: &Connection) -> Result<(), String> {
     Ok(())
 }
 
-fn storage_stats(conn: &Connection) -> Result<StorageStats, String> {
+fn compute_storage_stats(conn: &Connection) -> Result<StorageStats, String> {
     let cache_bytes: u64 = conn
         .query_row(
             "SELECT COALESCE(SUM(LENGTH(fen) + LENGTH(mode) + LENGTH(lines_json)), 0)
@@ -414,7 +414,7 @@ pub fn storage_stats(
     app: tauri::AppHandle,
 ) -> Result<StorageStats, String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
-    let mut stats = storage_stats(&conn)?;
+    let mut stats = compute_storage_stats(&conn)?;
     use tauri::Manager;
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     let db_bytes = std::fs::metadata(&dir.join("engineroom.db"))
@@ -766,7 +766,7 @@ mod tests {
     #[test]
     fn storage_stats_reporta_bytes_das_tabelas() {
         let conn = open_memory().unwrap();
-        let vazio = storage_stats(&conn).unwrap();
+        let vazio = compute_storage_stats(&conn).unwrap();
         assert_eq!(
             vazio.cache_bytes, 0,
             "banco vazio: cache em zero bytes"
@@ -779,7 +779,7 @@ mod tests {
         cache_store(&conn, FEN, "depth", 20, 1, 35, LINES).unwrap();
         store_game(&conn, &partida_exemplo()).unwrap();
 
-        let populado = storage_stats(&conn).unwrap();
+        let populado = compute_storage_stats(&conn).unwrap();
         assert!(
             populado.cache_bytes >= (FEN.len() + LINES.len()) as u64,
             "cache_bytes deve refletir ao menos fen + lines_json: got {}",
