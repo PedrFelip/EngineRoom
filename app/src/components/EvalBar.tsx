@@ -23,7 +23,7 @@ export default function EvalBar({ winPct, orientation = "white", label }: EvalBa
       style={{ backgroundColor: "#262421" }}
     >
       <div
-        className="absolute left-0 right-0 bg-white transition-[height,top,bottom] duration-300 ease-out"
+        className="absolute left-0 right-0 bg-white transition-[height,top,bottom] duration-700 ease-[cubic-bezier(0.25,0.1,0.25,1)]"
         style={
           whiteAtBottom
             ? { bottom: 0, height: `${clamped}%` }
