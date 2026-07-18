@@ -51,6 +51,7 @@ fn migrate(conn: &Connection) -> Result<(), String> {
     .map_err(|e| e.to_string())
 }
 
+#[cfg(test)]
 pub fn open_memory() -> Result<Connection, String> {
     let conn = Connection::open_in_memory().map_err(|e| e.to_string())?;
     migrate(&conn)?;
@@ -197,6 +198,36 @@ fn lookup_game(conn: &Connection, id: i64) -> Result<Option<StoredGame>, String>
         Some(row) => Ok(Some(stored_from_row(row)?)),
         None => Ok(None),
     }
+}
+
+fn remove_game(conn: &Connection, id: i64) -> Result<(), String> {
+    conn.execute("DELETE FROM games WHERE id = ?1", (id,))
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn games_save(state: tauri::State<'_, DbState>, game: NewGame) -> Result<i64, String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    store_game(&conn, &game)
+}
+
+#[tauri::command]
+pub fn games_list(state: tauri::State<'_, DbState>) -> Result<Vec<GameSummary>, String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    list_games(&conn)
+}
+
+#[tauri::command]
+pub fn games_get(state: tauri::State<'_, DbState>, id: i64) -> Result<Option<StoredGame>, String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    lookup_game(&conn, id)
+}
+
+#[tauri::command]
+pub fn games_delete(state: tauri::State<'_, DbState>, id: i64) -> Result<(), String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    remove_game(&conn, id)
 }
 
 fn stored_from_row(row: &rusqlite::Row<'_>) -> Result<StoredGame, String> {
@@ -356,5 +387,33 @@ mod tests {
         assert_eq!(lista.len(), 2);
         assert_eq!(lista[0].white, "Recente");
         assert_eq!(lista[1].white, "Antiga");
+    }
+
+    #[test]
+    fn reanalise_com_mesma_chave_substitui_entrada() {
+        let conn = open_memory().unwrap();
+        store_game(&conn, &partida_exemplo()).unwrap();
+        let mut nova = partida_exemplo();
+        nova.accuracy_white = 100.0;
+        nova.review_json = r#"{"nova":true}"#.to_string();
+
+        let id = store_game(&conn, &nova).unwrap();
+
+        let lista = list_games(&conn).unwrap();
+        assert_eq!(lista.len(), 1);
+        assert_eq!(lista[0].accuracy_white, 100.0);
+        let game = lookup_game(&conn, id).unwrap().unwrap();
+        assert_eq!(game.review_json, r#"{"nova":true}"#);
+    }
+
+    #[test]
+    fn delete_remove_partida_do_store() {
+        let conn = open_memory().unwrap();
+        let id = store_game(&conn, &partida_exemplo()).unwrap();
+
+        remove_game(&conn, id).unwrap();
+
+        assert_eq!(lookup_game(&conn, id).unwrap(), None);
+        assert!(list_games(&conn).unwrap().is_empty());
     }
 }
