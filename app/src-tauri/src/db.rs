@@ -42,17 +42,19 @@ fn migrate(conn: &Connection) -> Result<(), String> {
             result TEXT NOT NULL,
             plies INTEGER NOT NULL,
             engine_tier TEXT NOT NULL,
+            mode TEXT NOT NULL DEFAULT 'depth',
             depth INTEGER NOT NULL,
             multipv INTEGER NOT NULL,
             accuracy_white REAL NOT NULL,
             accuracy_black REAL NOT NULL,
             review_json TEXT NOT NULL,
             created_at TEXT NOT NULL DEFAULT (datetime('now')),
-            UNIQUE (pgn, depth, multipv)
+            UNIQUE (pgn, mode, depth, multipv)
         );",
     )
     .map_err(|e| e.to_string())?;
-    migrate_position_cache_mode(conn)
+    migrate_position_cache_mode(conn)?;
+    migrate_games_mode(conn)
 }
 
 /// Migração do `position_cache` para incluir a coluna `mode` (depth | time) na
@@ -93,6 +95,57 @@ fn migrate_position_cache_mode(conn: &Connection) -> Result<(), String> {
          INSERT INTO position_cache (fen, mode, depth, multipv, cp, lines_json)
             SELECT fen, 'depth', depth, multipv, cp, lines_json FROM position_cache_old;
          DROP TABLE position_cache_old;",
+    )
+    .map_err(|e| e.to_string())
+}
+
+/// Migração análoga para a tabela `games`: adiciona `mode` à chave UNIQUE,
+/// permitindo reanalisar a mesma PGN em modos diferentes (depth vs time).
+fn migrate_games_mode(conn: &Connection) -> Result<(), String> {
+    let has_mode = {
+        let mut stmt = conn
+            .prepare("PRAGMA table_info(games)")
+            .map_err(|e| e.to_string())?;
+        let mut rows = stmt.query(()).map_err(|e| e.to_string())?;
+        let mut found = false;
+        while let Some(row) = rows.next().map_err(|e| e.to_string())? {
+            let name: String = row.get(1).map_err(|e| e.to_string())?;
+            if name == "mode" {
+                found = true;
+                break;
+            }
+        }
+        found
+    };
+    if has_mode {
+        return Ok(());
+    }
+
+    conn.execute_batch(
+        "ALTER TABLE games RENAME TO games_old;
+         CREATE TABLE games (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            pgn TEXT NOT NULL,
+            white TEXT NOT NULL,
+            black TEXT NOT NULL,
+            result TEXT NOT NULL,
+            plies INTEGER NOT NULL,
+            engine_tier TEXT NOT NULL,
+            mode TEXT NOT NULL DEFAULT 'depth',
+            depth INTEGER NOT NULL,
+            multipv INTEGER NOT NULL,
+            accuracy_white REAL NOT NULL,
+            accuracy_black REAL NOT NULL,
+            review_json TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            UNIQUE (pgn, mode, depth, multipv)
+         );
+         INSERT INTO games (id, pgn, white, black, result, plies, engine_tier, mode,
+                depth, multipv, accuracy_white, accuracy_black, review_json, created_at)
+            SELECT id, pgn, white, black, result, plies, engine_tier, 'depth',
+                depth, multipv, accuracy_white, accuracy_black, review_json, created_at
+            FROM games_old;
+         DROP TABLE games_old;",
     )
     .map_err(|e| e.to_string())
 }
@@ -147,6 +200,7 @@ pub struct NewGame {
     pub result: String,
     pub plies: u32,
     pub engine_tier: String,
+    pub mode: String,
     pub depth: u32,
     pub multipv: u32,
     pub accuracy_white: f64,
@@ -164,6 +218,7 @@ pub struct GameSummary {
     pub result: String,
     pub plies: u32,
     pub engine_tier: String,
+    pub mode: String,
     pub depth: u32,
     pub multipv: u32,
     pub accuracy_white: f64,
@@ -184,9 +239,9 @@ pub struct StoredGame {
 fn store_game(conn: &Connection, game: &NewGame) -> Result<i64, String> {
     conn.execute(
         "INSERT OR REPLACE INTO games
-            (pgn, white, black, result, plies, engine_tier, depth, multipv,
+            (pgn, white, black, result, plies, engine_tier, mode, depth, multipv,
              accuracy_white, accuracy_black, review_json)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
         (
             &game.pgn,
             &game.white,
@@ -194,6 +249,7 @@ fn store_game(conn: &Connection, game: &NewGame) -> Result<i64, String> {
             &game.result,
             game.plies,
             &game.engine_tier,
+            &game.mode,
             game.depth,
             game.multipv,
             game.accuracy_white,
@@ -205,10 +261,10 @@ fn store_game(conn: &Connection, game: &NewGame) -> Result<i64, String> {
     Ok(conn.last_insert_rowid())
 }
 
-const SUMMARY_COLS: &str = "id, white, black, result, plies, engine_tier, depth, multipv,
+const SUMMARY_COLS: &str = "id, white, black, result, plies, engine_tier, mode, depth, multipv,
         accuracy_white, accuracy_black, created_at";
 
-/// Mapeia as 11 primeiras colunas (ordem de SUMMARY_COLS) para GameSummary.
+/// Mapeia as colunas (ordem de SUMMARY_COLS) para GameSummary.
 fn summary_from_row(row: &rusqlite::Row<'_>) -> Result<GameSummary, String> {
     Ok(GameSummary {
         id: row.get(0).map_err(|e| e.to_string())?,
@@ -217,11 +273,12 @@ fn summary_from_row(row: &rusqlite::Row<'_>) -> Result<GameSummary, String> {
         result: row.get(3).map_err(|e| e.to_string())?,
         plies: row.get(4).map_err(|e| e.to_string())?,
         engine_tier: row.get(5).map_err(|e| e.to_string())?,
-        depth: row.get(6).map_err(|e| e.to_string())?,
-        multipv: row.get(7).map_err(|e| e.to_string())?,
-        accuracy_white: row.get(8).map_err(|e| e.to_string())?,
-        accuracy_black: row.get(9).map_err(|e| e.to_string())?,
-        created_at: row.get(10).map_err(|e| e.to_string())?,
+        mode: row.get(6).map_err(|e| e.to_string())?,
+        depth: row.get(7).map_err(|e| e.to_string())?,
+        multipv: row.get(8).map_err(|e| e.to_string())?,
+        accuracy_white: row.get(9).map_err(|e| e.to_string())?,
+        accuracy_black: row.get(10).map_err(|e| e.to_string())?,
+        created_at: row.get(11).map_err(|e| e.to_string())?,
     })
 }
 
@@ -285,8 +342,8 @@ pub fn games_delete(state: tauri::State<'_, DbState>, id: i64) -> Result<(), Str
 fn stored_from_row(row: &rusqlite::Row<'_>) -> Result<StoredGame, String> {
     Ok(StoredGame {
         summary: summary_from_row(row)?,
-        pgn: row.get(11).map_err(|e| e.to_string())?,
-        review_json: row.get(12).map_err(|e| e.to_string())?,
+        pgn: row.get(12).map_err(|e| e.to_string())?,
+        review_json: row.get(13).map_err(|e| e.to_string())?,
     })
 }
 
@@ -427,6 +484,47 @@ mod tests {
         assert_eq!(time_hit.cp, 42, "time gravado separadamente");
     }
 
+    #[test]
+    fn migracao_adiciona_coluna_mode_preservando_dados_de_depth() {
+        // Banco "antigo": criado sem a coluna `mode`, populado antes da migrate().
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE position_cache (
+                fen TEXT NOT NULL,
+                depth INTEGER NOT NULL,
+                multipv INTEGER NOT NULL,
+                cp INTEGER NOT NULL,
+                lines_json TEXT NOT NULL,
+                PRIMARY KEY (fen, depth, multipv)
+             );",
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO position_cache (fen, depth, multipv, cp, lines_json)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            (FEN, 20, 1, 35, LINES),
+        )
+        .unwrap();
+
+        // Roda a migração em cima do banco já populado.
+        migrate(&conn).unwrap();
+
+        // Dado antigo continua acessível como mode='depth'.
+        let hit = cache_lookup(&conn, FEN, "depth", 20, 1).unwrap();
+        assert_eq!(
+            hit,
+            Some(CachedPosition {
+                cp: 35,
+                lines_json: LINES.to_string(),
+            })
+        );
+
+        // Migração é idempotente: rodar de novo não quebra nem duplica.
+        migrate(&conn).unwrap();
+        let hit2 = cache_lookup(&conn, FEN, "depth", 20, 1).unwrap();
+        assert_eq!(hit, hit2);
+    }
+
     fn partida_exemplo() -> NewGame {
         NewGame {
             pgn: "1. e4 e5".to_string(),
@@ -435,12 +533,47 @@ mod tests {
             result: "1-0".to_string(),
             plies: 2,
             engine_tier: "balanced".to_string(),
+            mode: "depth".to_string(),
             depth: 20,
             multipv: 1,
             accuracy_white: 98.5,
             accuracy_black: 91.0,
             review_json: r#"{"positions":[],"moves":[]}"#.to_string(),
         }
+    }
+
+    #[test]
+    fn partida_salva_em_modo_time_preserva_mode_e_movetime() {
+        let conn = open_memory().unwrap();
+        let mut game = partida_exemplo();
+        game.engine_tier = "time".to_string();
+        game.mode = "time".to_string();
+        game.depth = 5000; // movetimeMs
+        game.multipv = 3;
+        let id = store_game(&conn, &game).unwrap();
+
+        let recovered = lookup_game(&conn, id).unwrap().unwrap();
+
+        assert_eq!(recovered.summary.mode, "time");
+        assert_eq!(recovered.summary.depth, 5000);
+        assert_eq!(recovered.summary.multipv, 3);
+    }
+
+    #[test]
+    fn partida_em_modo_time_coexiste_com_depth_na_mesma_pgn() {
+        let conn = open_memory().unwrap();
+        let mut depth_game = partida_exemplo();
+        depth_game.pgn = "1. d4 d5".to_string();
+        store_game(&conn, &depth_game).unwrap();
+
+        let mut time_game = partida_exemplo();
+        time_game.pgn = "1. d4 d5".to_string();
+        time_game.mode = "time".to_string();
+        time_game.depth = 3000;
+        store_game(&conn, &time_game).unwrap();
+
+        let lista = list_games(&conn).unwrap();
+        assert_eq!(lista.len(), 2, "mesma PGN, modos diferentes = 2 entradas");
     }
 
     #[test]
