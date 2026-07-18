@@ -3,11 +3,12 @@ import { deleteGame, getGame, listGames, storedToConfig } from '../lib/games'
 import { parsePgn, resultLabel } from '../lib/pgn'
 import {
   ENGINE_TIERS,
+  type EngineMode,
   type EngineTierId,
   type GameSummary,
   type ReviewConfig,
 } from '../types'
-import EngineDepthSlider from './EngineDepthSlider'
+import EngineTierSelector, { DEFAULT_TIME_MS } from './EngineTierSelector'
 import PgnImporter from './PgnImporter'
 import ReviewedGamesList from './ReviewedGamesList'
 import SettingsModal from './SettingsModal'
@@ -19,6 +20,8 @@ interface Props {
 export default function HomePage({ onStart }: Props) {
   const [pgn, setPgn] = useState('')
   const [tierId, setTierId] = useState<EngineTierId>('balanced')
+  const [mode, setMode] = useState<EngineMode>('depth')
+  const [movetimeMs, setMovetimeMs] = useState<number>(DEFAULT_TIME_MS)
   const [lines, setLines] = useState(1)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [games, setGames] = useState<GameSummary[]>([])
@@ -26,6 +29,7 @@ export default function HomePage({ onStart }: Props) {
   const parse = useMemo(() => parsePgn(pgn), [pgn])
   const engine = ENGINE_TIERS.find((t) => t.id === tierId) ?? ENGINE_TIERS[0]
   const canStart = parse.ok && pgn.trim().length > 0
+  const plies = parse.ok ? parse.meta.plies : 0
 
   useEffect(() => {
     let cancelled = false
@@ -182,10 +186,15 @@ export default function HomePage({ onStart }: Props) {
 
             <div className='my-5 h-px bg-edge-soft' />
 
-            <EngineDepthSlider
-              value={tierId}
-              onChange={(t) => setTierId(t.id)}
+            <EngineTierSelector
+              mode={mode}
+              tierId={tierId}
+              movetimeMs={movetimeMs}
               lines={lines}
+              plies={plies}
+              onModeChange={setMode}
+              onTierChange={(t) => setTierId(t.id)}
+              onMovetimeChange={setMovetimeMs}
               onLinesChange={setLines}
             />
 
@@ -198,6 +207,8 @@ export default function HomePage({ onStart }: Props) {
                   pgn,
                   meta: parse.meta,
                   engine,
+                  mode,
+                  ...(mode === 'time' ? { movetimeMs } : {}),
                   lines,
                 })
               }

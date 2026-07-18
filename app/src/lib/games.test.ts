@@ -16,6 +16,7 @@ function stored(overrides: Partial<StoredGame> = {}): StoredGame {
     result: '1-0',
     plies: 2,
     engineTier: 'deep',
+    mode: 'depth',
     depth: 25,
     multipv: 2,
     accuracyWhite: 98.5,
@@ -32,6 +33,7 @@ describe('storedToConfig', () => {
     const config = storedToConfig(stored())
 
     expect(config.engine.id).toBe('deep')
+    expect(config.mode).toBe('depth')
     expect(config.lines).toBe(2)
     expect(config.initialResult).toEqual(REVIEW)
     expect(config.meta.white).toBe('Brancas')
@@ -43,5 +45,15 @@ describe('storedToConfig', () => {
     const config = storedToConfig(stored({ engineTier: 'legado', depth: 15 }))
 
     expect(config.engine.id).toBe('fast')
+  })
+
+  it('reabre partida em modo time com movetimeMs lido do campo depth', () => {
+    const config = storedToConfig(
+      stored({ mode: 'time', engineTier: 'time', depth: 5000 }),
+    )
+
+    expect(config.mode).toBe('time')
+    expect(config.movetimeMs).toBe(5000)
+    expect(config.initialResult).toEqual(REVIEW)
   })
 })

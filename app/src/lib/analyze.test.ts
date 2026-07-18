@@ -239,7 +239,11 @@ function fakePort(
 describe('analyzeGame', () => {
   it('aciona o engine por ply e devolve a revisão', async () => {
     const port = fakePort(() => ({ cp: 0, pv: ['e2e4'] }))
-    const review = await analyzeGame('1. e4 e5', { mode: 'depth', depth: 20 }, port)
+    const review = await analyzeGame(
+      '1. e4 e5',
+      { mode: 'depth', depth: 20 },
+      port,
+    )
 
     expect(review.positions).toHaveLength(3)
     expect(review.moves).toHaveLength(2)
@@ -254,7 +258,11 @@ describe('analyzeGame', () => {
     const port = fakePort((fen) =>
       fen === START_FEN ? { cp: 0, pv: ['e2e4'] } : { cp: 500, pv: ['d8h4'] },
     )
-    const review = await analyzeGame('1. e4', { mode: 'depth', depth: 20 }, port)
+    const review = await analyzeGame(
+      '1. e4',
+      { mode: 'depth', depth: 20 },
+      port,
+    )
 
     expect(review.moves).toHaveLength(1)
     expect(review.moves[0].winPctLoss).toBeCloseTo(36.3, 1)
@@ -283,7 +291,12 @@ describe('analyzeGame', () => {
       },
     }
 
-    const review = await analyzeGame('1. e4 e5', { mode: 'depth', depth: 20 }, port, 2)
+    const review = await analyzeGame(
+      '1. e4 e5',
+      { mode: 'depth', depth: 20 },
+      port,
+      2,
+    )
     const lines0 = review.positions[0].lines
 
     expect(lines0).toHaveLength(2)
@@ -296,7 +309,11 @@ describe('analyzeGame', () => {
 
   it('resolve xeque-mate deterministicamente (sem depender da engine)', async () => {
     const port = fakePort(() => ({ cp: 0, pv: [] }))
-    const review = await analyzeGame('1. f3 e5 2. g4 Qh4#', { mode: 'depth', depth: 20 }, port)
+    const review = await analyzeGame(
+      '1. f3 e5 2. g4 Qh4#',
+      { mode: 'depth', depth: 20 },
+      port,
+    )
 
     const last = review.positions[review.positions.length - 1]
     expect(last.winPct).toBeCloseTo(0, 0)
@@ -340,7 +357,13 @@ describe('analyzeGame', () => {
       },
     }
 
-    const review = await analyzeGame('1. e4 e5', { mode: 'depth', depth: 20 }, port, 1, { cache })
+    const review = await analyzeGame(
+      '1. e4 e5',
+      { mode: 'depth', depth: 20 },
+      port,
+      1,
+      { cache },
+    )
     expect(gos).toBe(0)
     expect(review.moves).toHaveLength(2)
     expect(review.moves.every((m) => m.winPctLoss === 0)).toBe(true)
@@ -363,7 +386,13 @@ describe('analyzeGame', () => {
       },
     }
 
-    const review = await analyzeGame('1. e4 e5', { mode: 'depth', depth: 18 }, port, 2, { cache })
+    const review = await analyzeGame(
+      '1. e4 e5',
+      { mode: 'depth', depth: 18 },
+      port,
+      2,
+      { cache },
+    )
 
     expect(gravadas).toHaveLength(3)
     expect(gravadas.map((g) => g.fen)).toEqual([
@@ -372,7 +401,9 @@ describe('analyzeGame', () => {
       'rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2',
     ])
     expect(
-      gravadas.every((g) => g.mode === 'depth' && g.value === 18 && g.multipv === 2),
+      gravadas.every(
+        (g) => g.mode === 'depth' && g.value === 18 && g.multipv === 2,
+      ),
     ).toBe(true)
     expect(review.moves).toHaveLength(2)
   })
@@ -450,17 +481,15 @@ describe('analyzeGame', () => {
       },
     }
 
-    await analyzeGame(
-      '1. e4 e5',
-      { mode: 'time', movetimeMs: 5000 },
-      port,
-      1,
-      { cache },
-    )
+    await analyzeGame('1. e4 e5', { mode: 'time', movetimeMs: 5000 }, port, 1, {
+      cache,
+    })
 
     expect(gets).toHaveLength(3)
     expect(
-      gets.every((g) => g.mode === 'time' && g.value === 5000 && g.multipv === 1),
+      gets.every(
+        (g) => g.mode === 'time' && g.value === 5000 && g.multipv === 1,
+      ),
     ).toBe(true)
   })
 })

@@ -1,5 +1,8 @@
 export type EngineTierId = 'fast' | 'balanced' | 'deep'
 
+/** Modo de análise: profundidade fixa ou tempo fixo por lance. */
+export type EngineMode = 'depth' | 'time'
+
 export interface EngineTier {
   id: EngineTierId
   label: string
@@ -42,6 +45,10 @@ export interface ReviewConfig {
   pgn: string
   meta: PgnMeta
   engine: EngineTier
+  /** Modo da análise: 'depth' usa `engine.depth`, 'time' usa `movetimeMs`. */
+  mode: EngineMode
+  /** Milissegundos por lance quando `mode === 'time'` (ignorado em 'depth'). */
+  movetimeMs?: number
   lines: number
   /** Revisão já concluída (partida vinda do store) — pula a análise. */
   initialResult?: ReviewResult
@@ -55,6 +62,8 @@ export interface GameSummary {
   result: string
   plies: number
   engineTier: string
+  mode: EngineMode
+  /** Profundidade (mode='depth') ou milissegundos por lance (mode='time'). */
   depth: number
   multipv: number
   accuracyWhite: number

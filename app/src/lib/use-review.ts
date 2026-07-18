@@ -65,13 +65,18 @@ export function useReview(config: ReviewConfig): UseReview {
           /* fallback: defaults */
         }
 
-        const review = await analyzeGame(
-          config.pgn,
-          { mode: 'depth', depth: config.engine.depth },
-          p,
-          config.lines,
-          { ...sizing, cache: createTauriPositionCache() },
-        )
+        const control =
+          config.mode === 'time'
+            ? {
+                mode: 'time' as const,
+                movetimeMs: config.movetimeMs ?? 5000,
+              }
+            : { mode: 'depth' as const, depth: config.engine.depth }
+
+        const review = await analyzeGame(config.pgn, control, p, config.lines, {
+          ...sizing,
+          cache: createTauriPositionCache(),
+        })
         if (cancelled) return
         setResult(review)
         setCurrentPly(review.moves.length)

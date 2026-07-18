@@ -25,12 +25,15 @@ export function deleteGame(id: number): Promise<void> {
 
 /**
  * Grava a revisão concluída no store. Reanálise da mesma partida com os
- * mesmos parâmetros (pgn, depth, multipv) substitui a entrada anterior.
+ * mesmos parâmetros (pgn, mode, depth/movetimeMs, multipv) substitui a
+ * entrada anterior.
  */
 export function saveReview(
   config: ReviewConfig,
   result: ReviewResult,
 ): Promise<number> {
+  const controlValue =
+    config.mode === 'time' ? (config.movetimeMs ?? 0) : config.engine.depth
   return invoke('games_save', {
     game: {
       pgn: config.pgn,
@@ -39,7 +42,8 @@ export function saveReview(
       result: config.meta.result,
       plies: config.meta.plies,
       engineTier: config.engine.id,
-      depth: config.engine.depth,
+      mode: config.mode,
+      depth: controlValue,
       multipv: config.lines,
       accuracyWhite: result.accuracy.white,
       accuracyBlack: result.accuracy.black,
@@ -55,10 +59,14 @@ export function saveReview(
  * elo/evento, que o store não duplica.
  */
 export function storedToConfig(game: StoredGame): ReviewConfig {
+  const mode = game.mode ?? 'depth'
+  const movetimeMs = mode === 'time' ? game.depth : undefined
   const engine =
-    ENGINE_TIERS.find((t) => t.id === game.engineTier) ??
-    ENGINE_TIERS.find((t) => t.depth === game.depth) ??
-    ENGINE_TIERS[1]
+    mode === 'depth'
+      ? (ENGINE_TIERS.find((t) => t.id === game.engineTier) ??
+        ENGINE_TIERS.find((t) => t.depth === game.depth) ??
+        ENGINE_TIERS[1])
+      : (ENGINE_TIERS.find((t) => t.id === game.engineTier) ?? ENGINE_TIERS[1])
 
   const parsed = parsePgn(game.pgn)
   const meta: PgnMeta = parsed.ok
@@ -77,6 +85,8 @@ export function storedToConfig(game: StoredGame): ReviewConfig {
     pgn: game.pgn,
     meta,
     engine,
+    mode,
+    ...(movetimeMs !== undefined ? { movetimeMs } : {}),
     lines: game.multipv,
     initialResult: JSON.parse(game.reviewJson) as ReviewResult,
   }
