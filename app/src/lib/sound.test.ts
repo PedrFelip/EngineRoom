@@ -15,8 +15,8 @@ describe('classifyMove', () => {
     expect(classifyMove('O-O-O')).toBe('move')
   })
 
-  it('lance com `+` é check', () => {
-    expect(classifyMove('Qd1+')).toBe('check')
+  it('lance com `+` usa o som padrão (move)', () => {
+    expect(classifyMove('Qd1+')).toBe('move')
   })
 
   it('promoção simples (`=`) usa o som padrão (move)', () => {
@@ -31,12 +31,12 @@ describe('classifyMove', () => {
     expect(classifyMove('exd8=Q')).toBe('capture')
   })
 
-  it('xeque-mate (`#`) é mate (tipo distinto, reserva para som próprio)', () => {
-    expect(classifyMove('Qh5#')).toBe('mate')
+  it('xeque-mate sem captura usa o som padrão (move)', () => {
+    expect(classifyMove('Qh5#')).toBe('move')
   })
 
-  it('mate vence captura (`Qxe7#` é mate, não capture)', () => {
-    expect(classifyMove('Qxe7#')).toBe('mate')
+  it('mate com captura cai em capture (`Qxe7#`)', () => {
+    expect(classifyMove('Qxe7#')).toBe('capture')
   })
 })
 

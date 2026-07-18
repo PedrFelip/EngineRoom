@@ -10,7 +10,8 @@ interface Props {
 }
 
 export default function SettingsModal({ open: isOpen, onClose }: Props) {
-  const { settings, setTheme, setEnginePath } = useSettings()
+  const { settings, setTheme, setEnginePath, setSoundEnabled, setSoundVolume } =
+    useSettings()
   const [testing, setTesting] = useState(false)
   const [result, setResult] = useState<ProbeResult | null>(null)
 
@@ -138,6 +139,54 @@ export default function SettingsModal({ open: isOpen, onClose }: Props) {
                   </button>
                 )
               })}
+            </div>
+          </section>
+
+          {/* Som */}
+          <section>
+            <h3 className='mb-2 text-xs font-semibold uppercase tracking-wide text-ink-dim'>
+              Som
+            </h3>
+            <div className='rounded-lg border border-edge-soft p-3'>
+              <label className='flex cursor-pointer items-center justify-between gap-3'>
+                <span className='min-w-0 flex-1'>
+                  <span className='block text-sm font-medium text-ink'>
+                    Som ao avançar lance
+                  </span>
+                  <span className='block text-xs text-ink-faint'>
+                    Toca ao navegar para a próxima jogada (não ao voltar).
+                  </span>
+                </span>
+                <input
+                  type='checkbox'
+                  checked={settings.soundEnabled}
+                  onChange={(e) => setSoundEnabled(e.target.checked)}
+                  className='h-4 w-4 accent-[var(--brand)]'
+                  aria-label='Ativar som de movimentação'
+                />
+              </label>
+              <label
+                className={`mt-3 flex items-center gap-3 ${
+                  settings.soundEnabled ? '' : 'cursor-not-allowed opacity-50'
+                }`}
+              >
+                <span className='w-16 shrink-0 text-xs text-ink-dim'>
+                  Volume
+                </span>
+                <input
+                  type='range'
+                  min={0}
+                  max={100}
+                  value={Math.round(settings.soundVolume * 100)}
+                  onChange={(e) => setSoundVolume(Number(e.target.value) / 100)}
+                  disabled={!settings.soundEnabled}
+                  className='min-w-0 flex-1 accent-[var(--brand)]'
+                  aria-label='Volume do som'
+                />
+                <span className='w-10 shrink-0 text-right font-mono text-xs text-ink-dim'>
+                  {Math.round(settings.soundVolume * 100)}
+                </span>
+              </label>
             </div>
           </section>
 

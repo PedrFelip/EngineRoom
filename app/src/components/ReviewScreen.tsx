@@ -1,8 +1,8 @@
 import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
 import { evalLabel, sideToMoveAtPly } from '../lib/eval-label'
 import { resultLabel } from '../lib/pgn'
-import { playMoveSound } from '../lib/sound'
 import { useSettings } from '../lib/settings-context'
+import { playMoveSound } from '../lib/sound'
 import { useReview } from '../lib/use-review'
 import type { ReviewConfig } from '../types'
 import Board from './Board'
@@ -24,6 +24,7 @@ function uciToSquares(uci: string): [string, string] | null {
 
 export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
   const review = useReview(config)
+  const { settings } = useSettings()
   const { result, status, error, currentPly, orientation } = review
   const position = result?.positions[currentPly] ?? null
   const lastMoveUci =
@@ -43,6 +44,18 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
   // biome-ignore lint/correctness/useExhaustiveDependencies: reseta a linha selecionada sempre que o usuário navega para outro lance
   useEffect(() => {
     setSelectedMultipv(1)
+  }, [currentPly])
+
+  // Toca o som do lance apenas ao avançar (currentPly aumenta). Voltar/início
+  // não dispara som. Ref rastreia o ply anterior sem causar re-render.
+  const prevPlyRef = useRef(currentPly)
+  // biome-ignore lint/correctness/useExhaustiveDependencies: dispara só em mudança de ply; settings/result lidos via closure no último render
+  useEffect(() => {
+    const movedForward = currentPly > prevPlyRef.current
+    prevPlyRef.current = currentPly
+    if (!movedForward || !settings.soundEnabled) return
+    const san = result?.moves[currentPly - 1]?.san
+    if (san) playMoveSound(san, settings.soundVolume)
   }, [currentPly])
   const selectedLine =
     position?.lines.find((l) => l.multipv === selectedMultipv) ??

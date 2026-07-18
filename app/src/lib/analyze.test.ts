@@ -365,9 +365,43 @@ describe('analyzeGame', () => {
     expect(gravadas.map((g) => g.fen)).toEqual([
       START_FEN,
       'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1',
-      'rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2',
+      'rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNB w KQkq - 0 2',
     ])
     expect(gravadas.every((g) => g.depth === 18 && g.multipv === 2)).toBe(true)
     expect(review.moves).toHaveLength(2)
+  })
+
+  it('em modo tempo envia `go movetime N` para a engine (nunca `go depth`)', async () => {
+    const sent: string[] = []
+    let lineCb: ((line: string) => void) | null = null
+    const port: EnginePort = {
+      send(cmd) {
+        sent.push(cmd.trim())
+        const c = cmd.trim()
+        if (c === 'uci') lineCb?.('uciok')
+        else if (c === 'isready') lineCb?.('readyok')
+        else if (c.startsWith('go')) {
+          lineCb?.('info depth 28 multipv 1 score cp 0 pv e2e4 e7e5')
+          lineCb?.('bestmove e2e4')
+        }
+      },
+      onLine(handler) {
+        lineCb = handler
+        return () => {
+          lineCb = null
+        }
+      },
+    }
+
+    const review = await analyzeGame(
+      '1. e4 e5',
+      { mode: 'time', movetimeMs: 1000 },
+      port,
+    )
+
+    expect(sent).toContain('go movetime 1000')
+    expect(sent.some((c) => c.startsWith('go depth'))).toBe(false)
+    expect(review.moves).toHaveLength(2)
+    expect(review.accuracy).toEqual({ white: 100, black: 100 })
   })
 })

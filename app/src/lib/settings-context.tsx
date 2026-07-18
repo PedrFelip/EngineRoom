@@ -72,14 +72,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       setSoundVolume,
       reset,
     }),
-    [
-      settings,
-      setTheme,
-      setEnginePath,
-      setSoundEnabled,
-      setSoundVolume,
-      reset,
-    ],
+    [settings, setTheme, setEnginePath, setSoundEnabled, setSoundVolume, reset],
   )
 
   return (

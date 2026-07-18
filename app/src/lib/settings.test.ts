@@ -1,9 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import {
-  DEFAULT_SETTINGS,
-  loadSettings,
-  SETTINGS_KEY,
-} from './settings'
+import { DEFAULT_SETTINGS, loadSettings } from './settings'
 
 function stubStorage(raw: string | null) {
   vi.stubGlobal('localStorage', {

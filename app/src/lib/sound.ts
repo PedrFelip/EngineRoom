@@ -1,22 +1,20 @@
 /**
  * Som de movimentação de peças.
  *
- * Classifica um lance (SAN) num tipo de som (mover, capturar, xeque, xeque-mate)
- * e toca o arquivo correspondente em `public/sounds/`.
+ * Classifica um lance (SAN) em mover ou capturar e toca o arquivo
+ * correspondente em `public/sounds/`.
  *
- * Conjunto de sons: "Standard" do lichess (CC0). Esse conjunto não possui arquivos
- * distintos para Castle (`O-O`) nem Promote (`=`); nesses casos o som é o mesmo
- * de um lance silencioso (Move).
+ * Conjunto de sons: "Standard" do lichess (CC0). Esse conjunto não possui
+ * arquivos distintos para Castle, Promote, Check nem Mate; todo lance
+ * não-capturante usa o som de Move.
  *
  * Mapeamento tipo → arquivo:
  *   move    → Move.mp3
  *   capture → Capture.mp3
- *   check   → Check.mp3
- *   mate    → Checkmate.mp3
  */
 
 /** Categoria de som associada a um lance. */
-export type SoundType = 'move' | 'capture' | 'check' | 'mate'
+export type SoundType = 'move' | 'capture'
 
 /** Função que de fato toca um som (abstrai o Audio API, injetável em testes). */
 export type PlaySound = (type: SoundType, volume: number) => void
@@ -24,19 +22,11 @@ export type PlaySound = (type: SoundType, volume: number) => void
 /**
  * Classifica um lance (notação SAN) no tipo de som correspondente.
  *
- * Prioridade quando o lance combina marcadores (ex.: `Qxe7#` é captura e mate):
- * mate > captura > xeque > silencioso.
- *
- * Observação: o conjunto "Standard" do lichess não possui arquivos distintos
- * para Castle (`O-O`) nem Promote (`=`); nesses casos o lance é classificado
- * conforme os demais marcadores presentes (default = move). O mate (`#`) é
- * mapeado para `Checkmate.mp3` — atualmente idêntico a `Check.mp3` neste
- * conjunto, mas o tipo fica reservado para futura troca de som.
+ * Apenas capturas (`x` no SAN) recebem som distinto; todo o resto
+ * (lance silencioso, roque, promoção, xeque, mate) usa o som de Move.
  */
 export function classifyMove(san: string): SoundType {
-  if (san.includes('#')) return 'mate'
   if (san.includes('x')) return 'capture'
-  if (san.includes('+')) return 'check'
   return 'move'
 }
 
@@ -58,8 +48,6 @@ export function playMoveSound(
 const SOUND_FILE: Record<SoundType, string> = {
   move: '/sounds/Move.mp3',
   capture: '/sounds/Capture.mp3',
-  check: '/sounds/Check.mp3',
-  mate: '/sounds/Checkmate.mp3',
 }
 
 /**
