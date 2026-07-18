@@ -168,6 +168,15 @@ export default function HomePage({ onStart }: Props) {
         <p className="mt-4 text-center text-xs text-ink-faint">
           Toda a análise acontece localmente — seu PGN não sai do seu computador.
         </p>
+
+        {games.length > 0 && (
+          <ReviewedGamesList
+            games={games}
+            onOpen={openStored}
+            onDelete={removeStored}
+            onReanalyze={reanalyzeStored}
+          />
+        )}
       </div>
 
       <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
