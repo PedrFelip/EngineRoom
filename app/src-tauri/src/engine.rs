@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::process::Stdio;
 use std::sync::Mutex;
 use tauri::{AppHandle, Emitter};
@@ -16,10 +17,42 @@ const SIDECAR: &str = "stockfish";
 /// Event name emitted to the frontend for every UCI line printed by the engine.
 pub const LINE_EVENT: &str = "engine://line";
 
-/// Holds the currently running engine process (if any).
+/// Holds the currently running engine processes (if any), keyed by an
+/// arbitrary id chosen by the caller (e.g. "primary", "live-wide").
 #[derive(Default)]
 pub struct EngineState {
-    inner: Mutex<Option<EngineHandle>>,
+    inner: Mutex<HashMap<String, EngineHandle>>,
+}
+
+impl EngineState {
+    /// Registers a new engine under `id`. Fails if `id` is already in use —
+    /// callers must `remove(id)` first to replace an engine.
+    pub fn insert(&self, id: String, handle: EngineHandle) -> Result<(), String> {
+        let mut guard = self.inner.lock().map_err(|e| e.to_string())?;
+        if guard.contains_key(&id) {
+            return Err(format!("Engine '{id}' já está em execução."));
+        }
+        guard.insert(id, handle);
+        Ok(())
+    }
+
+    /// Routes `line` to the stdin channel of the engine registered as `id`.
+    pub fn send(&self, id: &str, line: String) -> Result<(), String> {
+        let guard = self.inner.lock().map_err(|e| e.to_string())?;
+        match guard.get(id) {
+            Some(handle) => handle
+                .tx
+                .send(line)
+                .map_err(|_| format!("Engine '{id}' desconectada.")),
+            None => Err(format!("Engine '{id}' não está em execução.")),
+        }
+    }
+
+    /// Removes `id` from the registry and returns its handle so the caller can
+    /// trigger shutdown. No-op (returns `None`) if `id` is not registered.
+    pub fn remove(&self, id: &str) -> Option<EngineHandle> {
+        self.inner.lock().ok()?.remove(id)
+    }
 }
 
 struct EngineHandle {
@@ -135,13 +168,9 @@ fn spawn_engine(
 pub fn engine_spawn(
     app: AppHandle,
     state: tauri::State<'_, EngineState>,
+    id: String,
     path: Option<String>,
 ) -> Result<(), String> {
-    let mut guard = state.inner.lock().map_err(|e| e.to_string())?;
-    if guard.is_some() {
-        return Err("A engine já está em execução.".into());
-    }
-
     let kind = match path
         .as_deref()
         .map(str::trim)
@@ -152,27 +181,103 @@ pub fn engine_spawn(
     };
 
     let (tx, shutdown) = spawn_engine(&app, kind)?;
-    *guard = Some(EngineHandle { tx, shutdown });
-    Ok(())
+    state.insert(id, EngineHandle { tx, shutdown })
 }
 
 #[tauri::command]
-pub fn engine_send(state: tauri::State<'_, EngineState>, line: String) -> Result<(), String> {
-    let guard = state.inner.lock().map_err(|e| e.to_string())?;
-    match guard.as_ref() {
-        Some(handle) => handle
-            .tx
-            .send(line)
-            .map_err(|_| "Não foi possível enviar comando à engine.".into()),
-        None => Err("A engine não está em execução.".into()),
-    }
+pub fn engine_send(
+    state: tauri::State<'_, EngineState>,
+    id: String,
+    line: String,
+) -> Result<(), String> {
+    state.send(&id, line)
 }
 
 #[tauri::command]
-pub fn engine_stop(state: tauri::State<'_, EngineState>) -> Result<(), String> {
-    let mut guard = state.inner.lock().map_err(|e| e.to_string())?;
-    if let Some(handle) = guard.take() {
+pub fn engine_stop(state: tauri::State<'_, EngineState>, id: String) -> Result<(), String> {
+    if let Some(handle) = state.remove(&id) {
         let _ = handle.shutdown.send(());
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Returns a handle plus its receiver so the caller can keep the receiver
+    /// alive (otherwise `tx` reports as disconnected).
+    fn dummy_handle() -> (EngineHandle, mpsc::UnboundedReceiver<String>) {
+        let (tx, rx) = mpsc::unbounded_channel::<String>();
+        let (shutdown, _shutdown_rx) = oneshot::channel::<()>();
+        (EngineHandle { tx, shutdown }, rx)
+    }
+
+    #[test]
+    fn two_engines_with_different_ids_coexist() {
+        // Behavior: the Rust layer must allow multiple engines to live simultaneously,
+        // each addressed by id, with sends routed independently.
+        let state = EngineState::default();
+        let (h1, _rx1) = dummy_handle();
+        state
+            .insert("primary".to_string(), h1)
+            .expect("primeiro insert deve sucesso");
+        let (h2, _rx2) = dummy_handle();
+        state
+            .insert("live-wide".to_string(), h2)
+            .expect("segundo insert deve sucesso");
+
+        state
+            .send("primary", "uci".to_string())
+            .expect("send para primary deve sucesso");
+        state
+            .send("live-wide", "uci".to_string())
+            .expect("send para live-wide deve sucesso");
+    }
+
+    #[test]
+    fn inserting_duplicate_id_is_rejected() {
+        // Behavior: trying to spawn a second engine under an id already in use
+        // fails clearly, leaving the original engine untouched.
+        let state = EngineState::default();
+        let (h1, _rx1) = dummy_handle();
+        state.insert("primary".to_string(), h1).unwrap();
+
+        let (h2, _rx2) = dummy_handle();
+        let err = state
+            .insert("primary".to_string(), h2)
+            .expect_err("duplicate insert deve falhar");
+        assert!(
+            err.contains("primary"),
+            "mensagem de erro deve mencionar o id: {err}"
+        );
+
+        // Engine original segue enviável.
+        state
+            .send("primary", "uci".to_string())
+            .expect("engine original deve continuar ativa");
+    }
+
+    #[test]
+    fn stop_only_removes_targeted_engine() {
+        // Behavior: stopping one engine by id leaves all others running.
+        let state = EngineState::default();
+        let (h1, _rx1) = dummy_handle();
+        state.insert("primary".to_string(), h1).unwrap();
+        let (h2, _rx2) = dummy_handle();
+        state.insert("live-wide".to_string(), h2).unwrap();
+
+        let stopped = state
+            .remove("primary")
+            .expect("remove deve retornar o handle de primary");
+        let _ = stopped.shutdown.send(()); // caller would do this
+
+        assert!(
+            state.remove("primary").is_none(),
+            "primary não deve mais existir no registro"
+        );
+        state
+            .send("live-wide", "uci".to_string())
+            .expect("live-wide deve seguir ativa após parar primary");
+    }
 }
