@@ -8,7 +8,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@tauri-apps/api/core', () => ({ invoke: mocks.invoke }))
 vi.mock('@tauri-apps/api/event', () => ({ listen: mocks.listen }))
 
-import { createTauriEnginePort } from './engine-port'
+import { createTauriEnginePort, type TauriEnginePort } from './engine-port'
 
 type LineHandler = (event: { payload: { id: string; line: string } }) => void
 
@@ -31,18 +31,20 @@ function wireListen() {
   }
 }
 
+function requirePort(p: TauriEnginePort | null): TauriEnginePort {
+  if (!p) throw new Error('porta não deveria ser nula')
+  return p
+}
+
 describe('createTauriEnginePort', () => {
   it('forwards only the lines whose payload id matches the port id', async () => {
     const bus = wireListen()
-    const port = await createTauriEnginePort(
-      'primary',
-      undefined,
-      () => false,
+    const port = requirePort(
+      await createTauriEnginePort('primary', undefined, () => false),
     )
-    expect(port).not.toBeNull()
 
     const received: string[] = []
-    port!.onLine((line) => received.push(line))
+    port.onLine((line) => received.push(line))
 
     bus.emit('primary', 'uciok')
     bus.emit('live-wide', 'info depth 10')
@@ -53,12 +55,10 @@ describe('createTauriEnginePort', () => {
 
   it('send routes through engineSend with the port id', async () => {
     wireListen()
-    const port = await createTauriEnginePort(
-      'live-wide',
-      undefined,
-      () => false,
+    const port = requirePort(
+      await createTauriEnginePort('live-wide', undefined, () => false),
     )
-    await port!.send('go infinite')
+    await port.send('go infinite')
     expect(mocks.invoke).toHaveBeenCalledWith('engine_send', {
       id: 'live-wide',
       line: 'go infinite',
@@ -67,12 +67,10 @@ describe('createTauriEnginePort', () => {
 
   it('dispose stops only this port id, leaving other engines alive', async () => {
     wireListen()
-    const port = await createTauriEnginePort(
-      'live-wide',
-      undefined,
-      () => false,
+    const port = requirePort(
+      await createTauriEnginePort('live-wide', undefined, () => false),
     )
-    await port!.dispose()
+    await port.dispose()
     expect(mocks.invoke).toHaveBeenCalledWith('engine_stop', {
       id: 'live-wide',
     })

@@ -9,7 +9,13 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@tauri-apps/api/core', () => ({ invoke: mocks.invoke }))
 vi.mock('@tauri-apps/api/event', () => ({ listen: mocks.listen }))
 
-import { engineSend, engineStart, engineStop, onEngineLine, probeEngine } from './engine'
+import {
+  engineSend,
+  engineStart,
+  engineStop,
+  onEngineLine,
+  probeEngine,
+} from './engine'
 
 type LineHandler = (event: { payload: { id: string; line: string } }) => void
 
@@ -135,11 +141,13 @@ describe('probeEngine', () => {
 
   it('reports failure when the engine fails to spawn', async () => {
     mocks.listen.mockResolvedValue(() => {})
-    mocks.invoke.mockImplementation(async (cmd: string, args?: { id?: string }) => {
-      if (cmd === 'engine_spawn' && args?.id === 'probe')
-        throw new Error('spawn boom')
-      return undefined
-    })
+    mocks.invoke.mockImplementation(
+      async (cmd: string, args?: { id?: string }) => {
+        if (cmd === 'engine_spawn' && args?.id === 'probe')
+          throw new Error('spawn boom')
+        return undefined
+      },
+    )
 
     const res = await probeEngine(undefined, { timeoutMs: 500 })
 
