@@ -8,6 +8,12 @@ export interface Settings {
   soundEnabled: boolean
   /** Volume do som de movimentação, em [0, 1]. */
   soundVolume: number
+  /** Threads da engine pesada durante o refino ao vivo. */
+  liveThreads: number
+  /** Hash (MB) da engine pesada durante o refino ao vivo. */
+  liveHashMb: number
+  /** Liga/desliga a engine leve (variações) no refino ao vivo. Persiste entre sessões. */
+  liveWideOn: boolean
 }
 
 export const SETTINGS_KEY = 'engineroom.settings.v1'
@@ -17,6 +23,9 @@ export const DEFAULT_SETTINGS: Settings = {
   enginePath: '',
   soundEnabled: true,
   soundVolume: 0.7,
+  liveThreads: 2,
+  liveHashMb: 256,
+  liveWideOn: true,
 }
 
 export function loadSettings(): Settings {
@@ -31,6 +40,14 @@ export function loadSettings(): Settings {
         typeof parsed.enginePath === 'string' ? parsed.enginePath : '',
       soundEnabled: parsed.soundEnabled !== false,
       soundVolume: clampVolume(parsed.soundVolume),
+      liveThreads: clampInt(parsed.liveThreads, 1, 64, DEFAULT_SETTINGS.liveThreads),
+      liveHashMb: clampInt(
+        parsed.liveHashMb,
+        16,
+        4096,
+        DEFAULT_SETTINGS.liveHashMb,
+      ),
+      liveWideOn: parsed.liveWideOn !== false,
     }
   } catch {
     return { ...DEFAULT_SETTINGS }
@@ -42,6 +59,18 @@ function clampVolume(v: unknown): number {
   return typeof v === 'number' && Number.isFinite(v)
     ? Math.max(0, Math.min(1, v))
     : DEFAULT_SETTINGS.soundVolume
+}
+
+/** Número inteiro dentro de [min, max]; default se inválido. */
+function clampInt(
+  v: unknown,
+  min: number,
+  max: number,
+  fallback: number,
+): number {
+  if (typeof v !== 'number' || !Number.isFinite(v)) return fallback
+  const i = Math.round(v)
+  return Math.max(min, Math.min(max, i))
 }
 
 export function saveSettings(settings: Settings): void {

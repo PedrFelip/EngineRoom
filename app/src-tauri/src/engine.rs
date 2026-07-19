@@ -230,6 +230,60 @@ pub fn engine_stop(state: tauri::State<'_, EngineState>, id: String) -> Result<(
     Ok(())
 }
 
+/// Best-effort lookup of the bundled "lite" engine (Stockfish 17) filesystem
+/// path. Tries the dev layout (next to the sidecar, under `binaries/`) and the
+/// bundled layout (under the resource dir). Returns `None` when no lite binary
+/// is available, so the caller can fall back to deep-only refinement.
+#[tauri::command]
+pub fn engine_lite_path(app: AppHandle) -> Result<Option<String>, String> {
+    use tauri::Manager;
+    let ext = if cfg!(windows) { ".exe" } else { "" };
+    let filename = format!("stockfish-lite-{}{}", target_triple(), ext);
+
+    // Dev layout: src-tauri/binaries/<name>, looked up relative to the current
+    // working directory (which is `src-tauri/` under `tauri dev`).
+    if let Ok(cwd) = std::env::current_dir() {
+        let dev_path = cwd.join("binaries").join(&filename);
+        if dev_path.is_file() {
+            return Ok(Some(dev_path.to_string_lossy().into_owned()));
+        }
+    }
+
+    // Bundled layout: resources directory ships the binaries alongside the app.
+    if let Ok(resource_dir) = app.path().resource_dir() {
+        let prod_path = resource_dir.join("binaries").join(&filename);
+        if prod_path.is_file() {
+            return Ok(Some(prod_path.to_string_lossy().into_owned()));
+        }
+    }
+
+    Ok(None)
+}
+
+/// Returns the host target triple (best-effort), used to locate the lite
+/// engine binary whose filename embeds the triple.
+fn target_triple() -> String {
+    if let Some(triple) = option_env!("TAURI_ENV_TARGET_TRIPLE") {
+        if !triple.is_empty() {
+            return triple.to_string();
+        }
+    }
+    let arch = match std::env::consts::ARCH {
+        "x86_64" => "x86_64",
+        "x86" => "i686",
+        "aarch64" => "aarch64",
+        "arm" => "armv7",
+        other => other,
+    };
+    let os = match std::env::consts::OS {
+        "linux" => "unknown-linux-gnu",
+        "macos" => "apple-darwin",
+        "windows" => "pc-windows-msvc",
+        other => other,
+    };
+    format!("{arch}-{os}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

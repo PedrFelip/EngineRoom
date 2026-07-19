@@ -32,6 +32,7 @@ pub fn run() {
             engine::engine_spawn,
             engine::engine_send,
             engine::engine_stop,
+            engine::engine_lite_path,
             system::system_resources,
         ])
         .run(tauri::generate_context!())

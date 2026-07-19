@@ -1,13 +1,29 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ReviewConfig, ReviewResult } from '../types'
-import { analyzeGame } from './analyze'
+import { analyzeGame, type EnginePort, type RawPosition } from './analyze'
 import { createTauriPositionCache } from './cache'
-import { createTauriEnginePort } from './engine-port'
+import { engineLitePath } from './engine'
+import { createTauriEnginePort, type TauriEnginePort } from './engine-port'
+import {
+  createLiveEvalSession,
+  type LiveEvalSession,
+} from './live-eval'
+import { isReadyOk, isUciOk } from './uci'
 import { saveReview } from './games'
 import { useSettings } from './settings-context'
 import { getSystemResources, recommendedHashMb } from './system'
 
 export type ReviewStatus = 'running' | 'done' | 'error'
+
+/** ID de registro das engines no Rust. */
+const DEEP_ID = 'primary'
+const WIDE_ID = 'live-wide'
+
+/** Sizing fixo da engine leve —控制ado por não expor UI pra ela. */
+const WIDE_THREADS = 1
+const WIDE_HASH_MB = 64
+/** Quantas variações a wide explora por posição. */
+const WIDE_MULTIPV = 6
 
 export interface UseReview {
   result: ReviewResult | null
@@ -15,6 +31,14 @@ export interface UseReview {
   error: string | null
   currentPly: number
   orientation: 'white' | 'black'
+  /** Posição ao vivo refinada (null enquanto não há dados do refino). */
+  livePosition: RawPosition | null
+  /** True quando a engine leve está disponível nesta plataforma. */
+  liveWideAvailable: boolean
+  /** Estado corrente do toggle da engine leve. */
+  liveWideOn: boolean
+  setLiveWideOn: (on: boolean) => void
+  applyHeavyResources: (threads: number, hashMb: number) => void
   goTo: (ply: number) => void
   next: () => void
   prev: () => void
@@ -23,13 +47,54 @@ export interface UseReview {
   flip: () => void
 }
 
+/**
+ * Faz o handshake UCI mínimo necessário antes de uma enginewide começar a
+ * receber `position`/`go`: aguarda `uciok` e `readyok`, e seta Threads, Hash e
+ * Multipv. Falhas propagam (o caller decide se ignora).
+ */
+async function handshakeWide(
+  port: EnginePort,
+  opts: { threads: number; hashMb: number; multipv: number },
+): Promise<void> {
+  await ask(port, 'uci', (l) => isUciOk(l))
+  await port.send(
+    `setoption name Threads value ${Math.max(1, opts.threads)}`,
+  )
+  await port.send(`setoption name Hash value ${Math.max(1, opts.hashMb)}`)
+  await port.send(`setoption name Multipv value ${Math.max(1, opts.multipv)}`)
+  await ask(port, 'isready', (l) => isReadyOk(l))
+}
+
+function ask(
+  port: EnginePort,
+  cmd: string,
+  done: (line: string) => boolean,
+): Promise<void> {
+  return new Promise((resolve) => {
+    const off = port.onLine((line) => {
+      if (done(line)) {
+        off()
+        resolve()
+      }
+    })
+    void port.send(cmd)
+  })
+}
+
 export function useReview(config: ReviewConfig): UseReview {
-  const { settings } = useSettings()
+  const { settings, setSettings } = useSettings()
   const [result, setResult] = useState<ReviewResult | null>(null)
   const [status, setStatus] = useState<ReviewStatus>('running')
   const [error, setError] = useState<string | null>(null)
   const [currentPly, setCurrentPly] = useState(0)
   const [orientation, setOrientation] = useState<'white' | 'black'>('white')
+  const [livePosition, setLivePosition] = useState<RawPosition | null>(null)
+  const [liveWideAvailable, setLiveWideAvailable] = useState(false)
+  const [liveWideOn, setLiveWideOnState] = useState(settings.liveWideOn)
+
+  const sessionRef = useRef<LiveEvalSession | null>(null)
+  const deepPortRef = useRef<TauriEnginePort | null>(null)
+  const widePortRef = useRef<TauriEnginePort | null>(null)
 
   useEffect(() => {
     // Partida vinda do store: reabertura instantânea, sem engine e sem regravar.
@@ -41,19 +106,18 @@ export function useReview(config: ReviewConfig): UseReview {
     }
 
     let cancelled = false
-    let port: { dispose: () => Promise<void> } | null = null
 
     ;(async () => {
       try {
-        const p = await createTauriEnginePort(
-          'primary',
+        const deep = await createTauriEnginePort(
+          DEEP_ID,
           settings.enginePath || undefined,
           () => cancelled,
         )
-        if (cancelled || !p) return
-        port = p
+        if (cancelled || !deep) return
+        deepPortRef.current = deep
 
-        // Dimensiona a engine pra usar o máximo de CPU/RAM (Threads + Hash).
+        // Dimensiona a engine pesada pra usar o máximo de CPU/RAM (Threads + Hash).
         // Best-effort: se a detecção falhar, segue com os defaults do Stockfish.
         let sizing: { threads?: number; hashMb?: number } = {}
         try {
@@ -74,10 +138,18 @@ export function useReview(config: ReviewConfig): UseReview {
               }
             : { mode: 'depth' as const, depth: config.engine.depth }
 
-        const review = await analyzeGame(config.pgn, control, p, config.lines, {
-          ...sizing,
-          cache: createTauriPositionCache(),
-        })
+        // keepAlive: true → a engine pesada permanece viva para o refino ao vivo.
+        const review = await analyzeGame(
+          config.pgn,
+          control,
+          deep,
+          config.lines,
+          {
+            ...sizing,
+            cache: createTauriPositionCache(),
+            keepAlive: true,
+          },
+        )
         if (cancelled) return
         setResult(review)
         setCurrentPly(review.moves.length)
@@ -85,6 +157,51 @@ export function useReview(config: ReviewConfig): UseReview {
         void saveReview(config, review).catch((e) =>
           console.warn('Falha ao salvar a partida no store:', e),
         )
+
+        // === Refino ao vivo ===
+        // Engine leve (SF17) — opcional. Se disponível, explora mais variações.
+        let widePort: TauriEnginePort | null = null
+        try {
+          const litePath = await engineLitePath()
+          if (litePath) {
+            const w = await createTauriEnginePort(
+              WIDE_ID,
+              litePath,
+              () => cancelled,
+            )
+            if (w) {
+              await handshakeWide(w, {
+                threads: WIDE_THREADS,
+                hashMb: WIDE_HASH_MB,
+                multipv: WIDE_MULTIPV,
+              })
+              widePort = w
+              widePortRef.current = w
+              setLiveWideAvailable(true)
+            }
+          }
+        } catch (e) {
+          console.warn('Engine leve indisponível, seguindo só com a pesada:', e)
+        }
+
+        if (cancelled) return
+
+        const initialFen =
+          review.positions[review.moves.length]?.fen ??
+          review.positions[0].fen
+
+        const session = createLiveEvalSession(
+          { deep, wide: widePort },
+          { fen: initialFen },
+          { onMerge: (pos) => setLivePosition(pos) },
+          { cache: createTauriPositionCache() },
+        )
+        sessionRef.current = session
+
+        if (widePort && !settings.liveWideOn) {
+          await session.setWideEnabled(false)
+        }
+        await session.start()
       } catch (e) {
         if (cancelled) return
         setError(e instanceof Error ? e.message : String(e))
@@ -94,9 +211,35 @@ export function useReview(config: ReviewConfig): UseReview {
 
     return () => {
       cancelled = true
-      void port?.dispose()
+      const session = sessionRef.current
+      const deep = deepPortRef.current
+      const wide = widePortRef.current
+      sessionRef.current = null
+      deepPortRef.current = null
+      widePortRef.current = null
+      setLivePosition(null)
+      setLiveWideAvailable(false)
+      void (async () => {
+        try {
+          if (session) await session.stop()
+        } catch {
+          /* ignore */
+        }
+        await deep?.dispose().catch(() => {})
+        await wide?.dispose().catch(() => {})
+      })()
     }
+    // biome-ignore lint/correctness/useExhaustiveDependencies: settings.enginePath muda raramente; liveWideOn não re-spawna
   }, [config, settings.enginePath])
+
+  // Quando o usuário troca de ply, a session refina a nova posição.
+  useEffect(() => {
+    if (!result || !sessionRef.current) return
+    const fen = result.positions[currentPly]?.fen
+    if (!fen) return
+    setLivePosition(null)
+    void sessionRef.current.setFen(fen).catch(() => {})
+  }, [currentPly, result])
 
   const total = result?.moves.length ?? 0
 
@@ -116,12 +259,34 @@ export function useReview(config: ReviewConfig): UseReview {
     [],
   )
 
+  const setLiveWideOn = useCallback(
+    (on: boolean) => {
+      setLiveWideOnState(on)
+      setSettings({ ...settings, liveWideOn: on })
+      void sessionRef.current?.setWideEnabled(on).catch(() => {})
+    },
+    [settings, setSettings],
+  )
+
+  const applyHeavyResources = useCallback(
+    (threads: number, hashMb: number) => {
+      setSettings({ ...settings, liveThreads: threads, liveHashMb: hashMb })
+      void sessionRef.current?.applyHeavyResources(threads, hashMb).catch(() => {})
+    },
+    [settings, setSettings],
+  )
+
   return {
     result,
     status,
     error,
     currentPly,
     orientation,
+    livePosition,
+    liveWideAvailable,
+    liveWideOn,
+    setLiveWideOn,
+    applyHeavyResources,
     goTo,
     next,
     prev,

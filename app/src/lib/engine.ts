@@ -32,6 +32,15 @@ export function engineStop(id: string): Promise<void> {
 }
 
 /**
+ * Best-effort path to the bundled "lite" engine (Stockfish 17). Returns null
+ * when no lite binary is available on this platform, so the caller can fall
+ * back to deep-only refinement.
+ */
+export function engineLitePath(): Promise<string | null> {
+  return invoke<string | null>('engine_lite_path')
+}
+
+/**
  * subscribes to every UCI line the engines print to stdout. The callback
  * receives the engine id alongside the line so multiple engines can be
  * distinguished.

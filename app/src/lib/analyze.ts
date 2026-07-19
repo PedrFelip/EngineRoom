@@ -319,7 +319,13 @@ export async function analyzeGame(
   control: AnalyzeControl,
   port: EnginePort,
   multipv = 1,
-  opts: { threads?: number; hashMb?: number; cache?: PositionCache } = {},
+  opts: {
+    threads?: number
+    hashMb?: number
+    cache?: PositionCache
+    /** Quando true, não envia `quit` ao final — a engine fica viva para refino ao vivo. */
+    keepAlive?: boolean
+  } = {},
 ): Promise<ReviewResult> {
   const { positionFens, moves } = extractGame(pgn)
   const keyValue = controlKeyValue(control)
@@ -362,7 +368,7 @@ export async function analyzeGame(
     }
     raw.push(pos)
   }
-  await port.send('quit')
+  if (!opts.keepAlive) await port.send('quit')
 
   const opening = await lookupOpening(moves.map((m) => m.san))
   const book: BookInfo | undefined = opening

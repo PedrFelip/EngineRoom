@@ -11,16 +11,26 @@
  * developer / CI run fetches the right one for their platform.
  */
 import { execSync } from "node:child_process";
-import { createWriteStream, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
+import { copyFileSync, createWriteStream, existsSync, mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { exec as execCb } from "node:child_process";
 import { promisify } from "node:util";
 const exec = promisify(execCb);
 
 const BINARIES_DIR = resolve(process.cwd(), "src-tauri/binaries");
-const SF_TAG = "sf_18";
+
+/**
+ * Engines to download. SF18 is the heavy engine used for the full game review
+ * and the deep live refinement. SF17 is the lighter engine used for the wide
+ * live refinement (exploring more variations cheaply). Both are idempotent —
+ * if the destination already exists, it is skipped.
+ */
+const ENGINES = [
+  { tag: "sf_18", destPrefix: "stockfish", label: "Stockfish 18 (pesada)" },
+  { tag: "sf_17", destPrefix: "stockfish-lite", label: "Stockfish 17 (leve)" },
+];
 
 /** Map our known targets to a Stockfish release asset. */
 function assetFor(target) {
@@ -84,28 +94,26 @@ function findBinary(dir, ext) {
     } catch {
       continue;
     }
-    const name = String(entry);
+    // Match on basename only, otherwise `stockfish/AUTHORS` would match.
+    const name = basename(String(entry));
     if (!/^stockfish/i.test(name)) continue;
     if (ext ? name.endsWith(ext) : !name.endsWith(".exe")) return full;
   }
   return null;
 }
 
-async function main() {
-  const target = hostTuple();
-  if (!target) throw new Error("Não consegui determinar o target triple do Rust.");
-  const ext = target.includes("windows") ? ".exe" : "";
-  const finalPath = join(BINARIES_DIR, `stockfish-${target}${ext}`);
+async function fetchEngine({ tag, destPrefix, label }, target, ext) {
+  const finalPath = join(BINARIES_DIR, `${destPrefix}-${target}${ext}`);
   if (existsSync(finalPath)) {
-    console.log("✓ Já existe:", finalPath);
+    console.log(`✓ Já existe (${label}):`, finalPath);
     return;
   }
 
   const asset = assetFor(target);
-  const url = `https://github.com/official-stockfish/Stockfish/releases/download/${SF_TAG}/${asset}`;
+  const url = `https://github.com/official-stockfish/Stockfish/releases/download/${tag}/${asset}`;
   mkdirSync(BINARIES_DIR, { recursive: true });
 
-  const tmp = join(tmpdir(), `sf-${Date.now()}`);
+  const tmp = join(tmpdir(), `sf-${destPrefix}-${Date.now()}`);
   mkdirSync(tmp, { recursive: true });
   const archivePath = join(tmp, asset);
   await download(url, archivePath);
@@ -116,13 +124,31 @@ async function main() {
   else await extractZip(archivePath, extractDir);
 
   const bin = findBinary(extractDir, ext);
-  if (!bin) throw new Error("Binário do Stockfish não encontrado no pacote extraído.");
+  if (!bin) throw new Error(`Binário de ${label} não encontrado no pacote extraído.`);
 
   if (!ext) await exec(`chmod +x "${bin}"`);
-  renameSync(bin, finalPath);
+  // Use copy+rm instead of rename because tmp and the workspace can live on
+  // different filesystems (EXDEV on Linux when /tmp is a separate mount).
+  copyFileSync(bin, finalPath);
   rmSync(tmp, { recursive: true, force: true });
 
-  console.log("✓ Stockfish instalado em:", finalPath);
+  console.log(`✓ ${label} instalado em:`, finalPath);
+}
+
+async function main() {
+  const target = hostTuple();
+  if (!target) throw new Error("Não consegui determinar o target triple do Rust.");
+  const ext = target.includes("windows") ? ".exe" : "";
+
+  for (const engine of ENGINES) {
+    try {
+      await fetchEngine(engine, target, ext);
+    } catch (e) {
+      // SF17 may not be available for every target — log and continue so the
+      // primary SF18 install is not blocked.
+      console.error(`✗ Falha ao baixar ${engine.label}:`, e?.message || e);
+    }
+  }
 }
 
 main().catch((e) => {
