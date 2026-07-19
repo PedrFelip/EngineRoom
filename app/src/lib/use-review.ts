@@ -216,8 +216,8 @@ export function useReview(config: ReviewConfig): UseReview {
           if (w) {
             debug('wide spawnada, iniciando handshake')
             await handshakeWide(w, {
-              threads: WIDE_THREADS,
-              hashMb: WIDE_HASH_MB,
+              threads: preset.wide.threads,
+              hashMb: preset.wide.hashMb,
               multipv: WIDE_MULTIPV,
             })
             debug('handshake wide ok')
@@ -314,15 +314,19 @@ export function useReview(config: ReviewConfig): UseReview {
     [persistLiveWideOn],
   )
 
-  const applyHeavyResources = useCallback(
-    (threads: number, hashMb: number) => {
-      setLiveThreads(threads)
-      setLiveHashMb(hashMb)
-      void sessionRef.current
-        ?.applyHeavyResources(threads, hashMb)
+  const applyPreset = useCallback(
+    (preset: LivePreset) => {
+      setLivePreset(preset.id)
+      const session = sessionRef.current
+      if (!session) return
+      void session
+        .applyHeavyResources(preset.deep.threads, preset.deep.hashMb)
+        .catch(() => {})
+      void session
+        .applyWideResources(preset.wide.threads, preset.wide.hashMb)
         .catch(() => {})
     },
-    [setLiveThreads, setLiveHashMb],
+    [setLivePreset],
   )
 
   return {
@@ -335,7 +339,8 @@ export function useReview(config: ReviewConfig): UseReview {
     liveWideAvailable,
     liveWideOn,
     setLiveWideOn,
-    applyHeavyResources,
+    presets,
+    applyPreset,
     goTo,
     next,
     prev,

@@ -31,6 +31,11 @@ function uciToSquares(uci: string): [string, string] | null {
  * refino) num PositionAnalysis normalizado para o POV das brancas — preserva
  * ply/fen da posição base e descarta o cp/lines/pv antigo.
  *
+ * Quando o refino ainda não preencheu todos os slots multipv que a posição
+ * base tinha (vindas do analyzeGame com o SF18), completamos com os slots do
+ * `basePosition` — assim o painel nunca regredir pra menos linhas do que já
+ * tinha antes do refino começar.
+ *
  * Não computa SAN nem classification (esses dependem do fluxo do buildReview);
  * a UI lida com san=null mostrando "—".
  */
@@ -50,13 +55,21 @@ function mergeLiveIntoPosition(
       pv: l.pv,
     }
   })
+
+  // Completa com slots do base que a live ainda não cobriu (mínimo garantido).
+  const liveIndices = new Set(liveLines.map((l) => l.multipv))
+  const baseExtras = base.lines.filter((l) => !liveIndices.has(l.multipv))
+  const allLines = [...liveLines, ...baseExtras].sort(
+    (a, b) => a.multipv - b.multipv,
+  )
+
   return {
     ...base,
     depth: live.depth,
     cp: stm === 'w' ? live.cp : -live.cp,
     winPct,
-    pv: live.pv,
-    lines: liveLines.length > 0 ? liveLines : base.lines,
+    pv: live.pv.length > 0 ? live.pv : base.pv,
+    lines: allLines.length > 0 ? allLines : base.lines,
   }
 }
 
@@ -73,7 +86,8 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
     liveWideAvailable,
     liveWideOn,
     setLiveWideOn,
-    applyHeavyResources,
+    presets,
+    applyPreset,
   } = review
 
   const basePosition = result?.positions[currentPly] ?? null
@@ -174,7 +188,8 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
             liveWideAvailable={liveWideAvailable}
             liveWideOn={liveWideOn}
             onToggleWide={setLiveWideOn}
-            onApplyResources={applyHeavyResources}
+            presets={presets}
+            onApplyPreset={applyPreset}
           />
           <button
             type='button'
