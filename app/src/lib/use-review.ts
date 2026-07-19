@@ -4,14 +4,10 @@ import { analyzeGame, type EnginePort, type RawPosition } from './analyze'
 import { createTauriPositionCache } from './cache'
 import { engineLitePath } from './engine'
 import { createTauriEnginePort, type TauriEnginePort } from './engine-port'
-import {
-  createLiveEvalSession,
-  type LiveEvalSession,
-} from './live-eval'
-import { isReadyOk, isUciOk } from './uci'
 import { saveReview } from './games'
+import { createLiveEvalSession, type LiveEvalSession } from './live-eval'
 import { useSettings } from './settings-context'
-import { getSystemResources, recommendedHashMb } from './system'
+import { isReadyOk, isUciOk } from './uci'
 
 export type ReviewStatus = 'running' | 'done' | 'error'
 
@@ -57,9 +53,7 @@ async function handshakeWide(
   opts: { threads: number; hashMb: number; multipv: number },
 ): Promise<void> {
   await ask(port, 'uci', (l) => isUciOk(l))
-  await port.send(
-    `setoption name Threads value ${Math.max(1, opts.threads)}`,
-  )
+  await port.send(`setoption name Threads value ${Math.max(1, opts.threads)}`)
   await port.send(`setoption name Hash value ${Math.max(1, opts.hashMb)}`)
   await port.send(`setoption name Multipv value ${Math.max(1, opts.multipv)}`)
   await ask(port, 'isready', (l) => isReadyOk(l))
@@ -82,7 +76,12 @@ function ask(
 }
 
 export function useReview(config: ReviewConfig): UseReview {
-  const { settings, setSettings } = useSettings()
+  const {
+    settings,
+    setLiveThreads,
+    setLiveHashMb,
+    setLiveWideOn: persistLiveWideOn,
+  } = useSettings()
   const [result, setResult] = useState<ReviewResult | null>(null)
   const [status, setStatus] = useState<ReviewStatus>('running')
   const [error, setError] = useState<string | null>(null)
@@ -96,6 +95,7 @@ export function useReview(config: ReviewConfig): UseReview {
   const deepPortRef = useRef<TauriEnginePort | null>(null)
   const widePortRef = useRef<TauriEnginePort | null>(null)
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: dependências intencionais — settings.liveWideOn só é lido no setup inicial; mudanças no toggle em runtime vão por setLiveWideOn→session.setWideEnabled
   useEffect(() => {
     // Partida vinda do store: reabertura instantânea, sem engine e sem regravar.
     if (config.initialResult) {
@@ -117,17 +117,12 @@ export function useReview(config: ReviewConfig): UseReview {
         if (cancelled || !deep) return
         deepPortRef.current = deep
 
-        // Dimensiona a engine pesada pra usar o máximo de CPU/RAM (Threads + Hash).
-        // Best-effort: se a detecção falhar, segue com os defaults do Stockfish.
-        let sizing: { threads?: number; hashMb?: number } = {}
-        try {
-          const r = await getSystemResources()
-          sizing = {
-            threads: r.threads,
-            hashMb: recommendedHashMb(r.memory_mb),
-          }
-        } catch {
-          /* fallback: defaults */
+        // Sizing da engine pesada é controlado manualmente pelo usuário
+        // (painel de configurações do review). Defaults conservadores já
+        // estão em `settings.liveThreads/liveHashMb`.
+        const sizing: { threads: number; hashMb: number } = {
+          threads: settings.liveThreads,
+          hashMb: settings.liveHashMb,
         }
 
         const control =
@@ -187,8 +182,7 @@ export function useReview(config: ReviewConfig): UseReview {
         if (cancelled) return
 
         const initialFen =
-          review.positions[review.moves.length]?.fen ??
-          review.positions[0].fen
+          review.positions[review.moves.length]?.fen ?? review.positions[0].fen
 
         const session = createLiveEvalSession(
           { deep, wide: widePort },
@@ -229,7 +223,6 @@ export function useReview(config: ReviewConfig): UseReview {
         await wide?.dispose().catch(() => {})
       })()
     }
-    // biome-ignore lint/correctness/useExhaustiveDependencies: settings.enginePath muda raramente; liveWideOn não re-spawna
   }, [config, settings.enginePath])
 
   // Quando o usuário troca de ply, a session refina a nova posição.
@@ -262,18 +255,21 @@ export function useReview(config: ReviewConfig): UseReview {
   const setLiveWideOn = useCallback(
     (on: boolean) => {
       setLiveWideOnState(on)
-      setSettings({ ...settings, liveWideOn: on })
+      persistLiveWideOn(on)
       void sessionRef.current?.setWideEnabled(on).catch(() => {})
     },
-    [settings, setSettings],
+    [persistLiveWideOn],
   )
 
   const applyHeavyResources = useCallback(
     (threads: number, hashMb: number) => {
-      setSettings({ ...settings, liveThreads: threads, liveHashMb: hashMb })
-      void sessionRef.current?.applyHeavyResources(threads, hashMb).catch(() => {})
+      setLiveThreads(threads)
+      setLiveHashMb(hashMb)
+      void sessionRef.current
+        ?.applyHeavyResources(threads, hashMb)
+        .catch(() => {})
     },
-    [settings, setSettings],
+    [setLiveThreads, setLiveHashMb],
   )
 
   return {

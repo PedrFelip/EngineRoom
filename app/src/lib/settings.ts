@@ -40,7 +40,12 @@ export function loadSettings(): Settings {
         typeof parsed.enginePath === 'string' ? parsed.enginePath : '',
       soundEnabled: parsed.soundEnabled !== false,
       soundVolume: clampVolume(parsed.soundVolume),
-      liveThreads: clampInt(parsed.liveThreads, 1, 64, DEFAULT_SETTINGS.liveThreads),
+      liveThreads: clampInt(
+        parsed.liveThreads,
+        1,
+        64,
+        DEFAULT_SETTINGS.liveThreads,
+      ),
       liveHashMb: clampInt(
         parsed.liveHashMb,
         16,

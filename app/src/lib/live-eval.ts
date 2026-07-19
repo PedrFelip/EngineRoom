@@ -50,6 +50,11 @@ export interface LiveEvalSession {
    * rejects `setoption Hash` mid-search.
    */
   applyHeavyResources(threads: number, hashMb: number): Promise<void>
+  /**
+   * Stops any in-flight search on every active engine via UCI `stop`. Engines
+   * stay alive (idle); call this before dispose or when parking the session.
+   */
+  stop(): Promise<void>
 }
 
 interface Slot {
@@ -193,6 +198,12 @@ export function createLiveEvalSession(
       await ports.deep.send(`setoption name Hash value ${hashMb}`)
       await ports.deep.send(`position fen ${curFen}`)
       await ports.deep.send('go infinite')
+    },
+    async stop() {
+      await ports.deep.send('stop')
+      if (ports.wide && wideActive) {
+        await ports.wide.send('stop')
+      }
     },
   }
 }

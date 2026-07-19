@@ -1,16 +1,19 @@
 import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
+import type { RawPosition } from '../lib/analyze'
 import { formatEngineTag } from '../lib/engine-tag'
 import { evalLabel, sideToMoveAtPly } from '../lib/eval-label'
 import { resultLabel } from '../lib/pgn'
+import { cpToWinPct } from '../lib/scoring'
 import { useSettings } from '../lib/settings-context'
 import { playMoveSound } from '../lib/sound'
 import { useReview } from '../lib/use-review'
-import type { ReviewConfig } from '../types'
+import type { PositionAnalysis, PvLine, ReviewConfig } from '../types'
 import Board from './Board'
 import CandidateLines from './CandidateLines'
 import EvalBar from './EvalBar'
 import EvalGraph from './EvalGraph'
 import MoveList from './MoveList'
+import ReviewSettingsPanel from './ReviewSettingsPanel'
 import ReviewSummary from './ReviewSummary'
 
 interface ReviewScreenProps {
@@ -23,24 +26,72 @@ function uciToSquares(uci: string): [string, string] | null {
   return [uci.slice(0, 2), uci.slice(2, 4)]
 }
 
+/**
+ * Converte um RawPosition ao vivo (POV do lado a jogar, gerado pela engine de
+ * refino) num PositionAnalysis normalizado para o POV das brancas — preserva
+ * ply/fen da posição base e descarta o cp/lines/pv antigo.
+ *
+ * Não computa SAN nem classification (esses dependem do fluxo do buildReview);
+ * a UI lida com san=null mostrando "—".
+ */
+function mergeLiveIntoPosition(
+  live: RawPosition,
+  base: PositionAnalysis,
+  stm: 'w' | 'b',
+): PositionAnalysis {
+  const winPct = stm === 'w' ? cpToWinPct(live.cp) : 100 - cpToWinPct(live.cp)
+  const liveLines: PvLine[] = (live.lines ?? []).map((l) => {
+    const cp = stm === 'w' ? l.cp : -l.cp
+    return {
+      multipv: l.multipv,
+      san: null,
+      cp,
+      winPct: stm === 'w' ? cpToWinPct(l.cp) : 100 - cpToWinPct(l.cp),
+      pv: l.pv,
+    }
+  })
+  return {
+    ...base,
+    depth: live.depth,
+    cp: stm === 'w' ? live.cp : -live.cp,
+    winPct,
+    pv: live.pv,
+    lines: liveLines.length > 0 ? liveLines : base.lines,
+  }
+}
+
 export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
   const review = useReview(config)
   const { settings } = useSettings()
-  const { result, status, error, currentPly, orientation } = review
-  const position = result?.positions[currentPly] ?? null
+  const {
+    result,
+    status,
+    error,
+    currentPly,
+    orientation,
+    livePosition,
+    liveWideAvailable,
+    liveWideOn,
+    setLiveWideOn,
+    applyHeavyResources,
+  } = review
+
+  const basePosition = result?.positions[currentPly] ?? null
+  const stm = result ? sideToMoveAtPly(result.moves, currentPly) : 'w'
+
+  // Merge: quando há refinamento ao vivo, sobreponho cp/winPct/lines/pv/depth.
+  const position =
+    basePosition && livePosition
+      ? mergeLiveIntoPosition(livePosition, basePosition, stm)
+      : basePosition
+
   const currentMove =
     currentPly > 0 ? (result?.moves[currentPly - 1] ?? null) : null
   const lastMoveUci = currentMove?.uci ?? null
   const opening = result?.moves.find((m) => m.eco)?.eco ?? null
 
   const evalBarLabel =
-    position && result
-      ? evalLabel(
-          position.cp,
-          position.fen,
-          sideToMoveAtPly(result.moves, currentPly),
-        )
-      : undefined
+    position && result ? evalLabel(position.cp, position.fen, stm) : undefined
 
   const [selectedMultipv, setSelectedMultipv] = useState(1)
   // biome-ignore lint/correctness/useExhaustiveDependencies: reseta a linha selecionada sempre que o usuário navega para outro lance
@@ -98,12 +149,12 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
   return (
     <div className='mx-auto flex min-h-full max-w-6xl flex-col gap-4 px-4 py-6'>
       <header className='flex items-center justify-between gap-4'>
-        <div>
-          <h1 className='text-lg font-bold text-ink'>
+        <div className='min-w-0'>
+          <h1 className='truncate text-lg font-bold text-ink'>
             {config.meta.white} <span className='text-ink-faint'>vs</span>{' '}
             {config.meta.black}
           </h1>
-          <p className='text-sm text-ink-dim'>
+          <p className='truncate text-sm text-ink-dim'>
             {resultLabel(config.meta.result)} ·{' '}
             {Math.ceil(config.meta.plies / 2)} lances ·{' '}
             {formatEngineTag({
@@ -115,15 +166,24 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
               engineTier: config.engine.id,
             })}
             {opening ? ` · ${opening.code} ${opening.name}` : ''}
+            {livePosition ? ` · AO VIVO d${livePosition.depth}` : ''}
           </p>
         </div>
-        <button
-          type='button'
-          onClick={onExit}
-          className='rounded-xl bg-panel-3 px-4 py-2 text-sm font-medium text-ink transition hover:bg-edge'
-        >
-          ← Nova partida
-        </button>
+        <div className='flex items-center gap-2'>
+          <ReviewSettingsPanel
+            liveWideAvailable={liveWideAvailable}
+            liveWideOn={liveWideOn}
+            onToggleWide={setLiveWideOn}
+            onApplyResources={applyHeavyResources}
+          />
+          <button
+            type='button'
+            onClick={onExit}
+            className='rounded-xl bg-panel-3 px-4 py-2 text-sm font-medium text-ink transition hover:bg-edge'
+          >
+            ← Nova partida
+          </button>
+        </div>
       </header>
 
       {status === 'error' && (
