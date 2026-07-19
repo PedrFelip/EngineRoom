@@ -40,7 +40,7 @@ describe('createTauriEnginePort', () => {
   it('forwards only the lines whose payload id matches the port id', async () => {
     const bus = wireListen()
     const port = requirePort(
-      await createTauriEnginePort('primary', undefined, () => false),
+      await createTauriEnginePort('primary', undefined, undefined, () => false),
     )
 
     const received: string[] = []
@@ -56,7 +56,12 @@ describe('createTauriEnginePort', () => {
   it('send routes through engineSend with the port id', async () => {
     wireListen()
     const port = requirePort(
-      await createTauriEnginePort('live-wide', undefined, () => false),
+      await createTauriEnginePort(
+        'live-wide',
+        undefined,
+        undefined,
+        () => false,
+      ),
     )
     await port.send('go infinite')
     expect(mocks.invoke).toHaveBeenCalledWith('engine_send', {
@@ -68,7 +73,12 @@ describe('createTauriEnginePort', () => {
   it('dispose stops only this port id, leaving other engines alive', async () => {
     wireListen()
     const port = requirePort(
-      await createTauriEnginePort('live-wide', undefined, () => false),
+      await createTauriEnginePort(
+        'live-wide',
+        undefined,
+        undefined,
+        () => false,
+      ),
     )
     await port.dispose()
     expect(mocks.invoke).toHaveBeenCalledWith('engine_stop', {

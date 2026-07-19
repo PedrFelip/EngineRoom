@@ -118,7 +118,7 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
     const uci = selectedLine?.pv[0]
     if (!uci) return null
     const sq = uciToSquares(uci)
-    return sq ? { from: sq[0], to: sq[1], brush: 'green' as const } : null
+    return sq ? { from: sq[0], to: sq[1], brush: 'blue' as const } : null
   }, [selectedLine])
 
   useEffect(() => {

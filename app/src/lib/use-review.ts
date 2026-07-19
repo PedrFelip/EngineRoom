@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ReviewConfig, ReviewResult } from '../types'
 import { analyzeGame, type EnginePort, type RawPosition } from './analyze'
 import { createTauriPositionCache } from './cache'
-import { engineLitePath } from './engine'
 import { createTauriEnginePort, type TauriEnginePort } from './engine-port'
 import { saveReview } from './games'
 import { createLiveEvalSession, type LiveEvalSession } from './live-eval'
@@ -111,6 +110,7 @@ export function useReview(config: ReviewConfig): UseReview {
       try {
         const deep = await createTauriEnginePort(
           DEEP_ID,
+          undefined, // sidecar default ("stockfish")
           settings.enginePath || undefined,
           () => cancelled,
         )
@@ -154,26 +154,25 @@ export function useReview(config: ReviewConfig): UseReview {
         )
 
         // === Refino ao vivo ===
-        // Engine leve (SF17) — opcional. Se disponível, explora mais variações.
+        // Engine leve (SF17) — opcional. Sidecar "stockfish-lite" (definido em
+        // `bundle.externalBin`). Se indisponível, segue só com a pesada.
         let widePort: TauriEnginePort | null = null
         try {
-          const litePath = await engineLitePath()
-          if (litePath) {
-            const w = await createTauriEnginePort(
-              WIDE_ID,
-              litePath,
-              () => cancelled,
-            )
-            if (w) {
-              await handshakeWide(w, {
-                threads: WIDE_THREADS,
-                hashMb: WIDE_HASH_MB,
-                multipv: WIDE_MULTIPV,
-              })
-              widePort = w
-              widePortRef.current = w
-              setLiveWideAvailable(true)
-            }
+          const w = await createTauriEnginePort(
+            WIDE_ID,
+            'stockfish-lite',
+            undefined,
+            () => cancelled,
+          )
+          if (w) {
+            await handshakeWide(w, {
+              threads: WIDE_THREADS,
+              hashMb: WIDE_HASH_MB,
+              multipv: WIDE_MULTIPV,
+            })
+            widePort = w
+            widePortRef.current = w
+            setLiveWideAvailable(true)
           }
         } catch (e) {
           console.warn('Engine leve indisponível, seguindo só com a pesada:', e)

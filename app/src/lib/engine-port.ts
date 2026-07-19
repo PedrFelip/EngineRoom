@@ -12,6 +12,9 @@ export interface TauriEnginePort extends EnginePort {
  * porta é dona do seu id — múltiplas portas podem coexistir, cada uma ouvindo
  * só as linhas da sua engine.
  *
+ * `sidecar` é o basename do sidecar Tauri (default `"stockfish"`); `path` é um
+ * caminho absoluto para um binário custom. `path` vence sobre `sidecar`.
+ *
  * `isCancelled` é consultado entre cada etapa (stop → start → listen) para que
  * um efeito abortado (ex.: StrictMode em dev, que monta→desmonta→monta) saia
  * antes de spawnar a engine — evitando "engine já está em execução".
@@ -20,12 +23,13 @@ export interface TauriEnginePort extends EnginePort {
  */
 export async function createTauriEnginePort(
   id: string,
+  sidecar: string | undefined,
   path: string | undefined,
   isCancelled: () => boolean,
 ): Promise<TauriEnginePort | null> {
   await engineStop(id).catch(() => {})
   if (isCancelled()) return null
-  await engineStart(id, path)
+  await engineStart(id, sidecar, path)
   if (isCancelled()) {
     await engineStop(id).catch(() => {})
     return null

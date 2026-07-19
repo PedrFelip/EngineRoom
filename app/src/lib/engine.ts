@@ -10,18 +10,26 @@ export interface EngineLinePayload {
 }
 
 /**
- * Spawns an engine registered under `id`. Pass a `path` to use a custom
- * Stockfish binary; omit it to use the embedded sidecar. Multiple engines can
- * coexist as long as each one uses a distinct id.
+ * Spawns an engine registered under `id`. Pass `sidecar` to use a bundled
+ * sidecar by basename (e.g. "stockfish" or "stockfish-lite"); pass `path` to
+ * use a custom Stockfish binary on the host filesystem. `path` wins over
+ * `sidecar` when both are set; the default sidecar is "stockfish".
+ *
+ * Multiple engines can coexist as long as each one uses a distinct id.
  */
-export function engineStart(id: string, path?: string): Promise<void> {
+export function engineStart(
+  id: string,
+  sidecar?: string,
+  path?: string,
+): Promise<void> {
   return invoke('engine_spawn', {
     id,
+    sidecar: sidecar ?? null,
     path: path?.trim() ? path.trim() : null,
   })
 }
 
-/** Sends a single UCI command (no trailing newline) to the engine named `id`. */
+/** sends a single UCI command (no trailing newline) to the engine named `id`. */
 export function engineSend(id: string, line: string): Promise<void> {
   return invoke('engine_send', { id, line })
 }
@@ -29,15 +37,6 @@ export function engineSend(id: string, line: string): Promise<void> {
 /** stops and disposes the engine registered as `id`. */
 export function engineStop(id: string): Promise<void> {
   return invoke('engine_stop', { id })
-}
-
-/**
- * Best-effort path to the bundled "lite" engine (Stockfish 17). Returns null
- * when no lite binary is available on this platform, so the caller can fall
- * back to deep-only refinement.
- */
-export function engineLitePath(): Promise<string | null> {
-  return invoke<string | null>('engine_lite_path')
 }
 
 /**
@@ -79,7 +78,7 @@ export async function probeEngine(
 
   try {
     await engineStop(probeId).catch(() => {})
-    await engineStart(probeId, path)
+    await engineStart(probeId, undefined, path)
 
     let name: string | null = null
     let resolveResult!: (r: ProbeResult) => void

@@ -25,20 +25,22 @@ beforeEach(() => {
 })
 
 describe('engine thin wrappers (multi-engine)', () => {
-  it('engineStart passes id and null path to engine_spawn when path omitted', async () => {
+  it('engineStart passes id, default sidecar and null path when omitted', async () => {
     mocks.invoke.mockResolvedValue(undefined)
     await engineStart('primary')
     expect(mocks.invoke).toHaveBeenCalledWith('engine_spawn', {
       id: 'primary',
+      sidecar: null,
       path: null,
     })
   })
 
-  it('engineStart forwards id and a trimmed custom path', async () => {
+  it('engineStart forwards a named sidecar and a trimmed custom path', async () => {
     mocks.invoke.mockResolvedValue(undefined)
-    await engineStart('live-wide', '  /usr/bin/stockfish  ')
+    await engineStart('live-wide', 'stockfish-lite', '  /usr/bin/stockfish  ')
     expect(mocks.invoke).toHaveBeenCalledWith('engine_spawn', {
       id: 'live-wide',
+      sidecar: 'stockfish-lite',
       path: '/usr/bin/stockfish',
     })
   })
@@ -118,6 +120,7 @@ describe('probeEngine', () => {
     })
     expect(mocks.invoke).toHaveBeenCalledWith('engine_spawn', {
       id: 'probe',
+      sidecar: null,
       path: null,
     })
     // cleanup: engine is stopped at the end.
@@ -161,6 +164,7 @@ describe('probeEngine', () => {
     expect(res.ok).toBe(true)
     expect(mocks.invoke).toHaveBeenCalledWith('engine_spawn', {
       id: 'probe',
+      sidecar: null,
       path: '/opt/stockfish',
     })
   })
