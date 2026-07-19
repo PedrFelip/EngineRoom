@@ -46,6 +46,7 @@ export function useReview(config: ReviewConfig): UseReview {
     ;(async () => {
       try {
         const p = await createTauriEnginePort(
+          'primary',
           settings.enginePath || undefined,
           () => cancelled,
         )
