@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::process::Stdio;
 use std::sync::Mutex;
+use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 use tauri_plugin_shell::process::CommandEvent;
 use tauri_plugin_shell::ShellExt;
@@ -14,8 +15,26 @@ use tokio::sync::{mpsc, oneshot};
 /// `<target_dir>/stockfish`, and the resolver looks it up next to the main exe.
 const SIDECAR: &str = "stockfish";
 
-/// Event name emitted to the frontend for every UCI line printed by the engine.
+/// Event name emitted to the frontend for every UCI line printed by an engine.
 pub const LINE_EVENT: &str = "engine://line";
+
+/// Payload of [`LINE_EVENT`]: pairs an engine id with the UCI line it produced,
+/// so the frontend can route lines to the right consumer when more than one
+/// engine is alive.
+#[derive(Serialize, Clone)]
+pub struct EngineLine {
+    pub id: String,
+    pub line: String,
+}
+
+impl EngineLine {
+    fn new(id: &str, line: &str) -> Self {
+        Self {
+            id: id.to_string(),
+            line: line.to_string(),
+        }
+    }
+}
 
 /// Holds the currently running engine processes (if any), keyed by an
 /// arbitrary id chosen by the caller (e.g. "primary", "live-wide").
@@ -69,6 +88,7 @@ enum SpawnKind {
 
 fn spawn_engine(
     app: &AppHandle,
+    id: &str,
     kind: SpawnKind,
 ) -> Result<(mpsc::UnboundedSender<String>, oneshot::Sender<()>), String> {
     match kind {
@@ -82,14 +102,15 @@ fn spawn_engine(
                 .spawn()
                 .map_err(|e| format!("Falha ao iniciar o Stockfish embarcado: {e}"))?;
 
-            // Forward stdout lines to the frontend.
+            // Forward stdout lines to the frontend, tagged with the engine id.
             let app_reader = app.clone();
+            let id_owned = id.to_string();
             tauri::async_runtime::spawn(async move {
                 while let Some(event) = rx.recv().await {
                     if let CommandEvent::Stdout(bytes) = event {
                         let line = String::from_utf8_lossy(&bytes).trim().to_string();
                         if !line.is_empty() {
-                            let _ = app_reader.emit(LINE_EVENT, line);
+                            let _ = app_reader.emit(LINE_EVENT, EngineLine::new(&id_owned, &line));
                         }
                     }
                 }
@@ -128,12 +149,13 @@ fn spawn_engine(
             let stdin = child.stdin.take().ok_or("stdin indisponível")?;
 
             let app_reader = app.clone();
+            let id_owned = id.to_string();
             tauri::async_runtime::spawn(async move {
                 let mut lines = BufReader::new(stdout).lines();
                 while let Ok(Some(raw)) = lines.next_line().await {
                     let line = raw.trim().to_string();
                     if !line.is_empty() {
-                        let _ = app_reader.emit(LINE_EVENT, line);
+                        let _ = app_reader.emit(LINE_EVENT, EngineLine::new(&id_owned, &line));
                     }
                 }
             });
@@ -180,7 +202,7 @@ pub fn engine_spawn(
         None => SpawnKind::Sidecar,
     };
 
-    let (tx, shutdown) = spawn_engine(&app, kind)?;
+    let (tx, shutdown) = spawn_engine(&app, &id, kind)?;
     state.insert(id, EngineHandle { tx, shutdown })
 }
 
@@ -279,5 +301,29 @@ mod tests {
         state
             .send("live-wide", "uci".to_string())
             .expect("live-wide deve seguir ativa após parar primary");
+    }
+
+    #[test]
+    fn send_to_unknown_id_reports_which_id_is_missing() {
+        // Behavior: when a caller routes a line to an id that isn't registered,
+        // the error mentions that id so the caller can diagnose the mismatch.
+        let state = EngineState::default();
+        let err = state
+            .send("live-wide", "uci".to_string())
+            .expect_err("send pra id inexistente deve falhar");
+        assert!(
+            err.contains("live-wide"),
+            "erro deve mencionar o id procurado: {err}"
+        );
+    }
+
+    #[test]
+    fn line_payload_carries_engine_id_for_frontend_routing() {
+        // Behavior: when an engine emits a line, the frontend must be able to
+        // tell which engine produced it. The payload serializes as {"id","line"}
+        // so each Tauri event is self-describing.
+        let payload = EngineLine::new("live-wide", "uciok");
+        let json = serde_json::to_string(&payload).unwrap();
+        assert_eq!(json, r#"{"id":"live-wide","line":"uciok"}"#);
     }
 }
