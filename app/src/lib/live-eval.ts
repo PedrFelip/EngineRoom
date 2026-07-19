@@ -51,6 +51,11 @@ export interface LiveEvalSession {
    */
   applyHeavyResources(threads: number, hashMb: number): Promise<void>
   /**
+   * Reapplies Threads and Hash on the wide engine (seguindo preset). No-op
+   * quando a wide está desligada.
+   */
+  applyWideResources(threads: number, hashMb: number): Promise<void>
+  /**
    * Stops any in-flight search on every active engine via UCI `stop`. Engines
    * stay alive (idle); call this before dispose or when parking the session.
    */
@@ -198,6 +203,17 @@ export function createLiveEvalSession(
       await ports.deep.send(`setoption name Hash value ${hashMb}`)
       await ports.deep.send(`position fen ${curFen}`)
       await ports.deep.send('go infinite')
+    },
+    async applyWideResources(threads: number, hashMb: number) {
+      if (!ports.wide) return
+      const wasActive = wideActive
+      await ports.wide.send('stop')
+      await ports.wide.send(`setoption name Threads value ${threads}`)
+      await ports.wide.send(`setoption name Hash value ${hashMb}`)
+      if (wasActive) {
+        await ports.wide.send(`position fen ${curFen}`)
+        await ports.wide.send('go infinite')
+      }
     },
     async stop() {
       await ports.deep.send('stop')

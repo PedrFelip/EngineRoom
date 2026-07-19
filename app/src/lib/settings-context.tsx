@@ -21,8 +21,7 @@ interface SettingsContextValue {
   setEnginePath: (path: string) => void
   setSoundEnabled: (enabled: boolean) => void
   setSoundVolume: (volume: number) => void
-  setLiveThreads: (threads: number) => void
-  setLiveHashMb: (hashMb: number) => void
+  setLivePreset: (preset: Settings['livePreset']) => void
   setLiveWideOn: (on: boolean) => void
   reset: () => void
 }
@@ -64,20 +63,9 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       })),
     [],
   )
-  const setLiveThreads = useCallback(
-    (threads: number) =>
-      setSettings((s) => ({
-        ...s,
-        liveThreads: Math.max(1, Math.min(64, Math.round(threads))),
-      })),
-    [],
-  )
-  const setLiveHashMb = useCallback(
-    (hashMb: number) =>
-      setSettings((s) => ({
-        ...s,
-        liveHashMb: Math.max(16, Math.min(4096, Math.round(hashMb))),
-      })),
+  const setLivePreset = useCallback(
+    (livePreset: Settings['livePreset']) =>
+      setSettings((s) => ({ ...s, livePreset })),
     [],
   )
   const setLiveWideOn = useCallback(
@@ -93,8 +81,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       setEnginePath,
       setSoundEnabled,
       setSoundVolume,
-      setLiveThreads,
-      setLiveHashMb,
+      setLivePreset,
       setLiveWideOn,
       reset,
     }),
@@ -104,8 +91,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       setEnginePath,
       setSoundEnabled,
       setSoundVolume,
-      setLiveThreads,
-      setLiveHashMb,
+      setLivePreset,
       setLiveWideOn,
       reset,
     ],

@@ -6,6 +6,11 @@ import { createTauriEnginePort, type TauriEnginePort } from './engine-port'
 import { saveReview } from './games'
 import { createLiveEvalSession, type LiveEvalSession } from './live-eval'
 import { useSettings } from './settings-context'
+import {
+  computePresets,
+  getSystemResources,
+  type LivePreset,
+} from './system'
 import { isReadyOk, isUciOk } from './uci'
 
 export type ReviewStatus = 'running' | 'done' | 'error'
@@ -14,9 +19,6 @@ export type ReviewStatus = 'running' | 'done' | 'error'
 const DEEP_ID = 'primary'
 const WIDE_ID = 'live-wide'
 
-/** Sizing fixo da engine leve —控制ado por não expor UI pra ela. */
-const WIDE_THREADS = 1
-const WIDE_HASH_MB = 64
 /** Quantas variações a wide explora por posição. */
 const WIDE_MULTIPV = 6
 
@@ -33,7 +35,9 @@ export interface UseReview {
   /** Estado corrente do toggle da engine leve. */
   liveWideOn: boolean
   setLiveWideOn: (on: boolean) => void
-  applyHeavyResources: (threads: number, hashMb: number) => void
+  /** Presets computados a partir de getSystemResources (null enquanto carrega). */
+  presets: LivePreset[] | null
+  applyPreset: (preset: LivePreset) => void
   goTo: (ply: number) => void
   next: () => void
   prev: () => void
@@ -46,27 +50,44 @@ export interface UseReview {
  * Faz o handshake UCI mínimo necessário antes de uma enginewide começar a
  * receber `position`/`go`: aguarda `uciok` e `readyok`, e seta Threads, Hash e
  * Multipv. Falhas propagam (o caller decide se ignora).
+ *
+ * Cada `ask` tem timeout — sem isso, uma engine que não responde deixaria o
+ * hook pendurado para sempre (caso real: sidecar não encontrado em dev).
  */
 async function handshakeWide(
   port: EnginePort,
   opts: { threads: number; hashMb: number; multipv: number },
 ): Promise<void> {
-  await ask(port, 'uci', (l) => isUciOk(l))
+  await askWithTimeout(port, 'uci', (l) => isUciOk(l), HANDSHAKE_TIMEOUT_MS)
   await port.send(`setoption name Threads value ${Math.max(1, opts.threads)}`)
   await port.send(`setoption name Hash value ${Math.max(1, opts.hashMb)}`)
   await port.send(`setoption name Multipv value ${Math.max(1, opts.multipv)}`)
-  await ask(port, 'isready', (l) => isReadyOk(l))
+  await askWithTimeout(
+    port,
+    'isready',
+    (l) => isReadyOk(l),
+    HANDSHAKE_TIMEOUT_MS,
+  )
 }
 
-function ask(
+const HANDSHAKE_TIMEOUT_MS = 8000
+
+function askWithTimeout(
   port: EnginePort,
   cmd: string,
   done: (line: string) => boolean,
+  ms: number,
 ): Promise<void> {
-  return new Promise((resolve) => {
-    const off = port.onLine((line) => {
+  return new Promise((resolve, reject) => {
+    let off = () => {}
+    const timer = setTimeout(() => {
+      off()
+      reject(new Error(`timeout aguardando resposta de '${cmd}' (${ms}ms)`))
+    }, ms)
+    off = port.onLine((line) => {
       if (done(line)) {
         off()
+        clearTimeout(timer)
         resolve()
       }
     })
@@ -74,11 +95,15 @@ function ask(
   })
 }
 
+/** Log de diagnóstico, ativo só em dev. */
+function debug(...args: unknown[]) {
+  if (import.meta.env.DEV) console.info('[live]', ...args)
+}
+
 export function useReview(config: ReviewConfig): UseReview {
   const {
     settings,
-    setLiveThreads,
-    setLiveHashMb,
+    setLivePreset,
     setLiveWideOn: persistLiveWideOn,
   } = useSettings()
   const [result, setResult] = useState<ReviewResult | null>(null)
@@ -89,10 +114,32 @@ export function useReview(config: ReviewConfig): UseReview {
   const [livePosition, setLivePosition] = useState<RawPosition | null>(null)
   const [liveWideAvailable, setLiveWideAvailable] = useState(false)
   const [liveWideOn, setLiveWideOnState] = useState(settings.liveWideOn)
+  const [presets, setPresets] = useState<LivePreset[] | null>(null)
 
   const sessionRef = useRef<LiveEvalSession | null>(null)
   const deepPortRef = useRef<TauriEnginePort | null>(null)
   const widePortRef = useRef<TauriEnginePort | null>(null)
+  const presetsRef = useRef<LivePreset[] | null>(null)
+
+  // Carrega os recursos do sistema uma vez por sessão do hook — presets
+  // dependem de cores/RAM. Best-effort: se falhar, presets fica null e a UI
+  // pode continuar com defaults conservadores hardcoded.
+  useEffect(() => {
+    let cancelled = false
+    getSystemResources()
+      .then((sys) => {
+        if (cancelled) return
+        const list = computePresets(sys)
+        presetsRef.current = list
+        setPresets(list)
+      })
+      .catch(() => {
+        /* presets fica null — UI segue com fallback */
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: dependências intencionais — settings.liveWideOn só é lido no setup inicial; mudanças no toggle em runtime vão por setLiveWideOn→session.setWideEnabled
   useEffect(() => {
@@ -117,13 +164,14 @@ export function useReview(config: ReviewConfig): UseReview {
         if (cancelled || !deep) return
         deepPortRef.current = deep
 
-        // Sizing da engine pesada é controlado manualmente pelo usuário
-        // (painel de configurações do review). Defaults conservadores já
-        // estão em `settings.liveThreads/liveHashMb`.
-        const sizing: { threads: number; hashMb: number } = {
-          threads: settings.liveThreads,
-          hashMb: settings.liveHashMb,
-        }
+        // Sizing do preset selecionado (default Equilibrado). Se os presets
+        // ainda não carregaram, usa fallback conservador.
+        const preset =
+          presetsRef.current?.find((p) => p.id === settings.livePreset) ?? {
+            deep: { threads: 2, hashMb: 256 },
+            wide: { threads: 1, hashMb: 64 },
+          }
+        const sizing = preset.deep
 
         const control =
           config.mode === 'time'
@@ -158,6 +206,7 @@ export function useReview(config: ReviewConfig): UseReview {
         // `bundle.externalBin`). Se indisponível, segue só com a pesada.
         let widePort: TauriEnginePort | null = null
         try {
+          debug('spawnando engine leve (sidecar "stockfish-lite")…')
           const w = await createTauriEnginePort(
             WIDE_ID,
             'stockfish-lite',
@@ -165,14 +214,18 @@ export function useReview(config: ReviewConfig): UseReview {
             () => cancelled,
           )
           if (w) {
+            debug('wide spawnada, iniciando handshake')
             await handshakeWide(w, {
               threads: WIDE_THREADS,
               hashMb: WIDE_HASH_MB,
               multipv: WIDE_MULTIPV,
             })
+            debug('handshake wide ok')
             widePort = w
             widePortRef.current = w
             setLiveWideAvailable(true)
+          } else {
+            debug('createTauriEnginePort devolveu null (cancelado?)')
           }
         } catch (e) {
           console.warn('Engine leve indisponível, seguindo só com a pesada:', e)
@@ -195,6 +248,7 @@ export function useReview(config: ReviewConfig): UseReview {
           await session.setWideEnabled(false)
         }
         await session.start()
+        debug('session iniciada (deep%s)', widePort ? ' + wide' : ' apenas')
       } catch (e) {
         if (cancelled) return
         setError(e instanceof Error ? e.message : String(e))

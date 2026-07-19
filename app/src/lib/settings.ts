@@ -1,5 +1,7 @@
 export type Theme = 'dark' | 'light'
 
+export type LivePresetId = 'leve' | 'equilibrado' | 'pesado'
+
 export interface Settings {
   theme: Theme
   /** Empty string = use the embedded Stockfish sidecar. Otherwise an absolute path. */
@@ -8,10 +10,8 @@ export interface Settings {
   soundEnabled: boolean
   /** Volume do som de movimentação, em [0, 1]. */
   soundVolume: number
-  /** Threads da engine pesada durante o refino ao vivo. */
-  liveThreads: number
-  /** Hash (MB) da engine pesada durante o refino ao vivo. */
-  liveHashMb: number
+  /** Preset de sizing aplicado às engines no refino ao vivo. */
+  livePreset: LivePresetId
   /** Liga/desliga a engine leve (variações) no refino ao vivo. Persiste entre sessões. */
   liveWideOn: boolean
 }
@@ -23,8 +23,7 @@ export const DEFAULT_SETTINGS: Settings = {
   enginePath: '',
   soundEnabled: true,
   soundVolume: 0.7,
-  liveThreads: 2,
-  liveHashMb: 256,
+  livePreset: 'equilibrado',
   liveWideOn: true,
 }
 
@@ -40,18 +39,7 @@ export function loadSettings(): Settings {
         typeof parsed.enginePath === 'string' ? parsed.enginePath : '',
       soundEnabled: parsed.soundEnabled !== false,
       soundVolume: clampVolume(parsed.soundVolume),
-      liveThreads: clampInt(
-        parsed.liveThreads,
-        1,
-        64,
-        DEFAULT_SETTINGS.liveThreads,
-      ),
-      liveHashMb: clampInt(
-        parsed.liveHashMb,
-        16,
-        4096,
-        DEFAULT_SETTINGS.liveHashMb,
-      ),
+      livePreset: parsePreset(parsed.livePreset),
       liveWideOn: parsed.liveWideOn !== false,
     }
   } catch {
@@ -66,16 +54,9 @@ function clampVolume(v: unknown): number {
     : DEFAULT_SETTINGS.soundVolume
 }
 
-/** Número inteiro dentro de [min, max]; default se inválido. */
-function clampInt(
-  v: unknown,
-  min: number,
-  max: number,
-  fallback: number,
-): number {
-  if (typeof v !== 'number' || !Number.isFinite(v)) return fallback
-  const i = Math.round(v)
-  return Math.max(min, Math.min(max, i))
+/** Persistido deve ser um id válido; default Equilibrado. */
+function parsePreset(v: unknown): LivePresetId {
+  return v === 'leve' || v === 'pesado' ? v : 'equilibrado'
 }
 
 export function saveSettings(settings: Settings): void {
