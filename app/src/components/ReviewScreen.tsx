@@ -261,6 +261,7 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
               lines={position.lines}
               selectedMultipv={selectedMultipv}
               onSelect={setSelectedMultipv}
+              liveDepth={livePosition ? livePosition.depth : null}
             />
           ) : null}
 

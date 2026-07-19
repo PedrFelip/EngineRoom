@@ -6,11 +6,7 @@ import { createTauriEnginePort, type TauriEnginePort } from './engine-port'
 import { saveReview } from './games'
 import { createLiveEvalSession, type LiveEvalSession } from './live-eval'
 import { useSettings } from './settings-context'
-import {
-  computePresets,
-  getSystemResources,
-  type LivePreset,
-} from './system'
+import { computePresets, getSystemResources, type LivePreset } from './system'
 import { isReadyOk, isUciOk } from './uci'
 
 export type ReviewStatus = 'running' | 'done' | 'error'
@@ -95,9 +91,9 @@ function askWithTimeout(
   })
 }
 
-/** Log de diagnóstico, ativo só em dev. */
+/** Log de diagnóstico — sempre ativo enquanto debugamos a wide. */
 function debug(...args: unknown[]) {
-  if (import.meta.env.DEV) console.info('[live]', ...args)
+  console.info('[live]', ...args)
 }
 
 export function useReview(config: ReviewConfig): UseReview {
@@ -166,11 +162,12 @@ export function useReview(config: ReviewConfig): UseReview {
 
         // Sizing do preset selecionado (default Equilibrado). Se os presets
         // ainda não carregaram, usa fallback conservador.
-        const preset =
-          presetsRef.current?.find((p) => p.id === settings.livePreset) ?? {
-            deep: { threads: 2, hashMb: 256 },
-            wide: { threads: 1, hashMb: 64 },
-          }
+        const preset = presetsRef.current?.find(
+          (p) => p.id === settings.livePreset,
+        ) ?? {
+          deep: { threads: 2, hashMb: 256 },
+          wide: { threads: 1, hashMb: 64 },
+        }
         const sizing = preset.deep
 
         const control =
