@@ -46,7 +46,7 @@ pub struct EngineState {
 impl EngineState {
     /// Registers a new engine under `id`. Fails if `id` is already in use —
     /// callers must `remove(id)` first to replace an engine.
-    pub fn insert(&self, id: String, handle: EngineHandle) -> Result<(), String> {
+    fn insert(&self, id: String, handle: EngineHandle) -> Result<(), String> {
         let mut guard = self.inner.lock().map_err(|e| e.to_string())?;
         if guard.contains_key(&id) {
             return Err(format!("Engine '{id}' já está em execução."));
@@ -56,7 +56,7 @@ impl EngineState {
     }
 
     /// Routes `line` to the stdin channel of the engine registered as `id`.
-    pub fn send(&self, id: &str, line: String) -> Result<(), String> {
+    fn send(&self, id: &str, line: String) -> Result<(), String> {
         let guard = self.inner.lock().map_err(|e| e.to_string())?;
         match guard.get(id) {
             Some(handle) => handle
@@ -67,10 +67,19 @@ impl EngineState {
         }
     }
 
-    /// Removes `id` from the registry and returns its handle so the caller can
-    /// trigger shutdown. No-op (returns `None`) if `id` is not registered.
-    pub fn remove(&self, id: &str) -> Option<EngineHandle> {
-        self.inner.lock().ok()?.remove(id)
+    /// Removes `id` from the registry and signals its writer task to kill the
+    /// child process. Returns `true` if `id` was registered, `false` otherwise.
+    fn remove(&self, id: &str) -> bool {
+        let Ok(mut guard) = self.inner.lock() else {
+            return false;
+        };
+        match guard.remove(id) {
+            Some(handle) => {
+                let _ = handle.shutdown.send(());
+                true
+            }
+            None => false,
+        }
     }
 }
 
@@ -217,9 +226,7 @@ pub fn engine_send(
 
 #[tauri::command]
 pub fn engine_stop(state: tauri::State<'_, EngineState>, id: String) -> Result<(), String> {
-    if let Some(handle) = state.remove(&id) {
-        let _ = handle.shutdown.send(());
-    }
+    state.remove(&id);
     Ok(())
 }
 
@@ -289,14 +296,13 @@ mod tests {
         let (h2, _rx2) = dummy_handle();
         state.insert("live-wide".to_string(), h2).unwrap();
 
-        let stopped = state
-            .remove("primary")
-            .expect("remove deve retornar o handle de primary");
-        let _ = stopped.shutdown.send(()); // caller would do this
-
         assert!(
-            state.remove("primary").is_none(),
-            "primary não deve mais existir no registro"
+            state.remove("primary"),
+            "remove deve reportar sucesso para primary"
+        );
+        assert!(
+            !state.remove("primary"),
+            "remove numa segunda chamada deve reportar ausência"
         );
         state
             .send("live-wide", "uci".to_string())
