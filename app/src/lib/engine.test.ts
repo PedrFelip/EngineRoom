@@ -9,38 +9,74 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@tauri-apps/api/core', () => ({ invoke: mocks.invoke }))
 vi.mock('@tauri-apps/api/event', () => ({ listen: mocks.listen }))
 
-import { engineSend, engineStart, engineStop, probeEngine } from './engine'
+import {
+  engineSend,
+  engineStart,
+  engineStop,
+  onEngineLine,
+  probeEngine,
+} from './engine'
 
-type LineHandler = (event: { payload: string }) => void
+type LineHandler = (event: { payload: { id: string; line: string } }) => void
 
 beforeEach(() => {
   mocks.invoke.mockReset()
   mocks.listen.mockReset()
 })
 
-describe('engine thin wrappers', () => {
-  it('engineStart forwards null path when omitted', async () => {
+describe('engine thin wrappers (multi-engine)', () => {
+  it('engineStart passes id, default sidecar and null path when omitted', async () => {
     mocks.invoke.mockResolvedValue(undefined)
-    await engineStart()
-    expect(mocks.invoke).toHaveBeenCalledWith('engine_spawn', { path: null })
+    await engineStart('primary')
+    expect(mocks.invoke).toHaveBeenCalledWith('engine_spawn', {
+      id: 'primary',
+      sidecar: null,
+      path: null,
+    })
   })
 
-  it('engineStart trims a custom path', async () => {
+  it('engineStart forwards a named sidecar and a trimmed custom path', async () => {
     mocks.invoke.mockResolvedValue(undefined)
-    await engineStart('  /usr/bin/stockfish  ')
+    await engineStart('live-wide', 'stockfish-lite', '  /usr/bin/stockfish  ')
     expect(mocks.invoke).toHaveBeenCalledWith('engine_spawn', {
+      id: 'live-wide',
+      sidecar: 'stockfish-lite',
       path: '/usr/bin/stockfish',
     })
   })
 
-  it('engineSend / engineStop forward their commands', async () => {
+  it('engineSend routes a line to a specific id', async () => {
     mocks.invoke.mockResolvedValue(undefined)
-    await engineSend('go depth 20')
-    await engineStop()
+    await engineSend('live-wide', 'go infinite')
     expect(mocks.invoke).toHaveBeenCalledWith('engine_send', {
-      line: 'go depth 20',
+      id: 'live-wide',
+      line: 'go infinite',
     })
-    expect(mocks.invoke).toHaveBeenCalledWith('engine_stop')
+  })
+
+  it('engineStop targets a specific id', async () => {
+    mocks.invoke.mockResolvedValue(undefined)
+    await engineStop('primary')
+    expect(mocks.invoke).toHaveBeenCalledWith('engine_stop', { id: 'primary' })
+  })
+
+  it('onEngineLine forwards id and line extracted from the payload', async () => {
+    let lineCb: LineHandler | undefined
+    mocks.listen.mockImplementation(async (_event, cb) => {
+      lineCb = cb as LineHandler
+      return () => {}
+    })
+
+    const received: Array<[string, string]> = []
+    await onEngineLine((id, line) => received.push([id, line]))
+
+    lineCb?.({ payload: { id: 'primary', line: 'uciok' } })
+    lineCb?.({ payload: { id: 'live-wide', line: 'info depth 10' } })
+
+    expect(received).toEqual([
+      ['primary', 'uciok'],
+      ['live-wide', 'info depth 10'],
+    ])
   })
 })
 
@@ -53,11 +89,15 @@ describe('probeEngine', () => {
       return () => {}
     })
     mocks.invoke.mockImplementation(
-      async (cmd: string, args?: { line?: string }) => {
-        if (cmd === 'engine_send' && args?.line === 'uci') {
+      async (cmd: string, args?: { line?: string; id?: string }) => {
+        if (
+          cmd === 'engine_send' &&
+          args?.line === 'uci' &&
+          args?.id === 'probe'
+        ) {
           setTimeout(() => {
-            lineCb?.({ payload: 'id name Stockfish 18' })
-            lineCb?.({ payload: 'uciok' })
+            lineCb?.({ payload: { id: 'probe', line: 'id name Stockfish 18' } })
+            lineCb?.({ payload: { id: 'probe', line: 'uciok' } })
           }, 0)
         }
         return undefined
@@ -74,10 +114,17 @@ describe('probeEngine', () => {
 
     // Regression guard: the probe MUST actually issue the `uci` command,
     // otherwise the engine never answers and the probe times out.
-    expect(mocks.invoke).toHaveBeenCalledWith('engine_send', { line: 'uci' })
-    expect(mocks.invoke).toHaveBeenCalledWith('engine_spawn', { path: null })
+    expect(mocks.invoke).toHaveBeenCalledWith('engine_send', {
+      id: 'probe',
+      line: 'uci',
+    })
+    expect(mocks.invoke).toHaveBeenCalledWith('engine_spawn', {
+      id: 'probe',
+      sidecar: null,
+      path: null,
+    })
     // cleanup: engine is stopped at the end.
-    expect(mocks.invoke).toHaveBeenCalledWith('engine_stop')
+    expect(mocks.invoke).toHaveBeenCalledWith('engine_stop', { id: 'probe' })
   })
 
   it('reports failure when uciok never arrives (timeout)', async () => {
@@ -89,15 +136,21 @@ describe('probeEngine', () => {
     expect(res.ok).toBe(false)
     expect(res.error).toMatch(/Tempo esgotado/i)
     // it still tried to talk to the engine
-    expect(mocks.invoke).toHaveBeenCalledWith('engine_send', { line: 'uci' })
+    expect(mocks.invoke).toHaveBeenCalledWith('engine_send', {
+      id: 'probe',
+      line: 'uci',
+    })
   })
 
   it('reports failure when the engine fails to spawn', async () => {
     mocks.listen.mockResolvedValue(() => {})
-    mocks.invoke.mockImplementation(async (cmd: string) => {
-      if (cmd === 'engine_spawn') throw new Error('spawn boom')
-      return undefined
-    })
+    mocks.invoke.mockImplementation(
+      async (cmd: string, args?: { id?: string }) => {
+        if (cmd === 'engine_spawn' && args?.id === 'probe')
+          throw new Error('spawn boom')
+        return undefined
+      },
+    )
 
     const res = await probeEngine(undefined, { timeoutMs: 500 })
 
@@ -110,7 +163,33 @@ describe('probeEngine', () => {
     const res = await probeEngine('/opt/stockfish', { timeoutMs: 2000 })
     expect(res.ok).toBe(true)
     expect(mocks.invoke).toHaveBeenCalledWith('engine_spawn', {
+      id: 'probe',
+      sidecar: null,
       path: '/opt/stockfish',
     })
+  })
+
+  it('ignores lines emitted by other engine ids', async () => {
+    let lineCb: LineHandler | undefined
+    mocks.listen.mockImplementation(async (_event, cb) => {
+      lineCb = cb as LineHandler
+      return () => {}
+    })
+    mocks.invoke.mockImplementation(
+      async (cmd: string, args?: { line?: string; id?: string }) => {
+        if (cmd === 'engine_send' && args?.line === 'uci') {
+          setTimeout(() => {
+            // Another engine's noise must not satisfy the probe.
+            lineCb?.({ payload: { id: 'live-wide', line: 'uciok' } })
+            // Then the probe's own uciok.
+            lineCb?.({ payload: { id: 'probe', line: 'uciok' } })
+          }, 0)
+        }
+        return undefined
+      },
+    )
+
+    const res = await probeEngine(undefined, { timeoutMs: 2000 })
+    expect(res.ok).toBe(true)
   })
 })

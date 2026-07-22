@@ -166,6 +166,11 @@ export type EngineMode = AnalyzeControl['mode']
  * Cache de avaliações por posição, chaveado por (fen, mode, value, multipv),
  * onde `value` é `depth` (modo profundidade) ou `movetimeMs` (modo tempo).
  * `get` devolve null em caso de miss; `put` grava a avaliação alcançada.
+ *
+ * Os métodos `getInfinite`/`putInfinite` são opcionais e guardam o resultado
+ * mais profundo atingido pelo refino contínuo (`go infinite`), sob a chave
+ * `(fen, mode='infinite', depth=0)` — sentinel — com todas as slots dentro de
+ * `lines`. São injetados quando o caller suporta refino ao vivo.
  */
 export interface PositionCache {
   get(
@@ -180,6 +185,8 @@ export interface PositionCache {
     value: number,
     multipv: number,
   ): Promise<void>
+  getInfinite?(fen: string): Promise<RawPosition | null>
+  putInfinite?(pos: RawPosition): Promise<void>
 }
 
 interface ExtractedGame {
@@ -312,7 +319,13 @@ export async function analyzeGame(
   control: AnalyzeControl,
   port: EnginePort,
   multipv = 1,
-  opts: { threads?: number; hashMb?: number; cache?: PositionCache } = {},
+  opts: {
+    threads?: number
+    hashMb?: number
+    cache?: PositionCache
+    /** Quando true, não envia `quit` ao final — a engine fica viva para refino ao vivo. */
+    keepAlive?: boolean
+  } = {},
 ): Promise<ReviewResult> {
   const { positionFens, moves } = extractGame(pgn)
   const keyValue = controlKeyValue(control)
@@ -355,7 +368,7 @@ export async function analyzeGame(
     }
     raw.push(pos)
   }
-  await port.send('quit')
+  if (!opts.keepAlive) await port.send('quit')
 
   const opening = await lookupOpening(moves.map((m) => m.san))
   const book: BookInfo | undefined = opening
