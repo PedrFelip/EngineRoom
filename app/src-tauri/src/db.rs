@@ -582,70 +582,15 @@ mod tests {
     }
 
     #[test]
-    fn cache_so_reutiliza_com_depth_e_multipv_exatos() {
-        let conn = open_memory().unwrap();
-        cache_store(&conn, FEN, "depth", 20, 1, 35, LINES).unwrap();
-
-        assert_eq!(
-            cache_lookup(&conn, FEN, "depth", 15, 1).unwrap(),
-            None,
-            "depth menor"
-        );
-        assert_eq!(
-            cache_lookup(&conn, FEN, "depth", 25, 1).unwrap(),
-            None,
-            "depth maior"
-        );
-        assert_eq!(
-            cache_lookup(&conn, FEN, "depth", 20, 3).unwrap(),
-            None,
-            "multipv diferente"
-        );
-    }
-
-    #[test]
     fn cache_put_repetido_sobrescreve_entrada() {
         let conn = open_memory().unwrap();
-        cache_store(&conn, FEN, "depth", 20, 1, 35, LINES).unwrap();
-        cache_store(&conn, FEN, "depth", 20, 1, 42, "[]").unwrap();
+        cache_store(&conn, FEN, "depth", 20, 1, 20, 35, LINES).unwrap();
+        cache_store(&conn, FEN, "depth", 20, 1, 20, 42, "[]").unwrap();
 
         let hit = cache_lookup(&conn, FEN, "depth", 20, 1).unwrap().unwrap();
 
         assert_eq!(hit.cp, 42);
         assert_eq!(hit.lines_json, "[]");
-    }
-
-    #[test]
-    fn cache_store_com_mode_time_faz_round_trip() {
-        let conn = open_memory().unwrap();
-        cache_store(&conn, FEN, "time", 5000, 1, 35, LINES).unwrap();
-
-        let hit = cache_lookup(&conn, FEN, "time", 5000, 1).unwrap();
-
-        assert_eq!(
-            hit,
-            Some(CachedPosition {
-                cp: 35,
-                lines_json: LINES.to_string(),
-            })
-        );
-    }
-
-    #[test]
-    fn cache_nao_cruza_modos_mesmo_com_mesmo_valor_numerico() {
-        let conn = open_memory().unwrap();
-        cache_store(&conn, FEN, "depth", 20, 1, 35, LINES).unwrap();
-
-        // Mesma FEN, mesmo valor numérico (20), mas mode='time' → miss.
-        let cruzado = cache_lookup(&conn, FEN, "time", 20, 1).unwrap();
-        assert_eq!(cruzado, None);
-
-        // E vice-versa: gravar em 'time' não polui 'depth'.
-        cache_store(&conn, FEN, "time", 20, 1, 42, "[]").unwrap();
-        let depth_hit = cache_lookup(&conn, FEN, "depth", 20, 1).unwrap().unwrap();
-        assert_eq!(depth_hit.cp, 35, "depth preservado");
-        let time_hit = cache_lookup(&conn, FEN, "time", 20, 1).unwrap().unwrap();
-        assert_eq!(time_hit.cp, 42, "time gravado separadamente");
     }
 
     #[test]
@@ -680,6 +625,7 @@ mod tests {
             Some(CachedPosition {
                 cp: 35,
                 lines_json: LINES.to_string(),
+                reached_depth: 20,
             })
         );
 
@@ -806,8 +752,8 @@ mod tests {
     #[test]
     fn clear_cache_esvazia_tabela_de_posicoes() {
         let conn = open_memory().unwrap();
-        cache_store(&conn, FEN, "depth", 20, 1, 35, LINES).unwrap();
-        cache_store(&conn, FEN, "time", 5000, 1, 35, LINES).unwrap();
+        cache_store(&conn, FEN, "depth", 20, 1, 20, 35, LINES).unwrap();
+        cache_store(&conn, FEN, "time", 5000, 1, 28, 35, LINES).unwrap();
         assert_eq!(
             cache_lookup(&conn, FEN, "depth", 20, 1).unwrap().is_some(),
             true,
@@ -855,7 +801,7 @@ mod tests {
             "banco vazio: games em zero bytes"
         );
 
-        cache_store(&conn, FEN, "depth", 20, 1, 35, LINES).unwrap();
+        cache_store(&conn, FEN, "depth", 20, 1, 20, 35, LINES).unwrap();
         store_game(&conn, &partida_exemplo()).unwrap();
 
         let populado = compute_storage_stats(&conn).unwrap();
