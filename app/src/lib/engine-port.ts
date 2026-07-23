@@ -2,18 +2,11 @@ import type { EnginePort } from './analyze'
 import { engineSend, engineStart, engineStop, onEngineLine } from './engine'
 
 export interface TauriEnginePort extends EnginePort {
-  /** id under which this port's engine is registered with the Rust layer. */
-  readonly id: string
   dispose: () => Promise<void>
 }
 
 /**
- * Cria um EnginePort sobre um processo Stockfish registrado sob `id`. Cada
- * porta é dona do seu id — múltiplas portas podem coexistir, cada uma ouvindo
- * só as linhas da sua engine.
- *
- * `sidecar` é o basename do sidecar Tauri (default `"stockfish"`); `path` é um
- * caminho absoluto para um binário custom. `path` vence sobre `sidecar`.
+ * Cria um EnginePort sobre o processo Stockfish do Tauri.
  *
  * `isCancelled` é consultado entre cada etapa (stop → start → listen) para que
  * um efeito abortado (ex.: StrictMode em dev, que monta→desmonta→monta) saia
@@ -22,33 +15,29 @@ export interface TauriEnginePort extends EnginePort {
  * respostas (mesmo uciok/readyok). Devolve null se abortado.
  */
 export async function createTauriEnginePort(
-  id: string,
-  sidecar: string | undefined,
   path: string | undefined,
   isCancelled: () => boolean,
 ): Promise<TauriEnginePort | null> {
-  await engineStop(id).catch(() => {})
+  await engineStop().catch(() => {})
   if (isCancelled()) return null
-  await engineStart(id, sidecar, path)
+  await engineStart(path)
   if (isCancelled()) {
-    await engineStop(id).catch(() => {})
+    await engineStop().catch(() => {})
     return null
   }
   const handlers = new Set<(line: string) => void>()
-  const unlisten = await onEngineLine((lineId, line) => {
-    if (lineId !== id) return
+  const unlisten = await onEngineLine((line) => {
     handlers.forEach((h) => {
       h(line)
     })
   })
   if (isCancelled()) {
     unlisten()
-    await engineStop(id).catch(() => {})
+    await engineStop().catch(() => {})
     return null
   }
   return {
-    id,
-    send: (cmd: string) => engineSend(id, cmd),
+    send: (cmd: string) => engineSend(cmd),
     onLine(handler: (line: string) => void) {
       handlers.add(handler)
       return () => {
@@ -57,7 +46,7 @@ export async function createTauriEnginePort(
     },
     async dispose() {
       unlisten()
-      await engineStop(id).catch(() => {})
+      await engineStop().catch(() => {})
     },
   }
 }

@@ -21,8 +21,6 @@ interface SettingsContextValue {
   setEnginePath: (path: string) => void
   setSoundEnabled: (enabled: boolean) => void
   setSoundVolume: (volume: number) => void
-  setLivePreset: (preset: Settings['livePreset']) => void
-  setLiveWideOn: (on: boolean) => void
   reset: () => void
 }
 
@@ -63,15 +61,6 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       })),
     [],
   )
-  const setLivePreset = useCallback(
-    (livePreset: Settings['livePreset']) =>
-      setSettings((s) => ({ ...s, livePreset })),
-    [],
-  )
-  const setLiveWideOn = useCallback(
-    (on: boolean) => setSettings((s) => ({ ...s, liveWideOn: on })),
-    [],
-  )
   const reset = useCallback(() => setSettings({ ...DEFAULT_SETTINGS }), [])
 
   const value = useMemo<SettingsContextValue>(
@@ -81,20 +70,9 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       setEnginePath,
       setSoundEnabled,
       setSoundVolume,
-      setLivePreset,
-      setLiveWideOn,
       reset,
     }),
-    [
-      settings,
-      setTheme,
-      setEnginePath,
-      setSoundEnabled,
-      setSoundVolume,
-      setLivePreset,
-      setLiveWideOn,
-      reset,
-    ],
+    [settings, setTheme, setEnginePath, setSoundEnabled, setSoundVolume, reset],
   )
 
   return (

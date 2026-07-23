@@ -1,7 +1,5 @@
 export type Theme = 'dark' | 'light'
 
-export type LivePresetId = 'leve' | 'equilibrado' | 'pesado'
-
 export interface Settings {
   theme: Theme
   /** Empty string = use the embedded Stockfish sidecar. Otherwise an absolute path. */
@@ -10,10 +8,6 @@ export interface Settings {
   soundEnabled: boolean
   /** Volume do som de movimentação, em [0, 1]. */
   soundVolume: number
-  /** Preset de sizing aplicado às engines no refino ao vivo. */
-  livePreset: LivePresetId
-  /** Liga/desliga a engine leve (variações) no refino ao vivo. Persiste entre sessões. */
-  liveWideOn: boolean
 }
 
 export const SETTINGS_KEY = 'engineroom.settings.v1'
@@ -23,8 +17,6 @@ export const DEFAULT_SETTINGS: Settings = {
   enginePath: '',
   soundEnabled: true,
   soundVolume: 0.7,
-  livePreset: 'equilibrado',
-  liveWideOn: true,
 }
 
 export function loadSettings(): Settings {
@@ -39,8 +31,6 @@ export function loadSettings(): Settings {
         typeof parsed.enginePath === 'string' ? parsed.enginePath : '',
       soundEnabled: parsed.soundEnabled !== false,
       soundVolume: clampVolume(parsed.soundVolume),
-      livePreset: parsePreset(parsed.livePreset),
-      liveWideOn: parsed.liveWideOn !== false,
     }
   } catch {
     return { ...DEFAULT_SETTINGS }
@@ -52,11 +42,6 @@ function clampVolume(v: unknown): number {
   return typeof v === 'number' && Number.isFinite(v)
     ? Math.max(0, Math.min(1, v))
     : DEFAULT_SETTINGS.soundVolume
-}
-
-/** Persistido deve ser um id válido; default Equilibrado. */
-function parsePreset(v: unknown): LivePresetId {
-  return v === 'leve' || v === 'pesado' ? v : 'equilibrado'
 }
 
 export function saveSettings(settings: Settings): void {
