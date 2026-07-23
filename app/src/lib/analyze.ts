@@ -166,11 +166,6 @@ export type EngineMode = AnalyzeControl['mode']
  * Cache de avaliações por posição, chaveado por (fen, mode, value, multipv),
  * onde `value` é `depth` (modo profundidade) ou `movetimeMs` (modo tempo).
  * `get` devolve null em caso de miss; `put` grava a avaliação alcançada.
- *
- * Os métodos `getInfinite`/`putInfinite` são opcionais e guardam o resultado
- * mais profundo atingido pelo refino contínuo (`go infinite`), sob a chave
- * `(fen, mode='infinite', depth=0)` — sentinel — com todas as slots dentro de
- * `lines`. São injetados quando o caller suporta refino ao vivo.
  */
 export interface PositionCache {
   get(
@@ -185,8 +180,6 @@ export interface PositionCache {
     value: number,
     multipv: number,
   ): Promise<void>
-  getInfinite?(fen: string): Promise<RawPosition | null>
-  putInfinite?(pos: RawPosition): Promise<void>
 }
 
 interface ExtractedGame {

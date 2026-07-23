@@ -1,5 +1,4 @@
 import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
-import type { RawPosition } from '../lib/analyze'
 import { formatEngineTag } from '../lib/engine-tag'
 import { evalLabel, sideToMoveAtPly } from '../lib/eval-label'
 import { resultLabel } from '../lib/pgn'
@@ -7,13 +6,18 @@ import { cpToWinPct } from '../lib/scoring'
 import { useSettings } from '../lib/settings-context'
 import { playMoveSound } from '../lib/sound'
 import { useReview } from '../lib/use-review'
-import type { PositionAnalysis, PvLine, ReviewConfig } from '../types'
+import type {
+  Classification,
+  PositionAnalysis,
+  PvLine,
+  ReviewConfig,
+  VariationMove,
+} from '../types'
 import Board from './Board'
 import CandidateLines from './CandidateLines'
 import EvalBar from './EvalBar'
 import EvalGraph from './EvalGraph'
 import MoveList from './MoveList'
-import ReviewSettingsPanel from './ReviewSettingsPanel'
 import ReviewSummary from './ReviewSummary'
 
 interface ReviewScreenProps {
@@ -27,49 +31,40 @@ function uciToSquares(uci: string): [string, string] | null {
 }
 
 /**
- * Converte um RawPosition ao vivo (POV do lado a jogar, gerado pela engine de
- * refino) num PositionAnalysis normalizado para o POV das brancas — preserva
- * ply/fen da posição base e descarta o cp/lines/pv antigo.
- *
- * Quando o refino ainda não preencheu todos os slots multipv que a posição
- * base tinha (vindas do analyzeGame com o SF18), completamos com os slots do
- * `basePosition` — assim o painel nunca regredir pra menos linhas do que já
- * tinha antes do refino começar.
- *
- * Não computa SAN nem classification (esses dependem do fluxo do buildReview);
- * a UI lida com san=null mostrando "—".
+ * Constrói um PositionAnalysis de exibição a partir de um lance de variação
+ * (sem posição-base da linha principal). Reusa os campos que o refino
+ * preencheu no lance: afterCp (POV do lado a jogar) e lines (POV das brancas).
+ * Retorna null enquanto o lance está pendente (sem eval ainda).
  */
-function mergeLiveIntoPosition(
-  live: RawPosition,
-  base: PositionAnalysis,
+function variationToPosition(
+  move: VariationMove,
   stm: 'w' | 'b',
-): PositionAnalysis {
-  const winPct = stm === 'w' ? cpToWinPct(live.cp) : 100 - cpToWinPct(live.cp)
-  const liveLines: PvLine[] = (live.lines ?? []).map((l) => {
-    const cp = stm === 'w' ? l.cp : -l.cp
-    return {
-      multipv: l.multipv,
-      san: null,
-      cp,
-      winPct: stm === 'w' ? cpToWinPct(l.cp) : 100 - cpToWinPct(l.cp),
-      pv: l.pv,
-    }
-  })
-
-  // Completa com slots do base que a live ainda não cobriu (mínimo garantido).
-  const liveIndices = new Set(liveLines.map((l) => l.multipv))
-  const baseExtras = base.lines.filter((l) => !liveIndices.has(l.multipv))
-  const allLines = [...liveLines, ...baseExtras].sort(
-    (a, b) => a.multipv - b.multipv,
-  )
-
-  return {
-    ...base,
-    depth: live.depth,
-    cp: stm === 'w' ? live.cp : -live.cp,
+): PositionAnalysis | null {
+  if (move.afterCp === undefined && !(move.lines?.length ?? 0)) return null
+  const lines = move.lines ?? []
+  const primary = lines[0]
+  const winPct =
+    primary?.winPct ??
+    (move.afterCp !== undefined
+      ? stm === 'w'
+        ? cpToWinPct(move.afterCp)
+        : 100 - cpToWinPct(move.afterCp)
+      : 50)
+  const fallbackLine: PvLine = {
+    multipv: 1,
+    san: null,
+    cp: move.afterCp ?? 0,
     winPct,
-    pv: live.pv.length > 0 ? live.pv : base.pv,
-    lines: allLines.length > 0 ? allLines : base.lines,
+    pv: move.bestUci ? [move.bestUci] : [],
+  }
+  return {
+    ply: 0,
+    fen: move.fenAfter,
+    depth: move.depth ?? 0,
+    cp: move.afterCp ?? 0,
+    winPct,
+    pv: primary?.pv ?? fallbackLine.pv,
+    lines: lines.length > 0 ? lines : [fallbackLine],
   }
 }
 
@@ -82,28 +77,41 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
     error,
     currentPly,
     orientation,
-    livePosition,
-    liveWideAvailable,
-    liveWideOn,
-    setLiveWideOn,
-    presets,
-    applyPreset,
+    variations,
+    currentVariation,
+    currentVariationMove,
+    dests,
+    turnColor,
+    makeMove,
+    goToVariation,
+    exitVariation,
   } = review
 
   const basePosition = result?.positions[currentPly] ?? null
-  const stm = result ? sideToMoveAtPly(result.moves, currentPly) : 'w'
+  const inVariation = !!currentVariationMove
 
-  // Merge: quando há refinamento ao vivo, sobreponho cp/winPct/lines/pv/depth.
-  const position =
-    basePosition && livePosition
-      ? mergeLiveIntoPosition(livePosition, basePosition, stm)
-      : basePosition
+  // Posição exibida: variação tem sua própria posição sintetizada; linha
+  // principal mostra só o resultado do analyzeGame (sem refino ao vivo).
+  let position: PositionAnalysis | null
+  let stm: 'w' | 'b'
+  let lastMoveUci: string | null
+  let lastMoveClassification: Classification | null
 
-  const currentMove =
-    currentPly > 0 ? (result?.moves[currentPly - 1] ?? null) : null
-  const lastMoveUci = currentMove?.uci ?? null
+  if (currentVariationMove) {
+    stm = currentVariationMove.color === 'w' ? 'b' : 'w'
+    position = variationToPosition(currentVariationMove, stm)
+    lastMoveUci = currentVariationMove.uci
+    lastMoveClassification = currentVariationMove.classification ?? null
+  } else {
+    stm = result ? sideToMoveAtPly(result.moves, currentPly) : 'w'
+    position = basePosition
+    const currentMove =
+      currentPly > 0 ? (result?.moves[currentPly - 1] ?? null) : null
+    lastMoveUci = currentMove?.uci ?? null
+    lastMoveClassification = currentMove?.classification ?? null
+  }
+
   const opening = result?.moves.find((m) => m.eco)?.eco ?? null
-
   const evalBarLabel =
     position && result ? evalLabel(position.cp, position.fen, stm) : undefined
 
@@ -180,25 +188,18 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
               engineTier: config.engine.id,
             })}
             {opening ? ` · ${opening.code} ${opening.name}` : ''}
-            {livePosition ? ` · AO VIVO d${livePosition.depth}` : ''}
+            {inVariation && currentVariationMove?.depth
+              ? ` · VARIAÇÃO d${currentVariationMove.depth}`
+              : ''}
           </p>
         </div>
-        <div className='flex items-center gap-2'>
-          <ReviewSettingsPanel
-            liveWideAvailable={liveWideAvailable}
-            liveWideOn={liveWideOn}
-            onToggleWide={setLiveWideOn}
-            presets={presets}
-            onApplyPreset={applyPreset}
-          />
-          <button
-            type='button'
-            onClick={onExit}
-            className='rounded-xl bg-panel-3 px-4 py-2 text-sm font-medium text-ink transition hover:bg-edge'
-          >
-            ← Nova partida
-          </button>
-        </div>
+        <button
+          type='button'
+          onClick={onExit}
+          className='rounded-xl bg-panel-3 px-4 py-2 text-sm font-medium text-ink transition hover:bg-edge'
+        >
+          ← Nova partida
+        </button>
       </header>
 
       {status === 'error' && (
@@ -234,11 +235,19 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
                     orientation={orientation}
                     lastMove={lastMoveUci ? uciToSquares(lastMoveUci) : null}
                     arrows={bestArrow ? [bestArrow] : []}
-                    lastMoveClassification={currentMove?.classification ?? null}
+                    lastMoveClassification={lastMoveClassification}
+                    interactive={status === 'done'}
+                    turnColor={turnColor}
+                    dests={dests}
+                    onUserMove={makeMove}
                   />
                 ) : (
                   <div className='flex aspect-square w-full items-center justify-center rounded-lg border border-edge bg-panel-2/60 text-ink-dim'>
-                    {status === 'running' ? 'Analisando…' : '—'}
+                    {status === 'running'
+                      ? 'Analisando…'
+                      : inVariation
+                        ? 'Analisando jogada…'
+                        : '—'}
                   </div>
                 )}
               </div>
@@ -261,7 +270,6 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
               lines={position.lines}
               selectedMultipv={selectedMultipv}
               onSelect={setSelectedMultipv}
-              liveDepth={livePosition ? livePosition.depth : null}
             />
           ) : null}
 
@@ -271,13 +279,16 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
             </NavBtn>
             <NavBtn
               onClick={review.prev}
-              disabled={!result || currentPly === 0}
+              disabled={!result || (currentPly === 0 && !inVariation)}
             >
               ‹
             </NavBtn>
             <NavBtn
               onClick={review.next}
-              disabled={!result || currentPly >= (result?.moves.length ?? 0)}
+              disabled={
+                !result ||
+                (currentPly >= (result?.moves.length ?? 0) && !inVariation)
+              }
             >
               ›
             </NavBtn>
@@ -288,6 +299,9 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
               ⏭
             </NavBtn>
             <NavBtn onClick={review.flip}>⇅</NavBtn>
+            {inVariation ? (
+              <NavBtn onClick={exitVariation}>✕ variação</NavBtn>
+            ) : null}
           </div>
         </div>
 
@@ -299,6 +313,9 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
                 moves={result.moves}
                 currentPly={currentPly}
                 onSelect={review.goTo}
+                variations={variations}
+                currentVariation={currentVariation}
+                onSelectVariation={goToVariation}
               />
             </div>
           )}

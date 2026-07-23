@@ -135,3 +135,42 @@ export interface ReviewResult {
   moves: MoveAnalysis[]
   accuracy: AccuracyByColor
 }
+
+/**
+ * Lance jogado pelo usuário numa linha alternativa durante a revisão. Nasce
+ * "pendente" (sem afterCp/classification); o refino ao vivo preenche os campos
+ * opcionais conforme a engine avalia a posição resultante.
+ */
+export interface VariationMove {
+  id: string
+  /** Índice (1-based) do lance dentro da sua variação. */
+  ply: number
+  color: 'w' | 'b'
+  san: string
+  uci: string
+  fenBefore: string
+  fenAfter: string
+  /** cp cru (POV do lado a jogar) após o lance — serve de beforeCp do próximo. */
+  afterCp?: number
+  /** Linhas candidatas (multipv) normalizadas para o POV das brancas. */
+  lines?: PvLine[]
+  depth?: number
+  bestUci?: string
+  classification?: Classification
+  winPctBefore?: number
+  winPctAfter?: number
+  winPctLoss?: number
+}
+
+/**
+ * Sublinha jogada a partir de um ply da linha principal. `parentPly` é o índice
+ * da posição (em `ReviewResult.positions`) de onde a variação ramifica.
+ */
+export interface Variation {
+  id: string
+  parentPly: number
+  moves: VariationMove[]
+}
+
+/** Mapa de variações por ply-pai na linha principal. */
+export type VariationMap = Record<number, Variation[]>

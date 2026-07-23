@@ -1,22 +1,29 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import type { ReviewConfig, ReviewResult } from '../types'
-import { analyzeGame, type EnginePort, type RawPosition } from './analyze'
+import { Chess } from 'chess.js'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type {
+  ReviewConfig,
+  ReviewResult,
+  Variation,
+  VariationMap,
+  VariationMove,
+} from '../types'
+import { analyzeGame } from './analyze'
 import { createTauriPositionCache } from './cache'
 import { createTauriEnginePort, type TauriEnginePort } from './engine-port'
 import { saveReview } from './games'
-import { createLiveEvalSession, type LiveEvalSession } from './live-eval'
 import { useSettings } from './settings-context'
-import { computePresets, getSystemResources, type LivePreset } from './system'
-import { isReadyOk, isUciOk } from './uci'
+import { getSystemResources, recommendedHashMb } from './system'
+import {
+  createVariationEvalSession,
+  type VariationEvalSession,
+} from './variation-eval'
+import {
+  applyLiveToVariation,
+  decideUserMove,
+  defaultBeforeCpResolver,
+} from './variations'
 
 export type ReviewStatus = 'running' | 'done' | 'error'
-
-/** ID de registro das engines no Rust. */
-const DEEP_ID = 'primary'
-const WIDE_ID = 'live-wide'
-
-/** Quantas variações a wide explora por posição. */
-const WIDE_MULTIPV = 6
 
 export interface UseReview {
   result: ReviewResult | null
@@ -24,120 +31,94 @@ export interface UseReview {
   error: string | null
   currentPly: number
   orientation: 'white' | 'black'
-  /** Posição ao vivo refinada (null enquanto não há dados do refino). */
-  livePosition: RawPosition | null
-  /** True quando a engine leve está disponível nesta plataforma. */
-  liveWideAvailable: boolean
-  /** Estado corrente do toggle da engine leve. */
-  liveWideOn: boolean
-  setLiveWideOn: (on: boolean) => void
-  /** Presets computados a partir de getSystemResources (null enquanto carrega). */
-  presets: LivePreset[] | null
-  applyPreset: (preset: LivePreset) => void
   goTo: (ply: number) => void
   next: () => void
   prev: () => void
   first: () => void
   last: () => void
   flip: () => void
+  /** Linhas alternativas jogadas pelo usuário, indexadas pelo ply-pai. */
+  variations: VariationMap
+  /** Variação/ply atualmente em foco (null = linha principal). */
+  currentVariation: {
+    variationId: string
+    parentPly: number
+    ply: number
+  } | null
+  /** Destinos lícitos do lado a jogar na posição exibida (para o chessground). */
+  dests: Map<string, string[]> | null
+  /** Cor do lado a jogar na posição exibida. */
+  turnColor: 'white' | 'black' | null
+  /** FEN da posição exibida no tabuleiro (linha principal ou variação). */
+  displayedFen: string | null
+  /** Lance (de variação ou linha principal) que levou à posição exibida. */
+  currentVariationMove: VariationMove | null
+  /** Aplica um lance arrastado pelo usuário: avança a linha ou abre variação. */
+  makeMove: (uci: string) => void
+  /** Navega para um lance de uma variação. */
+  goToVariation: (variationId: string, parentPly: number, ply: number) => void
+  /** Abandona a variação e volta para a linha principal no ply-pai. */
+  exitVariation: () => void
 }
 
-/**
- * Faz o handshake UCI mínimo necessário antes de uma enginewide começar a
- * receber `position`/`go`: aguarda `uciok` e `readyok`, e seta Threads, Hash e
- * Multipv. Falhas propagam (o caller decide se ignora).
- *
- * Cada `ask` tem timeout — sem isso, uma engine que não responde deixaria o
- * hook pendurado para sempre (caso real: sidecar não encontrado em dev).
- */
-async function handshakeWide(
-  port: EnginePort,
-  opts: { threads: number; hashMb: number; multipv: number },
-): Promise<void> {
-  await askWithTimeout(port, 'uci', (l) => isUciOk(l), HANDSHAKE_TIMEOUT_MS)
-  await port.send(`setoption name Threads value ${Math.max(1, opts.threads)}`)
-  await port.send(`setoption name Hash value ${Math.max(1, opts.hashMb)}`)
-  await port.send(`setoption name Multipv value ${Math.max(1, opts.multipv)}`)
-  await askWithTimeout(
-    port,
-    'isready',
-    (l) => isReadyOk(l),
-    HANDSHAKE_TIMEOUT_MS,
-  )
-}
-
-const HANDSHAKE_TIMEOUT_MS = 8000
-
-function askWithTimeout(
-  port: EnginePort,
-  cmd: string,
-  done: (line: string) => boolean,
-  ms: number,
-): Promise<void> {
-  return new Promise((resolve, reject) => {
-    let off = () => {}
-    const timer = setTimeout(() => {
-      off()
-      reject(new Error(`timeout aguardando resposta de '${cmd}' (${ms}ms)`))
-    }, ms)
-    off = port.onLine((line) => {
-      if (done(line)) {
-        off()
-        clearTimeout(timer)
-        resolve()
-      }
-    })
-    void port.send(cmd)
-  })
-}
-
-/** Log de diagnóstico — sempre ativo enquanto debugamos a wide. */
-function debug(...args: unknown[]) {
-  console.info('[live]', ...args)
+/** Decompõe um lance UCI ("e2e4" / "e7e8q") em from/to/promotion p/ chess.js. */
+function parseUci(uci: string): {
+  from: string
+  to: string
+  promotion: string | undefined
+} {
+  return {
+    from: uci.slice(0, 2),
+    to: uci.slice(2, 4),
+    promotion: uci.length > 4 ? uci[4] : undefined,
+  }
 }
 
 export function useReview(config: ReviewConfig): UseReview {
-  const {
-    settings,
-    setLivePreset,
-    setLiveWideOn: persistLiveWideOn,
-  } = useSettings()
+  const { settings } = useSettings()
   const [result, setResult] = useState<ReviewResult | null>(null)
   const [status, setStatus] = useState<ReviewStatus>('running')
   const [error, setError] = useState<string | null>(null)
   const [currentPly, setCurrentPly] = useState(0)
   const [orientation, setOrientation] = useState<'white' | 'black'>('white')
-  const [livePosition, setLivePosition] = useState<RawPosition | null>(null)
-  const [liveWideAvailable, setLiveWideAvailable] = useState(false)
-  const [liveWideOn, setLiveWideOnState] = useState(settings.liveWideOn)
-  const [presets, setPresets] = useState<LivePreset[] | null>(null)
+  const [variations, setVariations] = useState<VariationMap>({})
+  const [currentVariation, setCurrentVariation] = useState<{
+    variationId: string
+    parentPly: number
+    ply: number
+  } | null>(null)
+  const [dests, setDests] = useState<Map<string, string[]> | null>(null)
+  const [turnColor, setTurnColor] = useState<'white' | 'black' | null>(null)
 
-  const sessionRef = useRef<LiveEvalSession | null>(null)
-  const deepPortRef = useRef<TauriEnginePort | null>(null)
-  const widePortRef = useRef<TauriEnginePort | null>(null)
-  const presetsRef = useRef<LivePreset[] | null>(null)
+  const sessionRef = useRef<VariationEvalSession | null>(null)
+  const portRef = useRef<TauriEnginePort | null>(null)
+  // Instância persistente de chess.js para validar lances do usuário e computar
+  // dests/turnColor na posição exibida. Mantida em sync pelo effect de displayedFen.
+  const chessRef = useRef<Chess | null>(null)
+  if (chessRef.current === null) chessRef.current = new Chess()
+  // Alvo do refino da engine: posição da linha principal ou de um lance de
+  // variação. Apenas posições de variação são refinadas — a linha principal
+  // mostra só o resultado do analyzeGame.
+  const analysisTargetRef = useRef<
+    | { kind: 'mainline' }
+    | { kind: 'variation'; variationId: string; moveId: string }
+  >({ kind: 'mainline' })
+  // Refs que espelham estado para closures estáveis (onMerge é criado uma vez).
+  const resultRef = useRef<ReviewResult | null>(null)
+  resultRef.current = result
+  const variationsRef = useRef<VariationMap>(variations)
+  variationsRef.current = variations
+  const resolveBeforeCpRef = useRef<
+    (v: Variation, m: VariationMove) => number | undefined
+  >(() => undefined)
+  resolveBeforeCpRef.current = (v, m) =>
+    defaultBeforeCpResolver(
+      v,
+      m,
+      (ply) => resultRef.current?.positions[ply]?.cp,
+    )
+  const idCounterRef = useRef(0)
 
-  // Carrega os recursos do sistema uma vez por sessão do hook — presets
-  // dependem de cores/RAM. Best-effort: se falhar, presets fica null e a UI
-  // pode continuar com defaults conservadores hardcoded.
-  useEffect(() => {
-    let cancelled = false
-    getSystemResources()
-      .then((sys) => {
-        if (cancelled) return
-        const list = computePresets(sys)
-        presetsRef.current = list
-        setPresets(list)
-      })
-      .catch(() => {
-        /* presets fica null — UI segue com fallback */
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [])
-
-  // biome-ignore lint/correctness/useExhaustiveDependencies: dependências intencionais — settings.liveWideOn só é lido no setup inicial; mudanças no toggle em runtime vão por setLiveWideOn→session.setWideEnabled
   useEffect(() => {
     // Partida vinda do store: reabertura instantânea, sem engine e sem regravar.
     if (config.initialResult) {
@@ -151,24 +132,30 @@ export function useReview(config: ReviewConfig): UseReview {
 
     ;(async () => {
       try {
-        const deep = await createTauriEnginePort(
-          DEEP_ID,
-          undefined, // sidecar default ("stockfish")
+        console.info('[review] createTauriEnginePort…')
+        const port = await createTauriEnginePort(
           settings.enginePath || undefined,
           () => cancelled,
         )
-        if (cancelled || !deep) return
-        deepPortRef.current = deep
-
-        // Sizing do preset selecionado (default Equilibrado). Se os presets
-        // ainda não carregaram, usa fallback conservador.
-        const preset = presetsRef.current?.find(
-          (p) => p.id === settings.livePreset,
-        ) ?? {
-          deep: { threads: 2, hashMb: 256 },
-          wide: { threads: 1, hashMb: 64 },
+        if (cancelled || !port) {
+          console.info('[review] port cancelado/null, saindo')
+          return
         }
-        const sizing = preset.deep
+        portRef.current = port
+        console.info('[review] port ok')
+
+        // Dimensiona a engine pra usar o máximo de CPU/RAM (Threads + Hash).
+        // Best-effort: se a detecção falhar, segue com os defaults do Stockfish.
+        let sizing: { threads?: number; hashMb?: number } = {}
+        try {
+          const r = await getSystemResources()
+          sizing = {
+            threads: r.threads,
+            hashMb: recommendedHashMb(r.memory_mb),
+          }
+        } catch {
+          /* fallback: defaults */
+        }
 
         const control =
           config.mode === 'time'
@@ -178,11 +165,12 @@ export function useReview(config: ReviewConfig): UseReview {
               }
             : { mode: 'depth' as const, depth: config.engine.depth }
 
-        // keepAlive: true → a engine pesada permanece viva para o refino ao vivo.
+        // keepAlive: true → a engine permanece viva para avaliar variações.
+        console.info('[review] analyzeGame começou')
         const review = await analyzeGame(
           config.pgn,
           control,
-          deep,
+          port,
           config.lines,
           {
             ...sizing,
@@ -190,6 +178,7 @@ export function useReview(config: ReviewConfig): UseReview {
             keepAlive: true,
           },
         )
+        console.info('[review] analyzeGame terminou, criando variation-eval')
         if (cancelled) return
         setResult(review)
         setCurrentPly(review.moves.length)
@@ -198,54 +187,45 @@ export function useReview(config: ReviewConfig): UseReview {
           console.warn('Falha ao salvar a partida no store:', e),
         )
 
-        // === Refino ao vivo ===
-        // Engine leve (SF17) — opcional. Sidecar "stockfish-lite" (definido em
-        // `bundle.externalBin`). Se indisponível, segue só com a pesada.
-        let widePort: TauriEnginePort | null = null
-        try {
-          debug('spawnando engine leve (sidecar "stockfish-lite")…')
-          const w = await createTauriEnginePort(
-            WIDE_ID,
-            'stockfish-lite',
-            undefined,
-            () => cancelled,
-          )
-          if (w) {
-            debug('wide spawnada, iniciando handshake')
-            await handshakeWide(w, {
-              threads: preset.wide.threads,
-              hashMb: preset.wide.hashMb,
-              multipv: WIDE_MULTIPV,
-            })
-            debug('handshake wide ok')
-            widePort = w
-            widePortRef.current = w
-            setLiveWideAvailable(true)
-          } else {
-            debug('createTauriEnginePort devolveu null (cancelado?)')
-          }
-        } catch (e) {
-          console.warn('Engine leve indisponível, seguindo só com a pesada:', e)
-        }
-
-        if (cancelled) return
-
+        // === Refino de variações ===
+        // Loop minimal sobre o SF18 já vivo (via keepAlive). Só alimenta
+        // `applyLiveToVariation` quando o alvo é uma variação. A linha principal
+        // mostra só o `result.positions[i]` do analyzeGame.
         const initialFen =
           review.positions[review.moves.length]?.fen ?? review.positions[0].fen
-
-        const session = createLiveEvalSession(
-          { deep, wide: widePort },
-          { fen: initialFen },
-          { onMerge: (pos) => setLivePosition(pos) },
-          { cache: createTauriPositionCache() },
+        const session = createVariationEvalSession(
+          port,
+          { fen: initialFen, multipv: config.lines },
+          {
+            onMerge: (pos) => {
+              const target = analysisTargetRef.current
+              console.info(
+                '[review] onMerge target=',
+                target.kind,
+                'fen=',
+                pos.fen.slice(0, 20),
+              )
+              if (target.kind !== 'variation') return
+              setVariations((prev) => {
+                const next = applyLiveToVariation(
+                  prev,
+                  target,
+                  pos,
+                  resolveBeforeCpRef.current,
+                )
+                console.info(
+                  '[review] applyLiveToVariation mudou?',
+                  next !== prev,
+                )
+                return next
+              })
+            },
+          },
         )
         sessionRef.current = session
-
-        if (widePort && !settings.liveWideOn) {
-          await session.setWideEnabled(false)
-        }
+        console.info('[review] session criada, chamando start()')
         await session.start()
-        debug('session iniciada (deep%s)', widePort ? ' + wide' : ' apenas')
+        console.info('[review] session.start() terminou')
       } catch (e) {
         if (cancelled) return
         setError(e instanceof Error ? e.message : String(e))
@@ -256,74 +236,242 @@ export function useReview(config: ReviewConfig): UseReview {
     return () => {
       cancelled = true
       const session = sessionRef.current
-      const deep = deepPortRef.current
-      const wide = widePortRef.current
+      const port = portRef.current
       sessionRef.current = null
-      deepPortRef.current = null
-      widePortRef.current = null
-      setLivePosition(null)
-      setLiveWideAvailable(false)
+      portRef.current = null
       void (async () => {
         try {
           if (session) await session.stop()
         } catch {
           /* ignore */
         }
-        await deep?.dispose().catch(() => {})
-        await wide?.dispose().catch(() => {})
+        await port?.dispose().catch(() => {})
       })()
     }
   }, [config, settings.enginePath])
 
-  // Quando o usuário troca de ply, a session refina a nova posição.
+  // Variação em foco e lance atual dentro dela (null = linha principal).
+  const currentVariationData = useMemo(() => {
+    if (!currentVariation) return null
+    const list = variations[currentVariation.parentPly] ?? []
+    return list.find((v) => v.id === currentVariation.variationId) ?? null
+  }, [currentVariation, variations])
+
+  const currentVariationMove = useMemo(() => {
+    if (!currentVariation || !currentVariationData) return null
+    return currentVariationData.moves[currentVariation.ply - 1] ?? null
+  }, [currentVariation, currentVariationData])
+
+  const displayedFen =
+    currentVariationMove?.fenAfter ?? result?.positions[currentPly]?.fen ?? null
+
+  // Espelha o alvo do refino para o ref lido pelo onMerge (criado uma só vez).
+  if (currentVariation && currentVariationMove) {
+    analysisTargetRef.current = {
+      kind: 'variation',
+      variationId: currentVariation.variationId,
+      moveId: currentVariationMove.id,
+    }
+  } else {
+    analysisTargetRef.current = { kind: 'mainline' }
+  }
+
+  // Sincroniza o chess.js com a posição exibida (compute dests/turnColor) e
+  // reponta a session de refino. Depende só do FEN exibido — assim o refino
+  // progressivo de uma mesma posição não é reiniciado quando o lance recebe nota.
   useEffect(() => {
-    if (!result || !sessionRef.current) return
-    const fen = result.positions[currentPly]?.fen
-    if (!fen) return
-    setLivePosition(null)
-    void sessionRef.current.setFen(fen).catch(() => {})
-  }, [currentPly, result])
+    if (!displayedFen) return
+    console.info(
+      '[review] displayedFen effect:',
+      displayedFen.slice(0, 24),
+      'session?',
+      !!sessionRef.current,
+    )
+    const chess = chessRef.current
+    if (chess) {
+      try {
+        chess.load(displayedFen)
+        const map = new Map<string, string[]>()
+        for (const m of chess.moves({ verbose: true })) {
+          const arr = map.get(m.from)
+          if (arr) arr.push(m.to)
+          else map.set(m.from, [m.to])
+        }
+        setDests(map.size > 0 ? map : null)
+        setTurnColor(chess.turn() === 'w' ? 'white' : 'black')
+      } catch {
+        setDests(null)
+        setTurnColor(null)
+      }
+    }
+    if (!sessionRef.current) return
+    void sessionRef.current.setFen(displayedFen).catch(() => {})
+  }, [displayedFen])
 
   const total = result?.moves.length ?? 0
 
   const goTo = useCallback(
-    (ply: number) => setCurrentPly(Math.max(0, Math.min(total, ply))),
+    (ply: number) => {
+      setCurrentVariation(null)
+      setCurrentPly(Math.max(0, Math.min(total, ply)))
+    },
     [total],
   )
-  const next = useCallback(
-    () => setCurrentPly((p) => Math.min(total, p + 1)),
-    [total],
-  )
-  const prev = useCallback(() => setCurrentPly((p) => Math.max(0, p - 1)), [])
-  const first = useCallback(() => setCurrentPly(0), [])
-  const last = useCallback(() => setCurrentPly(total), [total])
+
+  const next = useCallback(() => {
+    if (currentVariation) {
+      const v = variationsRef.current[currentVariation.parentPly]?.find(
+        (x) => x.id === currentVariation.variationId,
+      )
+      const len = v?.moves.length ?? 0
+      if (currentVariation.ply < len) {
+        setCurrentVariation({
+          ...currentVariation,
+          ply: currentVariation.ply + 1,
+        })
+      }
+      return
+    }
+    setCurrentPly((p) => Math.min(total, p + 1))
+  }, [currentVariation, total])
+
+  const prev = useCallback(() => {
+    if (currentVariation) {
+      if (currentVariation.ply > 1) {
+        setCurrentVariation({
+          ...currentVariation,
+          ply: currentVariation.ply - 1,
+        })
+      } else {
+        setCurrentVariation(null)
+      }
+      return
+    }
+    setCurrentPly((p) => Math.max(0, p - 1))
+  }, [currentVariation])
+
+  const first = useCallback(() => {
+    setCurrentVariation(null)
+    setCurrentPly(0)
+  }, [])
+  const last = useCallback(() => {
+    setCurrentVariation(null)
+    setCurrentPly(total)
+  }, [total])
   const flip = useCallback(
     () => setOrientation((o) => (o === 'white' ? 'black' : 'white')),
     [],
   )
 
-  const setLiveWideOn = useCallback(
-    (on: boolean) => {
-      setLiveWideOnState(on)
-      persistLiveWideOn(on)
-      void sessionRef.current?.setWideEnabled(on).catch(() => {})
+  const goToVariation = useCallback(
+    (variationId: string, parentPly: number, ply: number) => {
+      // Mantém currentPly sincronizado com o ply-pai (invariante: dentro de
+      // variação, currentPly === parentPly → sair volta ao ponto de ramificação).
+      setCurrentPly(parentPly)
+      setCurrentVariation({ variationId, parentPly, ply })
     },
-    [persistLiveWideOn],
+    [],
   )
 
-  const applyPreset = useCallback(
-    (preset: LivePreset) => {
-      setLivePreset(preset.id)
-      const session = sessionRef.current
-      if (!session) return
-      void session
-        .applyHeavyResources(preset.deep.threads, preset.deep.hashMb)
-        .catch(() => {})
-      void session
-        .applyWideResources(preset.wide.threads, preset.wide.hashMb)
-        .catch(() => {})
+  const exitVariation = useCallback(() => {
+    setCurrentVariation(null)
+  }, [])
+
+  const nextId = useCallback((prefix: 'm' | 'v') => {
+    idCounterRef.current += 1
+    return `${prefix}${idCounterRef.current}`
+  }, [])
+
+  const makeMove = useCallback(
+    (uci: string) => {
+      const chess = chessRef.current
+      if (!chess || !result) return
+      const parsed = parseUci(uci)
+      const fenBefore = chess.fen()
+      let moveObj: ReturnType<Chess['move']> | null = null
+      try {
+        moveObj = chess.move({
+          from: parsed.from,
+          to: parsed.to,
+          promotion: parsed.promotion,
+        })
+      } catch {
+        return
+      }
+      if (!moveObj) return
+      const fenAfter = chess.fen()
+      const color = moveObj.color // 'w' | 'b'
+      const san = moveObj.san
+
+      // Dentro de variação: acrescenta à variação corrente.
+      if (currentVariation) {
+        const list = variationsRef.current[currentVariation.parentPly] ?? []
+        const vIdx = list.findIndex(
+          (v) => v.id === currentVariation.variationId,
+        )
+        if (vIdx === -1) return
+        const v = list[vIdx]
+        const newMove: VariationMove = {
+          id: nextId('m'),
+          ply: v.moves.length + 1,
+          color,
+          san,
+          uci,
+          fenBefore,
+          fenAfter,
+        }
+        const newV: Variation = { ...v, moves: [...v.moves, newMove] }
+        setVariations({
+          ...variationsRef.current,
+          [v.parentPly]: [
+            ...list.slice(0, vIdx),
+            newV,
+            ...list.slice(vIdx + 1),
+          ],
+        })
+        setCurrentVariation({
+          variationId: v.id,
+          parentPly: v.parentPly,
+          ply: newMove.ply,
+        })
+        return
+      }
+
+      // Na linha principal: avança se o lance coincide com o próximo, senão abre variação.
+      const nextUci = result.moves[currentPly]?.uci ?? null
+      const decision = decideUserMove(uci, currentPly, nextUci)
+      if (decision.kind === 'advance') {
+        setCurrentVariation(null)
+        setCurrentPly(currentPly + 1)
+        return
+      }
+      const parentPly = decision.parentPly
+      const firstMove: VariationMove = {
+        id: nextId('m'),
+        ply: 1,
+        color,
+        san,
+        uci,
+        fenBefore,
+        fenAfter,
+      }
+      const newV: Variation = {
+        id: nextId('v'),
+        parentPly,
+        moves: [firstMove],
+      }
+      const list = variationsRef.current[parentPly] ?? []
+      setVariations({
+        ...variationsRef.current,
+        [parentPly]: [...list, newV],
+      })
+      setCurrentVariation({
+        variationId: newV.id,
+        parentPly,
+        ply: 1,
+      })
     },
-    [setLivePreset],
+    [currentVariation, currentPly, result, nextId],
   )
 
   return {
@@ -332,17 +480,20 @@ export function useReview(config: ReviewConfig): UseReview {
     error,
     currentPly,
     orientation,
-    livePosition,
-    liveWideAvailable,
-    liveWideOn,
-    setLiveWideOn,
-    presets,
-    applyPreset,
     goTo,
     next,
     prev,
     first,
     last,
     flip,
+    variations,
+    currentVariation,
+    dests,
+    turnColor,
+    displayedFen,
+    currentVariationMove,
+    makeMove,
+    goToVariation,
+    exitVariation,
   }
 }

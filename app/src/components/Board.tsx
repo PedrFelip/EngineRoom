@@ -1,7 +1,7 @@
 import { Chessground } from 'chessground'
 import type { Api } from 'chessground/api'
 import type { Key } from 'chessground/types'
-import { useEffect, useRef } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import 'chessground/assets/chessground.base.css'
 import 'chessground/assets/chessground.brown.css'
 import 'chessground/assets/chessground.cburnett.css'
@@ -32,6 +32,14 @@ export interface BoardProps {
   viewOnly?: boolean
   /** Classificação do último lance, exibida como selo sobre a casa de destino. */
   lastMoveClassification?: Classification | null
+  /** Habilita o arraste de peças pelo usuário (linha alternativa). */
+  interactive?: boolean
+  /** Cor do lado a jogar (quando interativo). */
+  turnColor?: 'white' | 'black' | null
+  /** Destinos lícitos por casa (quando interativo). */
+  dests?: Map<string, string[]> | null
+  /** Emitido com o lance UCI ("e2e4"/"e7e8q") após o usuário arrastar uma peça. */
+  onUserMove?: (uci: string) => void
 }
 
 function toKeys(pair: [string, string]): Key[] {
@@ -64,9 +72,33 @@ export default function Board({
   arrows = [],
   viewOnly = true,
   lastMoveClassification = null,
+  interactive = false,
+  turnColor = null,
+  dests = null,
+  onUserMove,
 }: BoardProps) {
   const elRef = useRef<HTMLDivElement>(null)
   const cgRef = useRef<Api | null>(null)
+  // Mantém o handler de lance do usuário sempre atualizado sem recriar o config.
+  const onUserMoveRef = useRef(onUserMove)
+  onUserMoveRef.current = onUserMove
+
+  const movable = useMemo(() => {
+    if (!interactive) return undefined
+    return {
+      free: false,
+      color: (turnColor ?? undefined) as 'white' | 'black' | 'both' | undefined,
+      dests: (dests as unknown as Map<Key, Key[]>) ?? undefined,
+      showDests: true,
+      events: {
+        after: (orig: Key, dest: Key) =>
+          onUserMoveRef.current?.(`${orig}${dest}`),
+      },
+    }
+  }, [interactive, turnColor, dests])
+
+  // Tabuleiro interativo sempre destrava o viewOnly, ignorando o prop.
+  const effectiveViewOnly = interactive ? false : viewOnly
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: monta o Chessground uma única vez; updates vão via .set() no effect abaixo
   useEffect(() => {
@@ -76,10 +108,11 @@ export default function Board({
       orientation,
       lastMove: lastMove ? toKeys(lastMove) : undefined,
       coordinates: true,
-      viewOnly,
+      viewOnly: effectiveViewOnly,
       highlight: { lastMove: true, check: true },
       animation: { enabled: true, duration: 200 },
       drawable: { enabled: true, visible: true, shapes: shapesFrom(arrows) },
+      movable,
     })
     return () => {
       cgRef.current?.destroy()
@@ -92,10 +125,11 @@ export default function Board({
       fen,
       orientation,
       lastMove: lastMove ? toKeys(lastMove) : undefined,
-      viewOnly,
+      viewOnly: effectiveViewOnly,
       drawable: { enabled: true, visible: true, shapes: shapesFrom(arrows) },
+      movable,
     })
-  }, [fen, orientation, lastMove, arrows, viewOnly])
+  }, [fen, orientation, lastMove, arrows, effectiveViewOnly, movable])
 
   const badgeSquare = lastMove && lastMoveClassification ? lastMove[1] : null
   const badgePos = badgeSquare ? squareTopLeft(badgeSquare, orientation) : null
