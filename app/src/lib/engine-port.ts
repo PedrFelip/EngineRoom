@@ -1,5 +1,11 @@
-import type { EnginePort } from './analyze'
-import { engineSend, engineStart, engineStop, onEngineLine } from './engine'
+import type { EngineExitReason, EnginePort } from './analyze'
+import {
+  engineSend,
+  engineStart,
+  engineStop,
+  onEngineExit,
+  onEngineLine,
+} from './engine'
 
 export interface TauriEnginePort extends EnginePort {
   dispose: () => Promise<void>
@@ -12,7 +18,9 @@ export interface TauriEnginePort extends EnginePort {
  * um efeito abortado (ex.: StrictMode em dev, que monta→desmonta→monta) saia
  * antes de spawnar a engine — evitando "engine já está em execução".
  * O listener de linhas é registrado antes de qualquer send para nunca perder
- * respostas (mesmo uciok/readyok). Devolve null se abortado.
+ * respostas (mesmo uciok/readyok). O listener de exit permite que um `ask()`
+ * pendente rejeite na hora se a engine morrer, em vez de esperar o timeout.
+ * Devolve null se abortado.
  */
 export async function createTauriEnginePort(
   path: string | undefined,
@@ -31,8 +39,15 @@ export async function createTauriEnginePort(
       h(line)
     })
   })
+  const exitHandlers = new Set<(r: EngineExitReason) => void>()
+  const unlistenExit = await onEngineExit((payload) => {
+    exitHandlers.forEach((h) => {
+      h(payload)
+    })
+  })
   if (isCancelled()) {
     unlisten()
+    unlistenExit()
     await engineStop().catch(() => {})
     return null
   }
@@ -44,8 +59,15 @@ export async function createTauriEnginePort(
         handlers.delete(handler)
       }
     },
+    onExit(handler: (r: EngineExitReason) => void) {
+      exitHandlers.add(handler)
+      return () => {
+        exitHandlers.delete(handler)
+      }
+    },
     async dispose() {
       unlisten()
+      unlistenExit()
       await engineStop().catch(() => {})
     },
   }

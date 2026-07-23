@@ -162,6 +162,16 @@ fn spawn_engine(
                         let _ = app_reader.emit(LINE_EVENT, line);
                     }
                 }
+                // EOF = the process is gone. Signal exit so the frontend fails
+                // fast instead of hanging to its ask() timeout.
+                let _ = app_reader.emit(
+                    EXIT_EVENT,
+                    EngineExit {
+                        code: None,
+                        signal: None,
+                        error: Some("stdout fechado".into()),
+                    },
+                );
             });
 
             let (tx, mut incoming) = mpsc::unbounded_channel::<String>();

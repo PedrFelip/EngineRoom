@@ -1,8 +1,10 @@
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
+import type { EngineExitReason } from './analyze'
 import { isUciOk, parseIdName } from './uci'
 
 export const ENGINE_LINE_EVENT = 'engine://line'
+export const ENGINE_EXIT_EVENT = 'engine://exit'
 
 /** Spawns the engine. Pass a path to use a custom Stockfish; omit to use the embedded sidecar. */
 export function engineStart(path?: string): Promise<void> {
@@ -22,6 +24,13 @@ export function engineStop(): Promise<void> {
 /** Subscribes to every UCI line the engine prints to stdout. */
 export function onEngineLine(cb: (line: string) => void): Promise<UnlistenFn> {
   return listen<string>(ENGINE_LINE_EVENT, (e) => cb(e.payload))
+}
+
+/** Subscribes to engine process exit (clean or crash). Lets callers fail fast. */
+export function onEngineExit(
+  cb: (r: EngineExitReason) => void,
+): Promise<UnlistenFn> {
+  return listen<EngineExitReason>(ENGINE_EXIT_EVENT, (e) => cb(e.payload))
 }
 
 export interface ProbeResult {
