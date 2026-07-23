@@ -16,6 +16,22 @@ const SIDECAR: &str = "stockfish";
 /// Event name emitted to the frontend for every UCI line printed by the engine.
 pub const LINE_EVENT: &str = "engine://line";
 
+/// Event name emitted to the frontend when the engine process exits — cleanly
+/// or crashing. Without this, a swallowed crash (SIGSEGV/OOM) looks identical
+/// to "still thinking" from the frontend, which hangs `ask()` to its timeout.
+pub const EXIT_EVENT: &str = "engine://exit";
+
+/// Payload of [`EXIT_EVENT`]: why/how the engine process ended.
+#[derive(Clone, serde::Serialize)]
+struct EngineExit {
+    /// Exit code, when known (clean exit or code-bearing termination).
+    code: Option<i32>,
+    /// Signal number that killed the process, if any (e.g. 11 = SIGSEGV).
+    signal: Option<i32>,
+    /// Plugin error string (UTF-8/IO failure), when that's the cause.
+    error: Option<String>,
+}
+
 /// Holds the currently running engine process (if any).
 #[derive(Default)]
 pub struct EngineState {
