@@ -568,6 +568,64 @@ describe('analyzeGame — onProgress', () => {
     expect(snapshots).toHaveLength(3)
     expect(snapshots.map((s) => s.length)).toEqual([1, 2, 3])
   })
+
+  it('entrega win% no ponto de vista das brancas e a última chamada iguala o resultado final', async () => {
+    const port = fakePort((fen) =>
+      fen === START_FEN ? { cp: 0, pv: ['e2e4'] } : { cp: 500, pv: ['d8h4'] },
+    )
+    const snapshots: number[][] = []
+    const review = await analyzeGame('1. e4', { mode: 'depth', depth: 20 }, port, 1, {
+      onProgress: (wp) => snapshots.push(wp),
+    })
+
+    expect(snapshots).toHaveLength(2)
+    expect(snapshots[0][0]).toBeCloseTo(50, 0)
+    // após e4 as pretas estão a jogar com cp 500 → win% das brancas cai < 50
+    expect(snapshots[1][1]).toBeLessThan(50)
+    expect(snapshots[1]).toEqual(review.positions.map((p) => p.winPct))
+  })
+
+  it('dispara onProgress também para posições vindas do cache (não só do engine)', async () => {
+    let gos = 0
+    let lineCb: ((line: string) => void) | null = null
+    const port: EnginePort = {
+      send(cmd) {
+        const c = cmd.trim()
+        if (c === 'uci') lineCb?.('uciok')
+        else if (c === 'isready') lineCb?.('readyok')
+        else if (c.startsWith('go')) gos++
+      },
+      onLine(handler) {
+        lineCb = handler
+        return () => {
+          lineCb = null
+        }
+      },
+    }
+    const cache: PositionCache = {
+      async get(fen) {
+        return {
+          fen,
+          cp: 0,
+          depth: 20,
+          pv: ['e2e4'],
+          lines: [{ multipv: 1, cp: 0, pv: ['e2e4'], san: 'e4' }],
+        }
+      },
+      async put() {
+        throw new Error('cache hit não deveria gravar')
+      },
+    }
+    const snapshots: number[][] = []
+    await analyzeGame('1. e4 e5', { mode: 'depth', depth: 20 }, port, 1, {
+      cache,
+      onProgress: (wp) => snapshots.push(wp),
+    })
+
+    expect(gos).toBe(0)
+    expect(snapshots).toHaveLength(3)
+    expect(snapshots.map((s) => s.length)).toEqual([1, 2, 3])
+  })
 })
 
 describe('defaultGoTimeout', () => {
