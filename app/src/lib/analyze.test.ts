@@ -557,6 +557,19 @@ describe('analyzeGame', () => {
   })
 })
 
+describe('analyzeGame — onProgress', () => {
+  it('chama onProgress uma vez por posição, cada chamada com as winPcts acumuladas crescendo de 1 em 1', async () => {
+    const port = fakePort(() => ({ cp: 0, pv: ['e2e4'] }))
+    const snapshots: number[][] = []
+    await analyzeGame('1. e4 e5', { mode: 'depth', depth: 20 }, port, 1, {
+      onProgress: (wp) => snapshots.push(wp),
+    })
+
+    expect(snapshots).toHaveLength(3)
+    expect(snapshots.map((s) => s.length)).toEqual([1, 2, 3])
+  })
+})
+
 describe('defaultGoTimeout', () => {
   it('modo depth: orçamento fixo generoso (180s) — busca não tem limite inerente', () => {
     expect(defaultGoTimeout({ mode: 'depth', depth: 15 })).toBe(180_000)

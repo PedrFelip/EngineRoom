@@ -61,6 +61,19 @@ function sideToMoveAt(game: PlayedGame, ply: number): 'w' | 'b' {
 }
 
 /**
+ * win% da i-ésima posição (POV brancas): inverte o sinal quando as pretas
+ * estão a jogar. Mesma regra usada por `buildReview` para `positions[i].winPct`.
+ */
+function positionWinPct(
+  game: PlayedGame,
+  raw: RawPosition[],
+  i: number,
+): number {
+  const stm = sideToMoveAt(game, i)
+  return stm === 'w' ? cpToWinPct(raw[i].cp) : 100 - cpToWinPct(raw[i].cp)
+}
+
+/**
  * Constrói a revisão a partir da partida jogada e das avaliações brutas por ply.
  * `raw[i]` é a avaliação da posição após o i-ésimo ply (raw[0] = posição inicial).
  * O win% das posições é normalizado para o ponto de vista das brancas.
@@ -428,9 +441,16 @@ export async function analyzeGame(
     keepAlive?: boolean
     /** Override do timeout do `go` por posição (default via `defaultGoTimeout`). */
     goTimeoutMs?: number
+    /**
+     * Recebe as winPcts (POV brancas) acumuladas após cada posição analisada —
+     * uma chamada por posição, sempre com a lista completa até ali. Usado para
+     * alimentar o gráfico de avaliação durante o loading.
+     */
+    onProgress?: (winPcts: number[]) => void
   } = {},
 ): Promise<ReviewResult> {
   const { positionFens, moves } = extractGame(pgn)
+  const game = { startFen: positionFens[0], moves }
   const keyValue = controlKeyValue(control)
   const goTimeoutMs = opts.goTimeoutMs ?? defaultGoTimeout(control)
 
@@ -441,6 +461,7 @@ export async function analyzeGame(
   })
 
   const raw: RawPosition[] = []
+  const winPcts: number[] = []
   for (let i = 0; i < positionFens.length; i++) {
     const fen = positionFens[i]
     const term = terminalCp(fen)
@@ -467,6 +488,8 @@ export async function analyzeGame(
       }
     }
     raw.push(pos)
+    winPcts.push(positionWinPct(game, raw, raw.length - 1))
+    opts.onProgress?.(winPcts.slice())
   }
   if (!opts.keepAlive) await port.send('quit')
 
@@ -475,5 +498,5 @@ export async function analyzeGame(
     ? { maxPly: opening.moves.length, eco: opening }
     : undefined
 
-  return buildReview({ startFen: positionFens[0], moves }, raw, book)
+  return buildReview(game, raw, book)
 }
