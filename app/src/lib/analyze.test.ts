@@ -626,6 +626,23 @@ describe('analyzeGame — onProgress', () => {
     expect(snapshots).toHaveLength(3)
     expect(snapshots.map((s) => s.length)).toEqual([1, 2, 3])
   })
+
+  it('dispara onProgress para posições terminais (xeque-mate) resolvidas sem a engine', async () => {
+    const port = fakePort(() => ({ cp: 0, pv: [] }))
+    const snapshots: number[][] = []
+    const review = await analyzeGame(
+      '1. f3 e5 2. g4 Qh4#',
+      { mode: 'depth', depth: 20 },
+      port,
+      1,
+      { onProgress: (wp) => snapshots.push(wp) },
+    )
+
+    // 5 posições; a última é xeque-mate (resolvida por terminalCp, sem engine)
+    expect(snapshots).toHaveLength(review.positions.length)
+    expect(snapshots).toHaveLength(5)
+    expect(snapshots.at(-1)).toEqual(review.positions.map((p) => p.winPct))
+  })
 })
 
 describe('defaultGoTimeout', () => {
