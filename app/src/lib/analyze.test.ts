@@ -4,6 +4,7 @@ import {
   buildReview,
   configureEngine,
   defaultGoTimeout,
+  type EngineExitReason,
   type EnginePort,
   type PositionCache,
 } from './analyze'
@@ -519,6 +520,40 @@ describe('analyzeGame', () => {
       }),
     ).rejects.toThrow(/não respondeu a 'go depth 21'/)
     expect(sent).toContain('stop')
+  })
+
+  it('rejeita na hora (sem esperar o timeout) quando a engine morre durante o `go`', async () => {
+    let lineCb: ((line: string) => void) | null = null
+    let exitCb: ((r: EngineExitReason) => void) | null = null
+    const port: EnginePort = {
+      send(cmd) {
+        const c = cmd.trim()
+        if (c === 'uci') lineCb?.('uciok')
+        else if (c === 'isready') lineCb?.('readyok')
+        else if (c.startsWith('go'))
+          exitCb?.({ code: null, signal: 11, error: undefined })
+      },
+      onLine(handler) {
+        lineCb = handler
+        return () => {
+          lineCb = null
+        }
+      },
+      onExit(handler) {
+        exitCb = handler
+        return () => {
+          exitCb = null
+        }
+      },
+    }
+
+    const t0 = Date.now()
+    await expect(
+      analyzeGame('1. e4', { mode: 'depth', depth: 21 }, port, 1, {
+        goTimeoutMs: 30_000,
+      }),
+    ).rejects.toThrow(/encerrou durante 'go depth 21'/)
+    expect(Date.now() - t0).toBeLessThan(1000)
   })
 })
 

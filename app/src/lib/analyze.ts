@@ -134,10 +134,25 @@ export function buildReview(
   return { positions, moves, accuracy }
 }
 
-/** Interface do engine injetável, para testar com engine falso. */
+/** Motivo pelo qual o processo da engine encerrou (evento `engine://exit`). */
+export interface EngineExitReason {
+  /** Código de saída, quando conhecido (saída limpa ou sinal com código). */
+  code: number | null
+  /** Número do sinal que matou o processo, se houver (ex.: 11 = SIGSEGV). */
+  signal: number | null
+  /** Erro reportado pelo plugin de shell (falha de UTF-8/IO), se for o caso. */
+  error?: string
+}
+
+/**
+ * Interface do engine injetável, para testar com engine falso.
+ * `onExit` é opcional: quando presente, `ask()` rejeita imediatamente se a
+ * engine morrer, em vez de esperar o timeout completo.
+ */
 export interface EnginePort {
   send(cmd: string): void | Promise<void>
   onLine(handler: (line: string) => void): () => void
+  onExit?(handler: (reason: EngineExitReason) => void): () => void
 }
 
 /**
@@ -251,9 +266,10 @@ export async function configureEngine(
 }
 
 /**
- * Envia `cmd` pra engine e resolve quando uma linha satisfaz `done`, ou
- * rejeita após `timeoutMs` (default 10s) se a engine não responder. O listener
- * é registrado antes do send pra nunca perder a resposta.
+ * Envia `cmd` pra engine e resolve quando uma linha satisfaz `done`, rejeita
+ * após `timeoutMs` (default 10s) se a engine não responder, ou rejeita na hora
+ * se a engine morrer (via `port.onExit`). O listener é registrado antes do send
+ * pra nunca perder a resposta.
  */
 function ask(
   port: EnginePort,
@@ -262,19 +278,43 @@ function ask(
   timeoutMs = 10_000,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
-    const off = port.onLine((line) => {
+    let off: () => void = () => {}
+    let offExit: () => void = () => {}
+    let timer: ReturnType<typeof setTimeout>
+    const cleanup = () => {
+      off()
+      offExit()
+      clearTimeout(timer)
+    }
+    off = port.onLine((line) => {
       if (done(line)) {
-        off()
-        clearTimeout(timer)
+        cleanup()
         resolve()
       }
     })
-    const timer = setTimeout(() => {
-      off()
+    offExit =
+      port.onExit?.((reason) => {
+        cleanup()
+        reject(new Error(formatEngineExit(cmd, reason)))
+      }) ?? (() => {})
+    timer = setTimeout(() => {
+      cleanup()
       reject(new Error(`A engine não respondeu a '${cmd}' em ${timeoutMs}ms.`))
     }, timeoutMs)
     void port.send(cmd)
   })
+}
+
+/** Formata a mensagem de erro quando a engine encerra durante um comando. */
+function formatEngineExit(cmd: string, reason: EngineExitReason): string {
+  const detail = reason.error
+    ? `: ${reason.error}`
+    : reason.signal !== null
+      ? ` (sinal ${reason.signal})`
+      : reason.code !== null
+        ? ` (código ${reason.code})`
+        : ''
+  return `A engine encerrou durante '${cmd}'${detail}.`
 }
 
 function uciToSan(fen: string, uci: string): string | null {
