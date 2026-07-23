@@ -574,9 +574,15 @@ describe('analyzeGame — onProgress', () => {
       fen === START_FEN ? { cp: 0, pv: ['e2e4'] } : { cp: 500, pv: ['d8h4'] },
     )
     const snapshots: number[][] = []
-    const review = await analyzeGame('1. e4', { mode: 'depth', depth: 20 }, port, 1, {
-      onProgress: (wp) => snapshots.push(wp),
-    })
+    const review = await analyzeGame(
+      '1. e4',
+      { mode: 'depth', depth: 20 },
+      port,
+      1,
+      {
+        onProgress: (wp) => snapshots.push(wp),
+      },
+    )
 
     expect(snapshots).toHaveLength(2)
     expect(snapshots[0][0]).toBeCloseTo(50, 0)

@@ -29,6 +29,8 @@ export interface UseReview {
   result: ReviewResult | null
   status: ReviewStatus
   error: string | null
+  /** winPcts parciais (POV brancas) que alimentam o gráfico durante o loading. */
+  partialWinPcts: number[]
   currentPly: number
   orientation: 'white' | 'black'
   goTo: (ply: number) => void
@@ -79,6 +81,7 @@ export function useReview(config: ReviewConfig): UseReview {
   const [result, setResult] = useState<ReviewResult | null>(null)
   const [status, setStatus] = useState<ReviewStatus>('running')
   const [error, setError] = useState<string | null>(null)
+  const [partialWinPcts, setPartialWinPcts] = useState<number[]>([])
   const [currentPly, setCurrentPly] = useState(0)
   const [orientation, setOrientation] = useState<'white' | 'black'>('white')
   const [variations, setVariations] = useState<VariationMap>({})
@@ -118,6 +121,10 @@ export function useReview(config: ReviewConfig): UseReview {
       (ply) => resultRef.current?.positions[ply]?.cp,
     )
   const idCounterRef = useRef(0)
+  // Buffer de winPcts parciais + id do rAF pendente: coalesce várias posições
+  // (ex.: cache hits rápidos) num único setState por frame — loading suave.
+  const pendingWinPctsRef = useRef<number[]>([])
+  const progressRafRef = useRef<number | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -177,12 +184,22 @@ export function useReview(config: ReviewConfig): UseReview {
               ...sizing,
               cache: createTauriPositionCache(),
               keepAlive: true,
+              onProgress: (wp) => {
+                pendingWinPctsRef.current = wp
+                if (progressRafRef.current == null) {
+                  progressRafRef.current = requestAnimationFrame(() => {
+                    progressRafRef.current = null
+                    if (!cancelled) setPartialWinPcts(pendingWinPctsRef.current)
+                  })
+                }
+              },
             },
           )
           if (cancelled) return
           setResult(review)
           setCurrentPly(review.moves.length)
           setStatus('done')
+          setPartialWinPcts([])
           void saveReview(config, review).catch((e) =>
             console.warn('Falha ao salvar a partida no store:', e),
           )
@@ -230,6 +247,10 @@ export function useReview(config: ReviewConfig): UseReview {
 
     return () => {
       cancelled = true
+      if (progressRafRef.current != null) {
+        cancelAnimationFrame(progressRafRef.current)
+        progressRafRef.current = null
+      }
       const session = sessionRef.current
       const port = portRef.current
       sessionRef.current = null
@@ -474,6 +495,7 @@ export function useReview(config: ReviewConfig): UseReview {
     result,
     status,
     error,
+    partialWinPcts,
     currentPly,
     orientation,
     goTo,

@@ -4,6 +4,8 @@ interface EvalGraphProps {
   winPcts: number[]
   currentPly: number
   onSelect: (ply: number) => void
+  /** Pulsa o ponto da posição atual — usado no loading pra sinalizar análise ao vivo. */
+  pulse?: boolean
 }
 
 const HEIGHT = 96
@@ -12,6 +14,7 @@ export default function EvalGraph({
   winPcts,
   currentPly,
   onSelect,
+  pulse = false,
 }: EvalGraphProps) {
   const ref = useRef<HTMLDivElement>(null)
   const [w, setW] = useState(0)
@@ -106,7 +109,13 @@ export default function EvalGraph({
               stroke='var(--color-brand)'
               strokeWidth={1.5}
             />
-            <circle cx={cx} cy={cy} r={3.5} fill='var(--color-brand)' />
+            <circle
+              cx={cx}
+              cy={cy}
+              r={3.5}
+              fill='var(--color-brand)'
+              className={pulse ? 'eval-graph-tip' : undefined}
+            />
           </svg>
         </button>
       )}

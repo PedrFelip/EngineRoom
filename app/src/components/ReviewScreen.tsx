@@ -75,6 +75,7 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
     result,
     status,
     error,
+    partialWinPcts,
     currentPly,
     orientation,
     variations,
@@ -168,6 +169,31 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
     return () => window.removeEventListener('keydown', onKey)
   }, [result, review.prev, review.next, review.first, review.last])
 
+  // Loading: durante a análise mostra só o gráfico de avaliação crescendo no
+  // centro da tela. Sem header, board, move list ou sumário — conforme UX.
+  if (status === 'running') {
+    return (
+      <div className='flex min-h-full items-center justify-center px-4 py-10'>
+        <div className='w-full max-w-3xl'>
+          {partialWinPcts.length >= 2 ? (
+            <div className='eval-graph-loading rounded-2xl border border-edge bg-panel-2/60 p-5 shadow-lg shadow-black/20'>
+              <EvalGraph
+                winPcts={partialWinPcts}
+                currentPly={partialWinPcts.length - 1}
+                onSelect={() => {}}
+                pulse
+              />
+            </div>
+          ) : (
+            <p className='text-center text-sm text-ink-dim'>
+              Analisando primeiros lances…
+            </p>
+          )}
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className='mx-auto flex min-h-full max-w-6xl flex-col gap-4 px-4 py-6'>
       <header className='flex items-center justify-between gap-4'>
@@ -243,11 +269,7 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
                   />
                 ) : (
                   <div className='flex aspect-square w-full items-center justify-center rounded-lg border border-edge bg-panel-2/60 text-ink-dim'>
-                    {status === 'running'
-                      ? 'Analisando…'
-                      : inVariation
-                        ? 'Analisando jogada…'
-                        : '—'}
+                    {inVariation ? 'Analisando jogada…' : '—'}
                   </div>
                 )}
               </div>
