@@ -7,7 +7,7 @@ import type {
   VariationMap,
   VariationMove,
 } from '../types'
-import { analyzeGame } from './analyze'
+import { analyzeGame, configureEngine } from './analyze'
 import { createTauriPositionCache } from './cache'
 import { createTauriEnginePort, type TauriEnginePort } from './engine-port'
 import { saveReview } from './games'
@@ -120,29 +120,24 @@ export function useReview(config: ReviewConfig): UseReview {
   const idCounterRef = useRef(0)
 
   useEffect(() => {
-    // Partida vinda do store: reabertura instantânea, sem engine e sem regravar.
+    let cancelled = false
+
+    // Reabertura instantânea: mostra o resultado imediatamente, antes mesmo
+    // de spawnar a engine. Preserva a UX "sem loading" do store.
     if (config.initialResult) {
       setResult(config.initialResult)
       setCurrentPly(config.initialResult.moves.length)
       setStatus('done')
-      return
     }
-
-    let cancelled = false
 
     ;(async () => {
       try {
-        console.info('[review] createTauriEnginePort…')
         const port = await createTauriEnginePort(
           settings.enginePath || undefined,
           () => cancelled,
         )
-        if (cancelled || !port) {
-          console.info('[review] port cancelado/null, saindo')
-          return
-        }
+        if (cancelled || !port) return
         portRef.current = port
-        console.info('[review] port ok')
 
         // Dimensiona a engine pra usar o máximo de CPU/RAM (Threads + Hash).
         // Best-effort: se a detecção falhar, segue com os defaults do Stockfish.
@@ -157,75 +152,75 @@ export function useReview(config: ReviewConfig): UseReview {
           /* fallback: defaults */
         }
 
-        const control =
-          config.mode === 'time'
-            ? {
-                mode: 'time' as const,
-                movetimeMs: config.movetimeMs ?? 5000,
-              }
-            : { mode: 'depth' as const, depth: config.engine.depth }
-
-        // keepAlive: true → a engine permanece viva para avaliar variações.
-        console.info('[review] analyzeGame começou')
-        const review = await analyzeGame(
-          config.pgn,
-          control,
-          port,
-          config.lines,
-          {
-            ...sizing,
-            cache: createTauriPositionCache(),
-            keepAlive: true,
-          },
-        )
-        console.info('[review] analyzeGame terminou, criando variation-eval')
-        if (cancelled) return
-        setResult(review)
-        setCurrentPly(review.moves.length)
-        setStatus('done')
-        void saveReview(config, review).catch((e) =>
-          console.warn('Falha ao salvar a partida no store:', e),
-        )
+        // Ramo: análise nova (analyzeGame faz handshake E analisa) vs
+        // reabertura do store (só handshake manual — o review já temos).
+        let current: ReviewResult
+        if (config.initialResult) {
+          await configureEngine(port, { ...sizing, multipv: config.lines })
+          if (cancelled) return
+          current = config.initialResult
+        } else {
+          const control =
+            config.mode === 'time'
+              ? {
+                  mode: 'time' as const,
+                  movetimeMs: config.movetimeMs ?? 5000,
+                }
+              : { mode: 'depth' as const, depth: config.engine.depth }
+          // keepAlive: true → a engine permanece viva para avaliar variações.
+          const review = await analyzeGame(
+            config.pgn,
+            control,
+            port,
+            config.lines,
+            {
+              ...sizing,
+              cache: createTauriPositionCache(),
+              keepAlive: true,
+            },
+          )
+          if (cancelled) return
+          setResult(review)
+          setCurrentPly(review.moves.length)
+          setStatus('done')
+          void saveReview(config, review).catch((e) =>
+            console.warn('Falha ao salvar a partida no store:', e),
+          )
+          current = review
+        }
 
         // === Refino de variações ===
-        // Loop minimal sobre o SF18 já vivo (via keepAlive). Só alimenta
-        // `applyLiveToVariation` quando o alvo é uma variação. A linha principal
-        // mostra só o `result.positions[i]` do analyzeGame.
+        // Loop minimal sobre o SF18 já vivo. Só alimenta `applyLiveToVariation`
+        // quando o alvo é uma variação; a linha principal mostra só o
+        // `result.positions[i]` do analyzeGame.
+        // Se o usuário já navegou pra um ply diferente do final antes da engine
+        // subir, usamos o FEN exibido no lugar do "final" — evita a engine
+        // avaliar posição que ninguém está vendo.
         const initialFen =
-          review.positions[review.moves.length]?.fen ?? review.positions[0].fen
+          displayedFenRef.current ??
+          current.positions[current.moves.length]?.fen ??
+          current.positions[0].fen
         const session = createVariationEvalSession(
           port,
           { fen: initialFen, multipv: config.lines },
           {
             onMerge: (pos) => {
               const target = analysisTargetRef.current
-              console.info(
-                '[review] onMerge target=',
-                target.kind,
-                'fen=',
-                pos.fen.slice(0, 20),
-              )
               if (target.kind !== 'variation') return
-              setVariations((prev) => {
-                const next = applyLiveToVariation(
+              setVariations((prev) =>
+                applyLiveToVariation(
                   prev,
                   target,
                   pos,
                   resolveBeforeCpRef.current,
-                )
-                console.info(
-                  '[review] applyLiveToVariation mudou?',
-                  next !== prev,
-                )
-                return next
-              })
+                ),
+              )
             },
           },
         )
         sessionRef.current = session
-        console.info('[review] session criada, chamando start()')
+        if (cancelled) return
         await session.start()
-        console.info('[review] session.start() terminou')
       } catch (e) {
         if (cancelled) return
         setError(e instanceof Error ? e.message : String(e))
@@ -265,6 +260,13 @@ export function useReview(config: ReviewConfig): UseReview {
   const displayedFen =
     currentVariationMove?.fenAfter ?? result?.positions[currentPly]?.fen ?? null
 
+  // Espelho de `displayedFen` para o effect principal ler o FEN atual mesmo
+  // depois dos awaits (quando ele criar a variation-eval session). Sem isso,
+  // a engine poderia nascer apontando pra posição final enquanto o usuário
+  // já navegou pra outra.
+  const displayedFenRef = useRef<string | null>(displayedFen)
+  displayedFenRef.current = displayedFen
+
   // Espelha o alvo do refino para o ref lido pelo onMerge (criado uma só vez).
   if (currentVariation && currentVariationMove) {
     analysisTargetRef.current = {
@@ -281,12 +283,6 @@ export function useReview(config: ReviewConfig): UseReview {
   // progressivo de uma mesma posição não é reiniciado quando o lance recebe nota.
   useEffect(() => {
     if (!displayedFen) return
-    console.info(
-      '[review] displayedFen effect:',
-      displayedFen.slice(0, 24),
-      'session?',
-      !!sessionRef.current,
-    )
     const chess = chessRef.current
     if (chess) {
       try {

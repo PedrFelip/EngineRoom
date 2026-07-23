@@ -3,11 +3,10 @@
  * engine para um FEN com `go infinite` e emite a posição refinada via
  * `onMerge` conforme `info depth N multipv K …` chega.
  *
- * Diferente da antiga `LiveEvalSession`, não há engine leve/wide, presets,
- * toggle, ou cache — só o essencial para alimentar `applyLiveToVariation`
- * enquanto o usuário explora uma sublinha.
- *
- * Puro sobre `EnginePort` (test seam).
+ * Puro sobre `EnginePort` (test seam): a engine é sempre injetada, nunca
+ * instanciada aqui. O handler de linhas é registrado no construction e
+ * removido em `stop()` — descartar a session sem chamar `stop()` vaza o
+ * handler.
  */
 import type { EnginePort, RawLine, RawPosition } from './analyze'
 import type { InfoScore } from './uci'
@@ -18,14 +17,18 @@ export interface VariationEvalCallbacks {
 }
 
 export interface VariationEvalSession {
-  /** Envia `position fen <current>` seguido de `go infinite`. */
+  /** Envia `setoption Multipv` + `position fen <current>` + `go infinite`. */
   start(): Promise<void>
   /**
    * Troca de posição: para o search atual (`stop`), limpa o estado acumulado,
    * e começa um novo `go infinite` no FEN informado.
    */
   setFen(fen: string): Promise<void>
-  /** Para qualquer search em curso via UCI `stop`. A engine segue viva (idle). */
+  /**
+   * Para qualquer search em curso via UCI `stop` e desregistra o handler de
+   * linhas. A engine segue viva (idle) — só pra ser morta pelo `dispose` do
+   * port dono. Idempotente.
+   */
   stop(): Promise<void>
 }
 
@@ -75,22 +78,12 @@ export function createVariationEvalSession(
 ): VariationEvalSession {
   let curFen = initial.fen
   const slots: SlotMap = new Map()
-
-  port.onLine((line) => {
-    if (ingest(line, slots)) {
-      console.info(
-        '[var-eval] info recebida em',
-        curFen.slice(0, 20),
-        'slots:',
-        slots.size,
-      )
-      cb.onMerge(buildPosition(curFen, slots))
-    }
+  let off: (() => void) | null = port.onLine((line) => {
+    if (ingest(line, slots)) cb.onMerge(buildPosition(curFen, slots))
   })
 
   return {
     async start() {
-      console.info('[var-eval] start em', curFen.slice(0, 20))
       await port.send(
         `setoption name Multipv value ${Math.max(1, initial.multipv)}`,
       )
@@ -98,7 +91,6 @@ export function createVariationEvalSession(
       await port.send('go infinite')
     },
     async setFen(fen: string) {
-      console.info('[var-eval] setFen', fen.slice(0, 20))
       curFen = fen
       slots.clear()
       await port.send('stop')
@@ -106,7 +98,10 @@ export function createVariationEvalSession(
       await port.send('go infinite')
     },
     async stop() {
-      console.info('[var-eval] stop')
+      if (off) {
+        off()
+        off = null
+      }
       await port.send('stop')
     },
   }

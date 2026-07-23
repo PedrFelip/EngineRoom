@@ -209,18 +209,59 @@ function extractGame(pgn: string): ExtractedGame {
   return { positionFens, moves }
 }
 
+/**
+ * Handshake UCI de uma engine já spawnada: aguarda `uciok`/`readyok` e aplica
+ * `setoption` de Threads, Hash e Multipv. Reutilizável entre `analyzeGame`
+ * (análise nova) e a reabertura do store (só handshake, sem análise).
+ *
+ * Lança `Error('A engine não respondeu…')` se a engine não responder em
+ * `timeoutMs` (default 10s) — sem isso, uma engine morta/travada deixaria o
+ * hook pendurado para sempre.
+ */
+export async function configureEngine(
+  port: EnginePort,
+  opts: {
+    threads?: number
+    hashMb?: number
+    multipv: number
+    timeoutMs?: number
+  },
+): Promise<void> {
+  const timeoutMs = opts.timeoutMs ?? 10_000
+  await ask(port, 'uci', isUciOk, timeoutMs)
+  await ask(port, 'isready', isReadyOk, timeoutMs)
+  if (opts.threads && opts.threads > 1) {
+    await port.send(`setoption name Threads value ${opts.threads}`)
+  }
+  if (opts.hashMb && opts.hashMb > 0) {
+    await port.send(`setoption name Hash value ${opts.hashMb}`)
+  }
+  await port.send(`setoption name Multipv value ${Math.max(1, opts.multipv)}`)
+}
+
+/**
+ * Envia `cmd` pra engine e resolve quando uma linha satisfaz `done`, ou
+ * rejeita após `timeoutMs` (default 10s) se a engine não responder. O listener
+ * é registrado antes do send pra nunca perder a resposta.
+ */
 function ask(
   port: EnginePort,
   cmd: string,
   done: (line: string) => boolean,
+  timeoutMs = 10_000,
 ): Promise<void> {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const off = port.onLine((line) => {
       if (done(line)) {
         off()
+        clearTimeout(timer)
         resolve()
       }
     })
+    const timer = setTimeout(() => {
+      off()
+      reject(new Error(`A engine não respondeu a '${cmd}' em ${timeoutMs}ms.`))
+    }, timeoutMs)
     void port.send(cmd)
   })
 }
@@ -323,15 +364,11 @@ export async function analyzeGame(
   const { positionFens, moves } = extractGame(pgn)
   const keyValue = controlKeyValue(control)
 
-  await ask(port, 'uci', isUciOk)
-  await ask(port, 'isready', isReadyOk)
-  if (opts.threads && opts.threads > 1) {
-    await port.send(`setoption name Threads value ${opts.threads}`)
-  }
-  if (opts.hashMb && opts.hashMb > 0) {
-    await port.send(`setoption name Hash value ${opts.hashMb}`)
-  }
-  await port.send(`setoption name Multipv value ${Math.max(1, multipv)}`)
+  await configureEngine(port, {
+    threads: opts.threads,
+    hashMb: opts.hashMb,
+    multipv,
+  })
 
   const raw: RawPosition[] = []
   for (let i = 0; i < positionFens.length; i++) {

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   analyzeGame,
   buildReview,
+  configureEngine,
   type EnginePort,
   type PositionCache,
 } from './analyze'
@@ -491,5 +492,82 @@ describe('analyzeGame', () => {
         (g) => g.mode === 'time' && g.value === 5000 && g.multipv === 1,
       ),
     ).toBe(true)
+  })
+})
+
+describe('configureEngine', () => {
+  /** Port que responde o handshake UCI sinicamente e grava todos os sends. */
+  function recordingPort(): {
+    port: EnginePort
+    sent: string[]
+  } {
+    const sent: string[] = []
+    let cb: ((line: string) => void) | null = null
+    return {
+      sent,
+      port: {
+        send(cmd: string) {
+          sent.push(cmd.trim())
+          const c = cmd.trim()
+          if (c === 'uci') {
+            cb?.('id name Stockfish 18')
+            cb?.('uciok')
+          } else if (c === 'isready') {
+            cb?.('readyok')
+          }
+        },
+        onLine(handler: (line: string) => void) {
+          cb = handler
+          return () => {
+            cb = null
+          }
+        },
+      },
+    }
+  }
+
+  /** Port muda: registra sends mas nunca emite linha alguma. */
+  function silentPort(): { port: EnginePort; sent: string[] } {
+    const sent: string[] = []
+    return {
+      sent,
+      port: {
+        send(cmd: string) {
+          sent.push(cmd.trim())
+        },
+        onLine() {
+          return () => {}
+        },
+      },
+    }
+  }
+
+  it('envia uci/isready e setoption Threads/Hash/Multipv', async () => {
+    const { port, sent } = recordingPort()
+    await configureEngine(port, {
+      threads: 4,
+      hashMb: 512,
+      multipv: 3,
+    })
+    expect(sent).toEqual([
+      'uci',
+      'isready',
+      'setoption name Threads value 4',
+      'setoption name Hash value 512',
+      'setoption name Multipv value 3',
+    ])
+  })
+
+  it('omite Threads/Hash quando não fornecidos', async () => {
+    const { port, sent } = recordingPort()
+    await configureEngine(port, { multipv: 1 })
+    expect(sent).toEqual(['uci', 'isready', 'setoption name Multipv value 1'])
+  })
+
+  it('rejeita com mensagem clara quando a engine não responde (timeout)', async () => {
+    const { port } = silentPort()
+    await expect(
+      configureEngine(port, { multipv: 1, timeoutMs: 25 }),
+    ).rejects.toThrow(/não respondeu a 'uci'/)
   })
 })
