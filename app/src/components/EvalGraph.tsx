@@ -89,8 +89,16 @@ export default function EvalGraph({
               strokeWidth={1}
             />
 
-            <path d={ribbonPath} fill='#e9e6e0' clipPath='url(#eval-top)' />
-            <path d={ribbonPath} fill='#3c3935' clipPath='url(#eval-bottom)' />
+            <path
+              d={ribbonPath}
+              fill='var(--color-panel-3)'
+              clipPath='url(#eval-top)'
+            />
+            <path
+              d={ribbonPath}
+              fill='var(--color-panel-2)'
+              clipPath='url(#eval-bottom)'
+            />
 
             <path
               d={linePath}

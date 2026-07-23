@@ -20,11 +20,11 @@ export default function EvalBar({
     : whiteAtBottom
       ? { top: 2 }
       : { bottom: 2 }
-  const labelColor = whiteAdv ? '#262421' : '#f0f0f0'
+  const labelColor = whiteAdv ? '#343236' : '#fcfcfa'
   return (
     <div
       className='relative w-5 shrink-0 self-stretch overflow-hidden rounded-md border border-edge'
-      style={{ backgroundColor: '#262421' }}
+      style={{ backgroundColor: '#343236' }}
     >
       <div
         className='absolute left-0 right-0 bg-white transition-[height,top,bottom] duration-700 ease-[cubic-bezier(0.25,0.1,0.25,1)]'

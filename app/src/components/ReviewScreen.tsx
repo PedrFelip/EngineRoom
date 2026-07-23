@@ -399,7 +399,7 @@ function PlayerTag({
     <div className='flex items-center gap-2 px-1 text-sm'>
       <span
         className={`inline-block h-3 w-3 shrink-0 rounded-full border border-edge ${
-          color === 'w' ? 'bg-white' : 'bg-[#1a1916]'
+          color === 'w' ? 'bg-white' : 'bg-[#2d2a2e]'
         }`}
       />
       <span className='font-medium text-ink'>{name}</span>
