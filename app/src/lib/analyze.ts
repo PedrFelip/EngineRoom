@@ -307,21 +307,26 @@ async function evalPosition(
       ? `go depth ${control.depth}`
       : `go movetime ${control.movetimeMs}`
   try {
-    await ask(port, goCmd, (line) => {
-      const info = parseInfo(line)
-      if (info?.score) {
-        const idx = info.multipv ?? 1
-        const prev = byPv.get(idx)
-        if (!prev || (info.depth ?? 0) >= prev.depth) {
-          byPv.set(idx, {
-            depth: info.depth ?? 0,
-            score: info.score,
-            pv: info.pv ?? [],
-          })
+    await ask(
+      port,
+      goCmd,
+      (line) => {
+        const info = parseInfo(line)
+        if (info?.score) {
+          const idx = info.multipv ?? 1
+          const prev = byPv.get(idx)
+          if (!prev || (info.depth ?? 0) >= prev.depth) {
+            byPv.set(idx, {
+              depth: info.depth ?? 0,
+              score: info.score,
+              pv: info.pv ?? [],
+            })
+          }
         }
-      }
-      return line.trim().startsWith('bestmove')
-    }, goTimeoutMs)
+        return line.trim().startsWith('bestmove')
+      },
+      goTimeoutMs,
+    )
   } catch (err) {
     // Aborta a busca órfã para que a engine volte a ficar reutilizável.
     await port.send('stop')
@@ -365,6 +370,10 @@ function terminalCp(fen: string): number | null {
  * `opts.threads` / `opts.hashMb` dimensionam a engine (Threads/Hash) para o uso
  * ideal de CPU/RAM. Omitir mantém os defaults do Stockfish.
  * Posições terminais (xeque-mate/afogamento) são resolvidas sem chamar a engine.
+ *
+ * Timeout do `go` por posição: `opts.goTimeoutMs` ou `defaultGoTimeout(control)`
+ * (180s no modo depth, 3·movetimeMs + 10s no modo time). Em timeout, envia
+ * `stop` para destravar a engine e rejeita — handshake continua com 10s próprios.
  */
 export async function analyzeGame(
   pgn: string,
