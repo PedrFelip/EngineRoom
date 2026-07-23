@@ -159,6 +159,17 @@ export function controlKeyValue(control: AnalyzeControl): number {
   return control.mode === 'depth' ? control.depth : control.movetimeMs
 }
 
+/**
+ * Orçamento padrão de timeout por posição para o comando `go`:
+ *  - `depth`: busca sem limite inerente — 180s como rede de segurança contra
+ *    engine travada (em hardware modesto, d25 pode chegar perto disso);
+ *  - `time`: a engine se auto-limita a `movetimeMs`, então 3·N + 10s cobre
+ *    folga de IPC/spawn.
+ */
+export function defaultGoTimeout(control: AnalyzeControl): number {
+  return control.mode === 'depth' ? 180_000 : 3 * control.movetimeMs + 10_000
+}
+
 /** Modo de análise: por profundidade fixa ou por tempo fixo por lance. */
 export type EngineMode = AnalyzeControl['mode']
 
@@ -284,6 +295,7 @@ async function evalPosition(
   port: EnginePort,
   fen: string,
   control: AnalyzeControl,
+  goTimeoutMs: number,
 ): Promise<RawPosition> {
   const byPv = new Map<
     number,
@@ -294,21 +306,27 @@ async function evalPosition(
     control.mode === 'depth'
       ? `go depth ${control.depth}`
       : `go movetime ${control.movetimeMs}`
-  await ask(port, goCmd, (line) => {
-    const info = parseInfo(line)
-    if (info?.score) {
-      const idx = info.multipv ?? 1
-      const prev = byPv.get(idx)
-      if (!prev || (info.depth ?? 0) >= prev.depth) {
-        byPv.set(idx, {
-          depth: info.depth ?? 0,
-          score: info.score,
-          pv: info.pv ?? [],
-        })
+  try {
+    await ask(port, goCmd, (line) => {
+      const info = parseInfo(line)
+      if (info?.score) {
+        const idx = info.multipv ?? 1
+        const prev = byPv.get(idx)
+        if (!prev || (info.depth ?? 0) >= prev.depth) {
+          byPv.set(idx, {
+            depth: info.depth ?? 0,
+            score: info.score,
+            pv: info.pv ?? [],
+          })
+        }
       }
-    }
-    return line.trim().startsWith('bestmove')
-  })
+      return line.trim().startsWith('bestmove')
+    }, goTimeoutMs)
+  } catch (err) {
+    // Aborta a busca órfã para que a engine volte a ficar reutilizável.
+    await port.send('stop')
+    throw err
+  }
   const lines: RawLine[] = [...byPv.entries()]
     .sort((a, b) => a[0] - b[0])
     .map(([multipv, l]) => ({
@@ -359,10 +377,13 @@ export async function analyzeGame(
     cache?: PositionCache
     /** Quando true, não envia `quit` ao final — a engine fica viva para refino ao vivo. */
     keepAlive?: boolean
+    /** Override do timeout do `go` por posição (default via `defaultGoTimeout`). */
+    goTimeoutMs?: number
   } = {},
 ): Promise<ReviewResult> {
   const { positionFens, moves } = extractGame(pgn)
   const keyValue = controlKeyValue(control)
+  const goTimeoutMs = opts.goTimeoutMs ?? defaultGoTimeout(control)
 
   await configureEngine(port, {
     threads: opts.threads,
@@ -389,7 +410,7 @@ export async function analyzeGame(
       if (cached) {
         pos = cached
       } else {
-        pos = await evalPosition(port, fen, control)
+        pos = await evalPosition(port, fen, control, goTimeoutMs)
         for (const l of pos.lines ?? []) {
           l.san = l.pv[0] ? uciToSan(pos.fen, l.pv[0]) : null
         }

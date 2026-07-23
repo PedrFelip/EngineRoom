@@ -3,6 +3,7 @@ import {
   analyzeGame,
   buildReview,
   configureEngine,
+  defaultGoTimeout,
   type EnginePort,
   type PositionCache,
 } from './analyze'
@@ -492,6 +493,44 @@ describe('analyzeGame', () => {
         (g) => g.mode === 'time' && g.value === 5000 && g.multipv === 1,
       ),
     ).toBe(true)
+  })
+
+  it('rejeita com mensagem do `go` e envia `stop` quando a busca excede goTimeoutMs', async () => {
+    const sent: string[] = []
+    let cb: ((line: string) => void) | null = null
+    const port: EnginePort = {
+      send(cmd) {
+        sent.push(cmd.trim())
+        const c = cmd.trim()
+        if (c === 'uci') cb?.('uciok')
+        else if (c === 'isready') cb?.('readyok')
+      },
+      onLine(handler) {
+        cb = handler
+        return () => {
+          cb = null
+        }
+      },
+    }
+
+    await expect(
+      analyzeGame('1. e4', { mode: 'depth', depth: 21 }, port, 1, {
+        goTimeoutMs: 25,
+      }),
+    ).rejects.toThrow(/não respondeu a 'go depth 21'/)
+    expect(sent).toContain('stop')
+  })
+})
+
+describe('defaultGoTimeout', () => {
+  it('modo depth: orçamento fixo generoso (180s) — busca não tem limite inerente', () => {
+    expect(defaultGoTimeout({ mode: 'depth', depth: 15 })).toBe(180_000)
+    expect(defaultGoTimeout({ mode: 'depth', depth: 25 })).toBe(180_000)
+  })
+
+  it('modo time: 3·movetimeMs + 10s de folga — engine se auto-limita a movetimeMs', () => {
+    expect(defaultGoTimeout({ mode: 'time', movetimeMs: 1000 })).toBe(13_000)
+    expect(defaultGoTimeout({ mode: 'time', movetimeMs: 5000 })).toBe(25_000)
   })
 })
 
