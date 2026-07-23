@@ -65,16 +65,59 @@ fn spawn_engine(
                 .spawn()
                 .map_err(|e| format!("Falha ao iniciar o Stockfish embarcado: {e}"))?;
 
-            // Forward stdout lines to the frontend.
+            // Forward stdout lines to the frontend; signal exit on death.
             let app_reader = app.clone();
             tauri::async_runtime::spawn(async move {
+                let mut reported_exit = false;
                 while let Some(event) = rx.recv().await {
-                    if let CommandEvent::Stdout(bytes) = event {
-                        let line = String::from_utf8_lossy(&bytes).trim().to_string();
-                        if !line.is_empty() {
-                            let _ = app_reader.emit(LINE_EVENT, line);
+                    match event {
+                        CommandEvent::Stdout(bytes) => {
+                            let line = String::from_utf8_lossy(&bytes).trim().to_string();
+                            if !line.is_empty() {
+                                let _ = app_reader.emit(LINE_EVENT, line);
+                            }
                         }
+                        CommandEvent::Terminated(p) => {
+                            if !reported_exit {
+                                reported_exit = true;
+                                let _ = app_reader.emit(
+                                    EXIT_EVENT,
+                                    EngineExit {
+                                        code: p.code,
+                                        signal: p.signal,
+                                        error: None,
+                                    },
+                                );
+                            }
+                        }
+                        CommandEvent::Error(err) => {
+                            if !reported_exit {
+                                reported_exit = true;
+                                let _ = app_reader.emit(
+                                    EXIT_EVENT,
+                                    EngineExit {
+                                        code: None,
+                                        signal: None,
+                                        error: Some(err),
+                                    },
+                                );
+                            }
+                        }
+                        _ => {}
                     }
+                }
+                // Channel closed = the process is gone but no Terminated/Error
+                // event was surfaced. Emit a generic exit so the frontend still
+                // fails fast instead of hanging to its ask() timeout.
+                if !reported_exit {
+                    let _ = app_reader.emit(
+                        EXIT_EVENT,
+                        EngineExit {
+                            code: None,
+                            signal: None,
+                            error: Some("stdout fechado sem evento de término".into()),
+                        },
+                    );
                 }
             });
 
