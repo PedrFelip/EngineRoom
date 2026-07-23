@@ -68,11 +68,10 @@ describe('gameAccuracy', () => {
     expect(gameAccuracy([])).toBe(100)
   })
 
-  it('aplica a fórmula chess.com por lance e tira a média', () => {
-    expect(gameAccuracy([10])).toBeCloseTo(69.7, 1)
-    expect(gameAccuracy([0, 10])).toBeCloseTo(84.9, 1)
-    expect(gameAccuracy([30])).toBeLessThan(30)
-    expect(gameAccuracy([30])).toBeGreaterThan(0)
+  it('calibra com a fórmula do Lichess (103.1668·exp(-0.04354·loss) - 3)', () => {
+    expect(gameAccuracy([10])).toBeCloseTo(63.7, 1)
+    expect(gameAccuracy([0, 10])).toBeCloseTo(80.0, 1)
+    expect(gameAccuracy([30])).toBeCloseTo(24.9, 1)
   })
 })
 

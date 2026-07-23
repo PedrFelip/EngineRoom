@@ -4,15 +4,16 @@
  *  - classificação de lances (Melhor/Excelente/Bom/Imprecisão/Erro/Blunder/Livro);
  *  - precisão agregada da partida (0–100%).
  *
- * Estilo chess.com: thresholds sobre delta de win% (adaptativos à complexidade)
- * e fórmula de precisão por lance. Mantido puro e sem efeitos colaterais.
+ * Modelo Lichess: thresholds sobre delta de win% e fórmula de acurácia
+ * 103.1668·exp(-0.04354·loss) - 3 aplicada sobre a média das perdas.
+ * Mantido puro e sem efeitos colaterais.
  */
 
 import type { Classification } from '../types'
 
 export type { Classification }
 
-/** Inclinação da curva logística cp→win% (constante do modelo chess.com). */
+/** Inclinação da curva logística cp→win% (constante do modelo Lichess). */
 const WINPCT_K = 0.00368208
 
 /** Rótulos em pt-BR exibidos na UI (badges, resumo). */
@@ -60,24 +61,20 @@ export function classifyMove(
   return 'blunder'
 }
 
-/** Constantes da fórmula de acurácia por lance (modelo chess.com). */
+/** Constantes da fórmula de acurácia (modelo Lichess). */
 const ACCURACY_CEIL = 103.1668
 const ACCURACY_DECAY = 0.04354
 
-function moveAccuracy(winPctLoss: number): number {
-  return Math.min(
-    100,
-    ACCURACY_CEIL * Math.exp(-ACCURACY_DECAY * (winPctLoss - 1)),
-  )
-}
-
 /**
  * Precisão agregada da partida (0–100%) a partir das perdas de win% por lance.
+ * Aplica a fórmula do Lichess (103.1668·exp(-0.04354·loss) - 3) sobre a média
+ * das perdas, não por lance — evita o viés convexo de transformar-então-média.
  */
 export function gameAccuracy(winPctLosses: number[]): number {
   if (winPctLosses.length === 0) return 100
-  const sum = winPctLosses.reduce((acc, loss) => acc + moveAccuracy(loss), 0)
-  return sum / winPctLosses.length
+  const meanLoss =
+    winPctLosses.reduce((acc, loss) => acc + loss, 0) / winPctLosses.length
+  return Math.min(100, ACCURACY_CEIL * Math.exp(-ACCURACY_DECAY * meanLoss) - 3)
 }
 
 /** Limiar acima do qual um cp é considerado xeque-mate (mate-in-N mapeado por scoreToCp). */
