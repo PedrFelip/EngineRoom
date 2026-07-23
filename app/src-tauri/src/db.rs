@@ -496,9 +496,11 @@ fn cache_store(
     Ok(())
 }
 
-/// Consulta exata (cycle 1): isolada por modo via `source_mode`. Depth casa por
-/// `reached_depth`; time casa por `source_value` (movetimeMs). Será trocada por
-/// covering nos ciclos seguintes.
+/// Consulta covering: um pedido de depth P é coberto por qualquer entry com
+/// `reached_depth >= P` (independente do source_mode — entries de time também
+/// servem depth); um pedido de time T só é coberto por entries de time com
+/// `source_value >= T`. Em ambos os casos exige `multipv >=` e desempata pela
+/// entry mais rasa (menor overkill).
 fn cache_lookup(
     conn: &Connection,
     fen: &str,
@@ -506,19 +508,21 @@ fn cache_lookup(
     value: u32,
     multipv: u32,
 ) -> Result<Option<CachedPosition>, String> {
-    let (where_clause, params): (&str, Vec<Box<dyn rusqlite::ToSql>>) = match mode {
+    let (sql, params): (&str, Vec<Box<dyn rusqlite::ToSql>>) = match mode {
         "time" => (
             "SELECT cp, lines_json, reached_depth FROM position_cache
-             WHERE fen = ?1 AND source_mode = 'time' AND source_value = ?2 AND multipv = ?3",
+             WHERE fen = ?1 AND source_mode = 'time' AND source_value >= ?2 AND multipv >= ?3
+             ORDER BY source_value ASC LIMIT 1",
             vec![Box::new(fen.to_string()), Box::new(value), Box::new(multipv)],
         ),
         _ => (
             "SELECT cp, lines_json, reached_depth FROM position_cache
-             WHERE fen = ?1 AND source_mode = 'depth' AND reached_depth = ?2 AND multipv = ?3",
+             WHERE fen = ?1 AND reached_depth >= ?2 AND multipv >= ?3
+             ORDER BY reached_depth ASC LIMIT 1",
             vec![Box::new(fen.to_string()), Box::new(value), Box::new(multipv)],
         ),
     };
-    let mut stmt = conn.prepare(where_clause).map_err(|e| e.to_string())?;
+    let mut stmt = conn.prepare(sql).map_err(|e| e.to_string())?;
     let mut rows = stmt
         .query(rusqlite::params_from_iter(params.iter().map(|b| b.as_ref())))
         .map_err(|e| e.to_string())?;
@@ -582,6 +586,122 @@ mod tests {
     }
 
     #[test]
+    fn cache_cobre_depth_menor_com_entry_mais_profunda() {
+        let conn = open_memory().unwrap();
+        // Posição analisada até reached_depth=20.
+        cache_store(&conn, FEN, "depth", 20, 1, 20, 35, LINES).unwrap();
+
+        // Pedido de depth 15 → deve acertar (20 >= 15).
+        let hit = cache_lookup(&conn, FEN, "depth", 15, 1).unwrap();
+        assert!(hit.is_some(), "depth menor deve ser coberto pela entry mais profunda");
+        assert_eq!(hit.unwrap().cp, 35);
+    }
+
+    #[test]
+    fn cache_nao_cobre_depth_maior_que_o_reached() {
+        let conn = open_memory().unwrap();
+        cache_store(&conn, FEN, "depth", 20, 1, 20, 35, LINES).unwrap();
+
+        // Pedido de depth 25 → miss (20 < 25).
+        assert_eq!(cache_lookup(&conn, FEN, "depth", 25, 1).unwrap(), None);
+    }
+
+    #[test]
+    fn cache_depth_coberto_por_entry_de_time_mode_cross_mode() {
+        let conn = open_memory().unwrap();
+        // Entry de time: reached_depth=28 (source_value/movetime não importa
+        // para cobrir depth, só reached_depth conta).
+        cache_store(&conn, FEN, "time", 5000, 1, 28, 35, LINES).unwrap();
+
+        // Pedido de depth 20 → hit: 28 >= 20, independente do source_mode.
+        let hit = cache_lookup(&conn, FEN, "depth", 20, 1).unwrap();
+        assert!(hit.is_some(), "entry de time cobre depth");
+        assert_eq!(hit.unwrap().reached_depth, 28);
+    }
+
+    #[test]
+    fn cache_desempata_pela_entry_mais_rasa_em_depth() {
+        let conn = open_memory().unwrap();
+        cache_store(&conn, FEN, "depth", 20, 1, 20, 20, LINES).unwrap();
+        cache_store(&conn, FEN, "depth", 30, 1, 30, 99, "[]").unwrap();
+
+        // Pedido de depth 15 → ambas cobrem; deve devolver a mais rasa (20).
+        let hit = cache_lookup(&conn, FEN, "depth", 15, 1).unwrap().unwrap();
+        assert_eq!(hit.reached_depth, 20);
+        assert_eq!(hit.cp, 20);
+    }
+
+    #[test]
+    fn cache_cobre_multipv_menor_com_entry_de_mais_linhas() {
+        let conn = open_memory().unwrap();
+        let lines4 = r#"[
+            {"multipv":1,"cp":35,"pv":["e2e4"],"san":"e4"},
+            {"multipv":2,"cp":30,"pv":["d2d4"],"san":"d4"},
+            {"multipv":3,"cp":28,"pv":["c2c4"],"san":"c4"},
+            {"multipv":4,"cp":25,"pv":["g1f3"],"san":"Nf3"}
+        ]"#;
+        cache_store(&conn, FEN, "depth", 20, 4, 20, 35, lines4).unwrap();
+
+        // Pedido multipv=2 → coberto pela entry multipv=4.
+        let hit = cache_lookup(&conn, FEN, "depth", 20, 2).unwrap();
+        assert!(hit.is_some(), "entry com mais multipv cobre pedido menor");
+    }
+
+    #[test]
+    fn cache_nao_cobre_multipv_maior_que_o_armazenado() {
+        let conn = open_memory().unwrap();
+        cache_store(&conn, FEN, "depth", 20, 1, 20, 35, LINES).unwrap();
+
+        // Pedido multipv=3 com entry multipv=1 → miss.
+        assert_eq!(cache_lookup(&conn, FEN, "depth", 20, 3).unwrap(), None);
+    }
+
+    #[test]
+    fn cache_time_coberto_por_entry_com_movetime_maior() {
+        let conn = open_memory().unwrap();
+        cache_store(&conn, FEN, "time", 5000, 1, 28, 35, LINES).unwrap();
+
+        // Pedido de time 3000ms → hit: 5000 >= 3000.
+        let hit = cache_lookup(&conn, FEN, "time", 3000, 1).unwrap();
+        assert!(hit.is_some(), "movetime maior cobre pedido menor");
+        assert_eq!(hit.unwrap().reached_depth, 28);
+    }
+
+    #[test]
+    fn cache_time_nao_coberto_por_entry_de_depth_mode() {
+        let conn = open_memory().unwrap();
+        // Entry de depth: reached_depth=28 mas sem orçamento temporal.
+        cache_store(&conn, FEN, "depth", 28, 1, 28, 35, LINES).unwrap();
+
+        // Pedido de time → miss: depth entries não têm source_mode='time'.
+        assert_eq!(cache_lookup(&conn, FEN, "time", 1000, 1).unwrap(), None);
+    }
+
+    #[test]
+    fn cache_coalescer_entries_de_modos_diferentes_no_mesmo_reached() {
+        let conn = open_memory().unwrap();
+        // Depth entry com reached=28.
+        cache_store(&conn, FEN, "depth", 28, 1, 28, 35, LINES).unwrap();
+        // Time entry no mesmo reached=28 → coalesce (PK é fen+reached+multipv),
+        // último write vence.
+        cache_store(&conn, FEN, "time", 5000, 1, 28, 42, "[]").unwrap();
+
+        // Consulta de depth 20 acha a entry coalescida.
+        let hit = cache_lookup(&conn, FEN, "depth", 20, 1).unwrap().unwrap();
+        assert_eq!(hit.cp, 42, "último write vence no coalesce");
+
+        // Exatamente 1 row para esta FEN (não duas, uma por modo).
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM position_cache WHERE fen = ?1",
+                [FEN],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1, "entries dos dois modos coalesceram num único row");
+    }
+
+    #[test]
     fn cache_put_repetido_sobrescreve_entrada() {
         let conn = open_memory().unwrap();
         cache_store(&conn, FEN, "depth", 20, 1, 20, 35, LINES).unwrap();
@@ -633,6 +753,60 @@ mod tests {
         migrate(&conn).unwrap();
         let hit2 = cache_lookup(&conn, FEN, "depth", 20, 1).unwrap();
         assert_eq!(hit, hit2);
+    }
+
+    #[test]
+    fn migracao_reached_depth_preserva_depth_e_descarta_time_legacy() {
+        // Banco intermediário: tem `mode` mas ainda não tem `reached_depth`.
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE position_cache (
+                fen TEXT NOT NULL,
+                mode TEXT NOT NULL DEFAULT 'depth',
+                depth INTEGER NOT NULL,
+                multipv INTEGER NOT NULL,
+                cp INTEGER NOT NULL,
+                lines_json TEXT NOT NULL,
+                PRIMARY KEY (fen, mode, depth, multipv)
+             );",
+        )
+        .unwrap();
+        // Linha depth: depth=20 → deve sobreviver com reached_depth=20.
+        conn.execute(
+            "INSERT INTO position_cache (fen, mode, depth, multipv, cp, lines_json)
+             VALUES (?1, 'depth', 20, 1, 35, ?2)",
+            (FEN, LINES),
+        )
+        .unwrap();
+        // Linha time: movetimeMs=5000 → descartada (não sabemos o reached).
+        conn.execute(
+            "INSERT INTO position_cache (fen, mode, depth, multipv, cp, lines_json)
+             VALUES (?1, 'time', 5000, 1, 42, '[]')",
+            (FEN,),
+        )
+        .unwrap();
+
+        migrate(&conn).unwrap();
+
+        // Depth row preservada com reached_depth=20.
+        let depth_hit = cache_lookup(&conn, FEN, "depth", 20, 1).unwrap();
+        assert_eq!(
+            depth_hit,
+            Some(CachedPosition {
+                cp: 35,
+                lines_json: LINES.to_string(),
+                reached_depth: 20,
+            })
+        );
+        // Time row descartada.
+        assert_eq!(cache_lookup(&conn, FEN, "time", 5000, 1).unwrap(), None);
+
+        // Idempotente.
+        migrate(&conn).unwrap();
+        assert_eq!(
+            cache_lookup(&conn, FEN, "depth", 20, 1).unwrap(),
+            depth_hit
+        );
     }
 
     fn partida_exemplo() -> NewGame {

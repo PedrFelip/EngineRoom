@@ -7,6 +7,7 @@ import {
   type EngineExitReason,
   type EnginePort,
   type PositionCache,
+  type RawLine,
 } from './analyze'
 
 const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1'
@@ -409,6 +410,44 @@ describe('analyzeGame', () => {
       ),
     ).toBe(true)
     expect(review.moves).toHaveLength(2)
+  })
+
+  it('grava depth por linha na RawPosition que vai para o cache', async () => {
+    let lineCb: ((line: string) => void) | null = null
+    const port: EnginePort = {
+      send(cmd) {
+        const c = cmd.trim()
+        if (c === 'uci') lineCb?.('uciok')
+        else if (c === 'isready') lineCb?.('readyok')
+        else if (c.startsWith('go')) {
+          lineCb?.('info depth 28 multipv 1 score cp 35 pv e2e4 e7e5')
+          lineCb?.('info depth 27 multipv 2 score cp 30 pv d2d4 d7d5')
+          lineCb?.('bestmove e2e4')
+        }
+      },
+      onLine(handler) {
+        lineCb = handler
+        return () => {
+          lineCb = null
+        }
+      },
+    }
+    let captured: { lines: RawLine[]; depth: number } | null = null
+    const cache: PositionCache = {
+      async get() {
+        return null
+      },
+      async put(pos) {
+        captured = { lines: pos.lines ?? [], depth: pos.depth }
+      },
+    }
+
+    await analyzeGame('1. e4', { mode: 'depth', depth: 20 }, port, 2, { cache })
+
+    expect(captured).not.toBeNull()
+    expect(captured?.lines[0].depth).toBe(28)
+    expect(captured?.lines[1].depth).toBe(27)
+    expect(captured?.depth).toBe(28)
   })
 
   it('em modo tempo envia `go movetime N` para a engine (nunca `go depth`)', async () => {

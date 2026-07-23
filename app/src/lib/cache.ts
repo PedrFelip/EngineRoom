@@ -1,9 +1,33 @@
 import { invoke } from '@tauri-apps/api/core'
-import type { PositionCache, RawLine } from './analyze'
+import type { PositionCache, RawLine, RawPosition } from './analyze'
 
-interface CachedPositionDto {
+export interface CachedPositionDto {
   cp: number
   linesJson: string
+  reachedDepth: number
+}
+
+/**
+ * Reconstrói um `RawPosition` a partir do DTO do Rust, fatiando as linhas ao
+ * multipv pedido e usando o **depth real atingido** (da pv-1 ou `reachedDepth`),
+ * nunca o escalar do pedido. Isso corrige o bug onde um hit em modo tempo
+ * reportava `depth = movetimeMs` (ex.: 5000) em vez da profundidade real.
+ */
+export function shapeCachedPosition(
+  hit: CachedPositionDto,
+  fen: string,
+  requestedMultipv: number,
+): RawPosition {
+  const allLines = JSON.parse(hit.linesJson) as RawLine[]
+  const lines = allLines.slice(0, requestedMultipv)
+  const principal = lines.find((l) => l.multipv === 1) ?? lines[0]
+  return {
+    fen,
+    cp: hit.cp,
+    depth: principal?.depth ?? hit.reachedDepth ?? 0,
+    pv: principal?.pv ?? [],
+    lines,
+  }
 }
 
 /**
@@ -21,9 +45,7 @@ export function createTauriPositionCache(): PositionCache {
         multipv,
       })
       if (!hit) return null
-      const lines = JSON.parse(hit.linesJson) as RawLine[]
-      const principal = lines.find((l) => l.multipv === 1) ?? lines[0]
-      return { fen, cp: hit.cp, depth: value, pv: principal?.pv ?? [], lines }
+      return shapeCachedPosition(hit, fen, multipv)
     },
     async put(pos, mode, value, multipv) {
       await invoke('cache_put', {
@@ -31,6 +53,7 @@ export function createTauriPositionCache(): PositionCache {
         mode,
         depth: value,
         multipv,
+        reachedDepth: pos.depth,
         cp: pos.cp,
         linesJson: JSON.stringify(pos.lines ?? []),
       })

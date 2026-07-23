@@ -30,6 +30,8 @@ export interface RawLine {
   cp: number
   pv: string[]
   san?: string | null
+  /** Profundidade (plies) que esta linha atingiu na busca. */
+  depth?: number
 }
 
 export interface RawPosition {
@@ -391,6 +393,7 @@ async function evalPosition(
       multipv,
       cp: scoreToCp(l.score) ?? 0,
       pv: l.pv,
+      depth: l.depth,
     }))
   const principal = lines.find((l) => l.multipv === 1) ?? lines[0]
   return {
