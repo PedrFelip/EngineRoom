@@ -1,4 +1,6 @@
-import { Chess } from 'chess.js'
+import type { Phase } from '../types'
+
+export type { Phase }
 
 /**
  * Fases do jogo (Abertura / Meio-jogo / Final) a partir do material não-peão,
@@ -13,8 +15,6 @@ import { Chess } from 'chess.js'
  * Núcleo puro, sem efeitos colaterais.
  */
 
-export type Phase = 'opening' | 'middlegame' | 'endgame'
-
 /** Limiar inclusivo: material >= este valor é Abertura. */
 const OPENING_MIN = 50
 /** Limiar inclusivo: material <= este valor é Final. */
@@ -25,15 +25,15 @@ const REINFELD: Record<string, number> = { n: 3, b: 3, r: 5, q: 9 }
 
 /**
  * Conta o material não-peão total (ambos os lados) na escala Reinfeld a partir
- * do FEN. Peões e reis são ignorados.
+ * do FEN. Peões e reis são ignorados. Lê apenas o campo de posicionamento de
+ * peças (antes do primeiro espaço) — robusto a FENs degenerados.
  */
 export function nonPawnMaterial(fen: string): number {
-  const board = new Chess(fen).board()
+  const placement = fen.split(' ')[0]
   let total = 0
-  for (const row of board) {
-    for (const sq of row) {
-      if (sq && sq.type in REINFELD) total += REINFELD[sq.type]
-    }
+  for (const ch of placement) {
+    const v = REINFELD[ch.toLowerCase()]
+    if (v !== undefined) total += v
   }
   return total
 }
