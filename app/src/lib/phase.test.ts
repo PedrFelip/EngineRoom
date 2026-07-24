@@ -2,9 +2,9 @@ import { describe, expect, it } from 'vitest'
 import {
   computePhases,
   nonPawnMaterial,
+  type Phase,
   phaseBoundaries,
   phaseOfMaterial,
-  type Phase,
 } from './phase'
 
 describe('phaseOfMaterial', () => {
@@ -35,8 +35,7 @@ describe('phaseOfMaterial', () => {
 
 describe('nonPawnMaterial', () => {
   it('posição inicial soma 62 (4N 4B 4T 2D na escala Reinfeld)', () => {
-    const start =
-      'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1'
+    const start = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1'
     // 4·3 (cavalos) + 4·3 (bispos) + 4·5 (torres) + 2·9 (damas) = 62
     expect(nonPawnMaterial(start)).toBe(62)
   })
@@ -60,11 +59,9 @@ describe('computePhases', () => {
   const highAfter = 'r2qk3/8/8/8/8/8/8/R1BQK3 w - - 0 1'
 
   it('arco natural Abertura → Meio-jogo → Final', () => {
-    expect(computePhases([{ fen: start }, { fen: mid }, { fen: end }])).toEqual([
-      'opening',
-      'middlegame',
-      'endgame',
-    ])
+    expect(computePhases([{ fen: start }, { fen: mid }, { fen: end }])).toEqual(
+      ['opening', 'middlegame', 'endgame'],
+    )
   })
 
   it('não regredir: atingido o Final, material maior permanece Final', () => {

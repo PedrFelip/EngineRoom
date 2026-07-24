@@ -66,15 +66,15 @@ export function computePhases(positions: { fen: string }[]): Phase[] {
  * Fases ausentes colapsam: sem Meio-jogo, `middlegameEnd === openingEnd`
  * (faixa do meio com largura 0); sem Final, `middlegameEnd` é o último índice.
  */
-export function phaseBoundaries(
-  phases: Phase[],
-): { openingEnd: number; middlegameEnd: number } {
+export function phaseBoundaries(phases: Phase[]): {
+  openingEnd: number
+  middlegameEnd: number
+} {
   let openingEnd = -1
   let middlegameEnd = -1
   for (let i = 0; i < phases.length; i++) {
     if (phases[i] === 'opening') openingEnd = i
-    if (phases[i] === 'opening' || phases[i] === 'middlegame')
-      middlegameEnd = i
+    if (phases[i] === 'opening' || phases[i] === 'middlegame') middlegameEnd = i
   }
   return { openingEnd, middlegameEnd }
 }

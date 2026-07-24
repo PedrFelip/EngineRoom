@@ -173,7 +173,10 @@ export function accuracyByPhaseOf(
           (m) => m.color === color && !m.isBook && phases[m.ply - 1] === phase,
         )
         .map((m) => m.winPctLoss)
-    return { white: gameAccuracy(losses('w')), black: gameAccuracy(losses('b')) }
+    return {
+      white: gameAccuracy(losses('w')),
+      black: gameAccuracy(losses('b')),
+    }
   }
   return {
     opening: forPhase('opening'),

@@ -8,8 +8,8 @@ import type {
 } from '../types'
 import { accuracyByPhaseOf } from './analyze'
 import { resolveEngineTier } from './engine-tier'
-import { computePhases } from './phase'
 import { parsePgn } from './pgn'
+import { computePhases } from './phase'
 
 /** Lista as partidas analisadas, da mais recente para a mais antiga. */
 export function listGames(): Promise<GameSummary[]> {

@@ -15,6 +15,10 @@
   --color-edge: var(--edge);
   --color-edge-soft: var(--edge-soft);
 
+  --color-phase-opening: var(--phase-opening);
+  --color-phase-middlegame: var(--phase-middlegame);
+  --color-phase-endgame: var(--phase-endgame);
+
   --color-brand: var(--brand);
   --color-brand-strong: var(--brand-strong);
   --color-ink: var(--ink);
@@ -47,6 +51,10 @@
   --edge: #4c484c;
   --edge-soft: #3b383c;
 
+  --phase-opening: color-mix(in srgb, #ab9df2 10%, transparent);
+  --phase-middlegame: color-mix(in srgb, #ffd866 8%, transparent);
+  --phase-endgame: color-mix(in srgb, #78dce8 10%, transparent);
+
   --brand: #a9dc76;
   --brand-strong: #8fc85f;
   --ink: #fcfcfa;
@@ -74,6 +82,10 @@
   --eval-black: color-mix(in srgb, #2d2a2e 24%, transparent);
   --edge: #dad6ce;
   --edge-soft: #ece8e1;
+
+  --phase-opening: color-mix(in srgb, #7b5bd8 12%, transparent);
+  --phase-middlegame: color-mix(in srgb, #c99500 10%, transparent);
+  --phase-endgame: color-mix(in srgb, #1e9ab0 12%, transparent);
 
   --brand: #5f9a2e;
   --brand-strong: #4f8224;

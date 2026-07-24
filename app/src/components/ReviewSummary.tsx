@@ -1,5 +1,5 @@
 import { CLASSIFICATION_LABELS } from '../lib/scoring'
-import type { Classification, ReviewResult } from '../types'
+import type { Classification, Phase, ReviewResult } from '../types'
 
 const ORDER: Classification[] = [
   'livro',
@@ -10,6 +10,20 @@ const ORDER: Classification[] = [
   'erro',
   'blunder',
 ]
+
+const PHASES: Phase[] = ['opening', 'middlegame', 'endgame']
+
+const PHASE_LABELS: Record<Phase, string> = {
+  opening: 'Abertura',
+  middlegame: 'Meio-jogo',
+  endgame: 'Final',
+}
+
+const PHASE_DOT: Record<Phase, string> = {
+  opening: 'var(--color-phase-opening)',
+  middlegame: 'var(--color-phase-middlegame)',
+  endgame: 'var(--color-phase-endgame)',
+}
 
 const BADGE_COLOR: Record<Classification, string> = {
   livro: 'bg-book',
@@ -40,6 +54,33 @@ export default function ReviewSummary({ result }: ReviewSummaryProps) {
       <div className='grid grid-cols-2 gap-3'>
         <SideAccuracy label='Brancas' value={result.accuracy.white} />
         <SideAccuracy label='Pretas' value={result.accuracy.black} />
+      </div>
+      <div className='mt-4 border-t border-edge pt-3'>
+        <div className='mb-2 text-xs uppercase tracking-wide text-ink-faint'>
+          Acurácia por fase
+        </div>
+        <div className='space-y-1.5'>
+          {PHASES.map((phase) => (
+            <div
+              key={phase}
+              className='grid grid-cols-[1fr_auto_auto] items-center gap-3 text-sm'
+            >
+              <span className='flex items-center gap-2 text-ink-dim'>
+                <span
+                  className='h-2.5 w-2.5 rounded-full ring-1 ring-edge'
+                  style={{ background: PHASE_DOT[phase] }}
+                />
+                {PHASE_LABELS[phase]}
+              </span>
+              <span className='w-10 text-right font-mono tabular-nums text-ink'>
+                {result.accuracyByPhase[phase].white.toFixed(0)}%
+              </span>
+              <span className='w-10 text-right font-mono tabular-nums text-ink'>
+                {result.accuracyByPhase[phase].black.toFixed(0)}%
+              </span>
+            </div>
+          ))}
+        </div>
       </div>
       <div className='mt-4 space-y-1.5'>
         {ORDER.map((c, i) => (

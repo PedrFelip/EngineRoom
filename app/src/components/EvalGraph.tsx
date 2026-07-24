@@ -6,6 +6,8 @@ interface EvalGraphProps {
   onSelect: (ply: number) => void
   /** Pulsa o ponto da posição atual — usado no loading pra sinalizar análise ao vivo. */
   pulse?: boolean
+  /** Fronteiras de fase (plis finais de Abertura/Meio-jogo) p/ desenhar faixas de fundo. */
+  phases?: { openingEnd: number; middlegameEnd: number }
 }
 
 const HEIGHT = 96
@@ -15,6 +17,7 @@ export default function EvalGraph({
   currentPly,
   onSelect,
   pulse = false,
+  phases,
 }: EvalGraphProps) {
   const ref = useRef<HTMLDivElement>(null)
   const [w, setW] = useState(0)
@@ -43,6 +46,29 @@ export default function EvalGraph({
   const ribbonPath = ready
     ? `M ${x(0).toFixed(1)},${mid} L ${curvePts.join(' L ')} L ${x(n - 1).toFixed(1)},${mid} Z`
     : ''
+
+  const bands = phases
+    ? [
+        {
+          key: 'opening',
+          x1: x(0),
+          x2: x(phases.openingEnd),
+          fill: 'var(--color-phase-opening)',
+        },
+        {
+          key: 'middlegame',
+          x1: x(phases.openingEnd),
+          x2: x(phases.middlegameEnd),
+          fill: 'var(--color-phase-middlegame)',
+        },
+        {
+          key: 'endgame',
+          x1: x(phases.middlegameEnd),
+          x2: x(n - 1),
+          fill: 'var(--color-phase-endgame)',
+        },
+      ]
+    : []
 
   const handleClick = (e: React.MouseEvent<HTMLButtonElement>) => {
     if (n <= 1) return
@@ -79,6 +105,17 @@ export default function EvalGraph({
                 <rect x={0} y={mid} width={w} height={mid} />
               </clipPath>
             </defs>
+
+            {bands.map((b) => (
+              <rect
+                key={b.key}
+                x={Math.min(b.x1, b.x2)}
+                y={0}
+                width={Math.max(0, b.x2 - b.x1)}
+                height={HEIGHT}
+                fill={b.fill}
+              />
+            ))}
 
             <line
               x1={0}
