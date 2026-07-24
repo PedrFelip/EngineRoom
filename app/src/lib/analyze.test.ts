@@ -209,6 +209,48 @@ describe('buildReview', () => {
     expect(review.moves[0].classification).toBe('melhor')
     expect(review.positions[1].winPct).toBeCloseTo(100, 0)
   })
+
+  it('preenche phase das posições e accuracyByPhase por fase', () => {
+    const game = {
+      startFen: START_FEN,
+      moves: [
+        {
+          ply: 1,
+          color: 'w' as const,
+          san: 'e4',
+          uci: 'e2e4',
+          fenBefore: START_FEN,
+        },
+        {
+          ply: 2,
+          color: 'b' as const,
+          san: 'e5',
+          uci: 'e7e5',
+          fenBefore: AFTER_E4,
+        },
+      ],
+    }
+    const raw = [
+      { fen: START_FEN, cp: 0, depth: 20, pv: ['e2e4', 'e7e5'] },
+      { fen: AFTER_E4, cp: 0, depth: 20, pv: ['e7e5'] },
+      { fen: AFTER_E5, cp: 0, depth: 20, pv: [] },
+    ]
+
+    const review = buildReview(game, raw)
+
+    // material cheio (e4/e5 não capturam) → todas as posições são Abertura
+    expect(review.positions.every((p) => p.phase === 'opening')).toBe(true)
+    // acurácia da Abertura espelha a acurácia geral; demais fases vazias → 100
+    expect(review.accuracyByPhase.opening).toEqual({
+      white: 100,
+      black: 100,
+    })
+    expect(review.accuracyByPhase.middlegame).toEqual({
+      white: 100,
+      black: 100,
+    })
+    expect(review.accuracyByPhase.endgame).toEqual({ white: 100, black: 100 })
+  })
 })
 
 function fakePort(

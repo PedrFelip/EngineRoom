@@ -2,6 +2,7 @@ import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
 import { formatEngineTag } from '../lib/engine-tag'
 import { evalLabel, sideToMoveAtPly } from '../lib/eval-label'
 import { resultLabel } from '../lib/pgn'
+import { nonPawnMaterial, phaseBoundaries, phaseOfMaterial } from '../lib/phase'
 import { cpToWinPct } from '../lib/scoring'
 import { useSettings } from '../lib/settings-context'
 import { playMoveSound } from '../lib/sound'
@@ -60,6 +61,7 @@ function variationToPosition(
   return {
     ply: 0,
     fen: move.fenAfter,
+    phase: phaseOfMaterial(nonPawnMaterial(move.fenAfter)),
     depth: move.depth ?? 0,
     cp: move.afterCp ?? 0,
     winPct,
@@ -358,6 +360,7 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
             winPcts={result.positions.map((p) => p.winPct)}
             currentPly={currentPly}
             onSelect={review.goTo}
+            phases={phaseBoundaries(result.positions.map((p) => p.phase))}
           />
         </div>
       )}
