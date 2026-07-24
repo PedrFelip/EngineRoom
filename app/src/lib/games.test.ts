@@ -6,6 +6,11 @@ const REVIEW: ReviewResult = {
   positions: [],
   moves: [],
   accuracy: { white: 98.5, black: 91 },
+  accuracyByPhase: {
+    opening: { white: 100, black: 100 },
+    middlegame: { white: 100, black: 100 },
+    endgame: { white: 100, black: 100 },
+  },
 }
 
 function stored(overrides: Partial<StoredGame> = {}): StoredGame {
@@ -55,5 +60,34 @@ describe('storedToConfig', () => {
     expect(config.mode).toBe('time')
     expect(config.movetimeMs).toBe(5000)
     expect(config.initialResult).toEqual(REVIEW)
+  })
+
+  it('normaliza revisão antiga (sem phase/accuracyByPhase) ao reabrir', () => {
+    const START = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1'
+    const AFTER_E4 =
+      'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1'
+    const oldJson = JSON.stringify({
+      positions: [
+        { ply: 0, fen: START, depth: 20, cp: 0, winPct: 50, pv: [], lines: [] },
+        {
+          ply: 1,
+          fen: AFTER_E4,
+          depth: 20,
+          cp: 0,
+          winPct: 50,
+          pv: [],
+          lines: [],
+        },
+      ],
+      moves: [],
+      accuracy: { white: 100, black: 100 },
+    })
+
+    const config = storedToConfig(stored({ reviewJson: oldJson }))
+    const result = config.initialResult
+
+    // material cheio → todas as posições viram Abertura; accuracyByPhase preenchido
+    expect(result.positions.every((p) => p.phase === 'opening')).toBe(true)
+    expect(result.accuracyByPhase.opening).toEqual({ white: 100, black: 100 })
   })
 })

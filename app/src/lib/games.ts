@@ -6,7 +6,9 @@ import type {
   ReviewResult,
   StoredGame,
 } from '../types'
+import { accuracyByPhaseOf } from './analyze'
 import { resolveEngineTier } from './engine-tier'
+import { computePhases } from './phase'
 import { parsePgn } from './pgn'
 
 /** Lista as partidas analisadas, da mais recente para a mais antiga. */
@@ -58,6 +60,27 @@ export function saveReview(
 }
 
 /**
+ * Garante que uma revisão (possivelmente antiga, do store) tenha `phase` em
+ * cada posição e `accuracyByPhase`. Recomputa a partir dos FENs/lances já
+ * presentes — puro e barato. Partidas novas (já com fases) passam ilesas.
+ */
+function normalizeReview(result: ReviewResult): ReviewResult {
+  const hasPhases = result.positions.every((p) => p.phase)
+  if (hasPhases && result.accuracyByPhase) return result
+  const phases = computePhases(result.positions)
+  const positions = result.positions.map((p, i) => ({
+    ...p,
+    phase: p.phase ?? phases[i],
+  }))
+  return {
+    ...result,
+    positions,
+    accuracyByPhase:
+      result.accuracyByPhase ?? accuracyByPhaseOf(result.moves, phases),
+  }
+}
+
+/**
  * Converte uma partida do store em ReviewConfig com o resultado pré-carregado
  * (useReview pula a análise quando initialResult está presente).
  * Os metadados são reparseados do PGN — fonte única de verdade para
@@ -89,6 +112,6 @@ export function storedToConfig(game: StoredGame): ReviewConfig {
     mode,
     ...(movetimeMs !== undefined ? { movetimeMs } : {}),
     lines: game.multipv,
-    initialResult: JSON.parse(game.reviewJson) as ReviewResult,
+    initialResult: normalizeReview(JSON.parse(game.reviewJson) as ReviewResult),
   }
 }
