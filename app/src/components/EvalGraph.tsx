@@ -91,12 +91,12 @@ export default function EvalGraph({
 
             <path
               d={ribbonPath}
-              fill='var(--color-panel-3)'
+              fill='var(--color-eval-white)'
               clipPath='url(#eval-top)'
             />
             <path
               d={ribbonPath}
-              fill='var(--color-panel-2)'
+              fill='var(--color-eval-black)'
               clipPath='url(#eval-bottom)'
             />
 
