@@ -3,46 +3,160 @@ import type { Phase } from '../types'
 export type { Phase }
 
 /**
- * Fases do jogo (Abertura / Meio-jogo / Final) combinando dois sinais:
+ * Fases do jogo (Abertura / Meio-jogo / Final) a partir do estado do tabuleiro,
+ * lido do FEN. Núcleo puro, sem efeitos colaterais, sem chess.js.
  *
- *  - Número do lance (ply): define a Abertura — os primeiros lances completos
- *    são Abertura independente do material (a maioria das aberturas chega ao
- *    meio-jogo com material cheio, então material sozinho é um sinal ruim aqui).
- *  - Material não-peão na escala Reinfeld (N=3, B=3, T=5, D=9; peões excluídos):
- *    define o Final — pouco material (<= 24, ~1/3 do máximo inicial 62).
+ * Sinais (todos derivados do posicionamento de peças):
+ *  - Contagem de peças maiores/menores (cavalos, bispos, torres, damas);
+ *  - Densidade da fileira de trás (sinal de desenvolvimento/roque);
+ *  - Interação entre peças dos dois lados (mixedness).
  *
- * Regra (com prioridade):
- *  - Final: mat <= 24                    (material baixo, independente do lance)
- *  - Abertura: ply <= OPENING_MAX_PLY    (primeiros 10 lances completos)
- *  - Meio-jogo: o que estiver entre os dois.
- *
- * `phaseOfMaterial` (só material) fica como fallback p/ posições isoladas sem
- * contexto de lance (variações). Núcleo puro, sem efeitos colaterais.
+ * `phaseOfPosition(fen)` classifica uma posição isolada. `computePhases` aplica
+ * um travamento monotônico sobre a sequência — a fase só avança, nunca regredir
+ * (uma promoção que aumente a contagem não desfaz a fase já atingida).
  */
 
-/** Limiar inclusivo: ply <= este valor é Abertura (10 lances completos). */
-const OPENING_MAX_PLY = 12
-/** Limiar inclusivo: material >= este valor é Abertura (sinal de material p/ variações). */
-const OPENING_MIN = 50
-/** Limiar inclusivo: material <= este valor é Final. */
-const ENDGAME_MAX = 12
-
-/** Valores Reinfeld das peças não-peão (peões e reis não entram). */
-const REINFELD: Record<string, number> = { n: 3, b: 3, r: 5, q: 9 }
+/** Meio-jogo quando a contagem de maiores/menores cai para este valor ou menos. */
+const MIDGAME_MAX_PIECES = 10
+/** Final quando a contagem de maiores/menores cai para este valor ou menos. */
+const ENDGAME_MAX_PIECES = 6
+/** Meio-jogo quando a interação entre as peças (mixedness) ultrapassa este valor. */
+const MIXEDNESS_THRESHOLD = 150
 
 /**
- * Conta o material não-peão total (ambos os lados) na escala Reinfeld a partir
- * do FEN. Peões e reis são ignorados. Lê apenas o campo de posicionamento de
- * peças (antes do primeiro espaço) — robusto a FENs degenerados.
+ * Conta as peças maiores e menores (cavalos, bispos, torres e damas) dos dois
+ * lados a partir do FEN. Reis e peões não entram. Inicial = 14.
  */
-export function nonPawnMaterial(fen: string): number {
+export function majorsAndMinors(fen: string): number {
   const placement = fen.split(' ')[0]
-  let total = 0
+  let count = 0
   for (const ch of placement) {
-    const v = REINFELD[ch.toLowerCase()]
-    if (v !== undefined) total += v
+    if ('nbrqNBRQ'.includes(ch)) count++
   }
-  return total
+  return count
+}
+
+/**
+ * Fileira de trás "rala": menos de 4 peças do lado na casa inicial indica que
+ * as peças se desenvolveram (e/ou o rei rocou). Brancas na 1ª fileira (ranks[7]),
+ * pretas na 8ª fileira (ranks[0]).
+ */
+export function backrankSparse(fen: string): boolean {
+  const ranks = fen.split(' ')[0].split('/')
+  const count = (rank: string, isUpper: boolean): number => {
+    let n = 0
+    for (const ch of rank) {
+      const upper = ch >= 'A' && ch <= 'Z'
+      if ((isUpper && upper) || (!isUpper && ch >= 'a' && ch <= 'z')) n++
+    }
+    return n
+  }
+  return count(ranks[7], true) < 4 || count(ranks[0], false) < 4
+}
+
+/**
+ * Pontuação de interação de uma região 2×2 dado o número de peças brancas e
+ * pretas ali e a linha y (1..7). Valores mais altos indicam peças dos dois
+ * lados conflitando numa mesma zona. Tabela de referência fixa.
+ */
+export function regionScore(y: number, white: number, black: number): number {
+  switch (white) {
+    case 0:
+      switch (black) {
+        case 1:
+          return 1 + y
+        case 2:
+          return y < 6 ? 2 + (6 - y) : 0
+        case 3:
+          return y < 7 ? 3 + (7 - y) : 0
+        case 4:
+          return y < 7 ? 3 + (7 - y) : 0
+        default:
+          return 0
+      }
+    case 1:
+      switch (black) {
+        case 0:
+          return 1 + (8 - y)
+        case 1:
+          return 5 + Math.abs(4 - y)
+        case 2:
+          return 4 + (7 - y)
+        case 3:
+          return 5 + (7 - y)
+        default:
+          return 0
+      }
+    case 2:
+      switch (black) {
+        case 0:
+          return y > 2 ? 2 + (y - 2) : 0
+        case 1:
+          return 4 + (y - 1)
+        case 2:
+          return 7
+        default:
+          return 0
+      }
+    case 3:
+      switch (black) {
+        case 0:
+          return y > 1 ? 3 + (y - 1) : 0
+        case 1:
+          return 5 + (y - 1)
+        default:
+          return 0
+      }
+    case 4:
+      switch (black) {
+        case 0:
+          return y > 1 ? 3 + (y - 1) : 0
+        default:
+          return 0
+      }
+    default:
+      return 0
+  }
+}
+
+/**
+ * Soma de interação das 49 regiões 2×2 (grade 7×7) do tabuleiro. Cada região
+ * contribui com `regionScore(y, brancas, pretas)`. Valores altos indicam peças
+ * dos dois lados disputando as mesmas zonas (sinal de meio-jogo).
+ */
+export function mixedness(fen: string): number {
+  const ranks = fen.split(' ')[0].split('/')
+  // board[rank][file], rank 0 = 1ª fileira (baixo), file 0 = coluna a.
+  const board: ('w' | 'b' | null)[][] = []
+  for (let fenRank = 0; fenRank < 8; fenRank++) {
+    const row: ('w' | 'b' | null)[] = new Array(8).fill(null)
+    let file = 0
+    for (const ch of ranks[fenRank]) {
+      if (ch >= '1' && ch <= '8') file += Number(ch)
+      else {
+        row[file] = ch >= 'A' && ch <= 'Z' ? 'w' : 'b'
+        file++
+      }
+    }
+    board[7 - fenRank] = row
+  }
+
+  let acc = 0
+  for (let y = 0; y <= 6; y++) {
+    for (let x = 0; x <= 6; x++) {
+      let w = 0
+      let b = 0
+      for (let dy = 0; dy <= 1; dy++) {
+        for (let dx = 0; dx <= 1; dx++) {
+          const cell = board[y + dy][x + dx]
+          if (cell === 'w') w++
+          else if (cell === 'b') b++
+        }
+      }
+      acc += regionScore(y + 1, w, b)
+    }
+  }
+  return acc
 }
 
 /** Ordem das fases (Abertura < Meio-jogo < Final) para o travamento monotônico. */
@@ -53,17 +167,15 @@ const PHASE_ORDER: Record<Phase, number> = {
 }
 
 /**
- * Fase de cada posição (paralelo ao vetor de entrada), combinando número do
- * lance e material não-peão via `phaseOf`. A fase só avança: uma vez atingida
- * uma fase, posições posteriores com material maior (p.ex. por promoção de peão
- * em dama) não regrediram — garante faixas contíguas no gráfico.
+ * Fase de cada posição (paralelo ao vetor de entrada), via `phaseOfPosition`.
+ * A fase só avança: uma vez atingida uma fase, posições posteriores com mais
+ * peças (p.ex. por promoção de peão em dama) não regrediram — garante faixas
+ * contíguas no gráfico.
  */
-export function computePhases(
-  positions: { fen: string; ply: number }[],
-): Phase[] {
+export function computePhases(positions: { fen: string }[]): Phase[] {
   let current: Phase = 'opening'
   return positions.map((p) => {
-    const raw = phaseOf(p.ply, nonPawnMaterial(p.fen))
+    const raw = phaseOfPosition(p.fen)
     if (PHASE_ORDER[raw] > PHASE_ORDER[current]) current = raw
     return current
   })
@@ -90,24 +202,21 @@ export function phaseBoundaries(phases: Phase[]): {
 }
 
 /**
- * Fase combinando material não-peão e número do lance. O Final (material baixo)
- * tem prioridade sobre a Abertura (número do lance), para que trocas massivas
- * precoces já caracterizem o final.
+ * Fase de uma posição isolada a partir de três sinais do tabuleiro:
+ *  - Final: poucas peças maiores/menores (≤ ENDGAME_MAX_PIECES).
+ *  - Meio-jogo: peças já trocadas (≤ MIDGAME_MAX_PIECES), ou fileira de trás
+ *    rala (desenvolvimento), ou peças dos dois lados disputando zonas (mixedness).
+ *  - Abertura: caso contrário.
+ * Usada para a sequência da partida e para posições isoladas de variações.
  */
-export function phaseOf(ply: number, mat: number): Phase {
-  if (mat <= ENDGAME_MAX) return 'endgame'
-  if (ply <= OPENING_MAX_PLY) return 'opening'
-  return 'middlegame'
-}
-
-/**
- * Mapeia um total de material não-peão à fase correspondente (só material).
- * Usado para posições isoladas sem contexto de lance — p.ex. uma casa de uma
- * variação explorada, onde o ply absoluto da partida não está disponível.
- * Limiares inclusivos nas bordas (50 é Abertura, 24 é Final).
- */
-export function phaseOfMaterial(mat: number): Phase {
-  if (mat >= OPENING_MIN) return 'opening'
-  if (mat <= ENDGAME_MAX) return 'endgame'
-  return 'middlegame'
+export function phaseOfPosition(fen: string): Phase {
+  const pieces = majorsAndMinors(fen)
+  if (pieces <= ENDGAME_MAX_PIECES) return 'endgame'
+  if (
+    pieces <= MIDGAME_MAX_PIECES ||
+    backrankSparse(fen) ||
+    mixedness(fen) > MIXEDNESS_THRESHOLD
+  )
+    return 'middlegame'
+  return 'opening'
 }

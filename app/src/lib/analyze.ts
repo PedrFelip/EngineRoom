@@ -87,7 +87,7 @@ export function buildReview(
   raw: RawPosition[],
   book?: BookInfo,
 ): ReviewResult {
-  const phases = computePhases(raw.map((r, i) => ({ fen: r.fen, ply: i })))
+  const phases = computePhases(raw.map((r) => ({ fen: r.fen })))
 
   const positions: PositionAnalysis[] = raw.map((r, i) => {
     const stm = sideToMoveAt(game, i)
