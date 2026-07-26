@@ -3,22 +3,29 @@ import type { Phase } from '../types'
 export type { Phase }
 
 /**
- * Fases do jogo (Abertura / Meio-jogo / Final) a partir do material não-peão,
- * contado na escala Reinfeld (N=3, B=3, T=5, D=9). Peões são excluídos —
- * sobrevivem ao final e não discriminam a fase.
+ * Fases do jogo (Abertura / Meio-jogo / Final) combinando dois sinais:
  *
- * Limiares sobre o total de material não-peão dos dois lados (máximo inicial = 62):
- *  - Abertura: mat >= 50   (poucas trocas, fase de desenvolvimento)
- *  - Meio-jogo: 24 < mat < 50
- *  - Final: mat <= 24       (~1/3 do material inicial)
+ *  - Número do lance (ply): define a Abertura — os primeiros lances completos
+ *    são Abertura independente do material (a maioria das aberturas chega ao
+ *    meio-jogo com material cheio, então material sozinho é um sinal ruim aqui).
+ *  - Material não-peão na escala Reinfeld (N=3, B=3, T=5, D=9; peões excluídos):
+ *    define o Final — pouco material (<= 24, ~1/3 do máximo inicial 62).
  *
- * Núcleo puro, sem efeitos colaterais.
+ * Regra (com prioridade):
+ *  - Final: mat <= 24                    (material baixo, independente do lance)
+ *  - Abertura: ply <= OPENING_MAX_PLY    (primeiros 10 lances completos)
+ *  - Meio-jogo: o que estiver entre os dois.
+ *
+ * `phaseOfMaterial` (só material) fica como fallback p/ posições isoladas sem
+ * contexto de lance (variações). Núcleo puro, sem efeitos colaterais.
  */
 
-/** Limiar inclusivo: material >= este valor é Abertura. */
+/** Limiar inclusivo: ply <= este valor é Abertura (10 lances completos). */
+const OPENING_MAX_PLY = 12
+/** Limiar inclusivo: material >= este valor é Abertura (sinal de material p/ variações). */
 const OPENING_MIN = 50
 /** Limiar inclusivo: material <= este valor é Final. */
-const ENDGAME_MAX = 24
+const ENDGAME_MAX = 12
 
 /** Valores Reinfeld das peças não-peão (peões e reis não entram). */
 const REINFELD: Record<string, number> = { n: 3, b: 3, r: 5, q: 9 }
@@ -46,14 +53,17 @@ const PHASE_ORDER: Record<Phase, number> = {
 }
 
 /**
- * Fase de cada posição (paralelo ao vetor de entrada). A fase só avança: uma
- * vez atingida uma fase, posições posteriores com material maior (p.ex. por
- * promoção de peão em dama) não regrediram — garante faixas contíguas no gráfico.
+ * Fase de cada posição (paralelo ao vetor de entrada), combinando número do
+ * lance e material não-peão via `phaseOf`. A fase só avança: uma vez atingida
+ * uma fase, posições posteriores com material maior (p.ex. por promoção de peão
+ * em dama) não regrediram — garante faixas contíguas no gráfico.
  */
-export function computePhases(positions: { fen: string }[]): Phase[] {
+export function computePhases(
+  positions: { fen: string; ply: number }[],
+): Phase[] {
   let current: Phase = 'opening'
   return positions.map((p) => {
-    const raw = phaseOfMaterial(nonPawnMaterial(p.fen))
+    const raw = phaseOf(p.ply, nonPawnMaterial(p.fen))
     if (PHASE_ORDER[raw] > PHASE_ORDER[current]) current = raw
     return current
   })
@@ -80,7 +90,20 @@ export function phaseBoundaries(phases: Phase[]): {
 }
 
 /**
- * Mapeia um total de material não-peão à fase correspondente.
+ * Fase combinando material não-peão e número do lance. O Final (material baixo)
+ * tem prioridade sobre a Abertura (número do lance), para que trocas massivas
+ * precoces já caracterizem o final.
+ */
+export function phaseOf(ply: number, mat: number): Phase {
+  if (mat <= ENDGAME_MAX) return 'endgame'
+  if (ply <= OPENING_MAX_PLY) return 'opening'
+  return 'middlegame'
+}
+
+/**
+ * Mapeia um total de material não-peão à fase correspondente (só material).
+ * Usado para posições isoladas sem contexto de lance — p.ex. uma casa de uma
+ * variação explorada, onde o ply absoluto da partida não está disponível.
  * Limiares inclusivos nas bordas (50 é Abertura, 24 é Final).
  */
 export function phaseOfMaterial(mat: number): Phase {

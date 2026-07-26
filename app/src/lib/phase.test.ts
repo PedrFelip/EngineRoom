@@ -4,6 +4,7 @@ import {
   nonPawnMaterial,
   type Phase,
   phaseBoundaries,
+  phaseOf,
   phaseOfMaterial,
 } from './phase'
 
@@ -33,6 +34,36 @@ describe('phaseOfMaterial', () => {
   })
 })
 
+describe('phaseOf (material + número do lance)', () => {
+  it('início da partida com material cheio é Abertura', () => {
+    expect(phaseOf(0, 62)).toBe('opening')
+  })
+
+  it('material cheio até o ply 20 (10 lances completos) ainda é Abertura', () => {
+    expect(phaseOf(20, 62)).toBe('opening')
+  })
+
+  it('material cheio APÓS o lance 10 vira Meio-jogo (sinal do número do lance)', () => {
+    // antes dessa mudança, material 62 era sempre Abertura
+    expect(phaseOf(21, 62)).toBe('middlegame')
+    expect(phaseOf(40, 62)).toBe('middlegame')
+  })
+
+  it('material de meio-jogo no meio da partida é Meio-jogo', () => {
+    expect(phaseOf(40, 40)).toBe('middlegame')
+  })
+
+  it('material baixo vira Final independente do número do lance', () => {
+    expect(phaseOf(40, 24)).toBe('endgame')
+    // mesmo cedo, se o material já é de final, é final
+    expect(phaseOf(10, 20)).toBe('endgame')
+  })
+
+  it('prioridade: material de final vence sobre número do lance cedo', () => {
+    expect(phaseOf(5, 10)).toBe('endgame')
+  })
+})
+
 describe('nonPawnMaterial', () => {
   it('posição inicial soma 62 (4N 4B 4T 2D na escala Reinfeld)', () => {
     const start = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1'
@@ -50,26 +81,40 @@ describe('nonPawnMaterial', () => {
 })
 
 describe('computePhases', () => {
-  // FENs de referência com material em cada banda:
-  //  - start: 62 (Abertura)   - mid: 44 (Meio-jogo, damas removidas)
-  //  - end: 5 (Final, só uma torre)   - highAfter: 31 (raw Meio-jogo)
+  // FENs de referência: start = material cheio (62); end = 5 (Final, uma torre);
+  // highAfter = 31 (raw Meio-jogo). Cada posição carrega seu ply absoluto.
   const start = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1'
-  const mid = 'rnb1kbnr/pppppppp/8/8/8/8/PPPPPPPP/RNB1KBNR w KQkq - 0 1'
   const end = '8/4k3/8/8/8/8/8/4K2R w - - 0 1'
   const highAfter = 'r2qk3/8/8/8/8/8/8/R1BQK3 w - - 0 1'
 
+  it('mesma posição, ply diferente: material cheio vira Meio-jogo após o lance 10', () => {
+    // o NÚMERO DO LANCE decide a Abertura, não o material
+    expect(
+      computePhases([
+        { fen: start, ply: 20 },
+        { fen: start, ply: 21 },
+      ]),
+    ).toEqual(['opening', 'middlegame'])
+  })
+
   it('arco natural Abertura → Meio-jogo → Final', () => {
-    expect(computePhases([{ fen: start }, { fen: mid }, { fen: end }])).toEqual(
-      ['opening', 'middlegame', 'endgame'],
-    )
+    expect(
+      computePhases([
+        { fen: start, ply: 0 },
+        { fen: start, ply: 25 },
+        { fen: end, ply: 40 },
+      ]),
+    ).toEqual(['opening', 'middlegame', 'endgame'])
   })
 
   it('não regredir: atingido o Final, material maior permanece Final', () => {
-    // end(raw Final) → highAfter(raw Meio-jogo): a fase não pode voltar.
-    expect(computePhases([{ fen: end }, { fen: highAfter }])).toEqual([
-      'endgame',
-      'endgame',
-    ])
+    // end(raw Final, ply 40) → highAfter(raw Meio-jogo, ply 41): a fase não volta
+    expect(
+      computePhases([
+        { fen: end, ply: 40 },
+        { fen: highAfter, ply: 41 },
+      ]),
+    ).toEqual(['endgame', 'endgame'])
   })
 
   it('vetor vazio retorna vazio', () => {
