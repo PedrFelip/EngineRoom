@@ -11,11 +11,13 @@ import { Chess } from 'chess.js'
 import type {
   AccuracyByColor,
   MoveAnalysis,
+  Phase,
   PositionAnalysis,
   PvLine,
   ReviewResult,
 } from '../types'
 import { type EcoEntry, lookupOpening } from './eco'
+import { computePhases } from './phase'
 import { classifyMove, cpToWinPct, gameAccuracy } from './scoring'
 import type { InfoScore } from './uci'
 import { isReadyOk, isUciOk, parseInfo, scoreToCp } from './uci'
@@ -85,6 +87,8 @@ export function buildReview(
   raw: RawPosition[],
   book?: BookInfo,
 ): ReviewResult {
+  const phases = computePhases(raw.map((r) => ({ fen: r.fen })))
+
   const positions: PositionAnalysis[] = raw.map((r, i) => {
     const stm = sideToMoveAt(game, i)
     const winPct = stm === 'w' ? cpToWinPct(r.cp) : 100 - cpToWinPct(r.cp)
@@ -99,6 +103,7 @@ export function buildReview(
     return {
       ply: i,
       fen: r.fen,
+      phase: phases[i],
       depth: r.depth,
       cp: r.cp,
       winPct,
@@ -146,7 +151,38 @@ export function buildReview(
     ),
   }
 
-  return { positions, moves, accuracy }
+  const accuracyByPhase = accuracyByPhaseOf(moves, phases)
+
+  return { positions, moves, accuracy, accuracyByPhase }
+}
+
+/**
+ * Acurácia agregada (0–100) por fase do jogo. Um lance pertence à fase da
+ * posição de onde partiu (`phases[ply - 1]`). Lances de livro são excluídos,
+ * espelhando a acurácia geral. Reaproveitada na normalização de partidas
+ * antigas vindas do store (sem `accuracyByPhase` persistido).
+ */
+export function accuracyByPhaseOf(
+  moves: MoveAnalysis[],
+  phases: Phase[],
+): Record<Phase, AccuracyByColor> {
+  const forPhase = (phase: Phase): AccuracyByColor => {
+    const losses = (color: 'w' | 'b') =>
+      moves
+        .filter(
+          (m) => m.color === color && !m.isBook && phases[m.ply - 1] === phase,
+        )
+        .map((m) => m.winPctLoss)
+    return {
+      white: gameAccuracy(losses('w')),
+      black: gameAccuracy(losses('b')),
+    }
+  }
+  return {
+    opening: forPhase('opening'),
+    middlegame: forPhase('middlegame'),
+    endgame: forPhase('endgame'),
+  }
 }
 
 /** Motivo pelo qual o processo da engine encerrou (evento `engine://exit`). */

@@ -87,10 +87,14 @@ export type Classification =
   | 'erro'
   | 'blunder'
 
+/** Fase do jogo inferida a partir do FEN (material não-peão + heurísticas de desenvolvimento/contato). */
+export type Phase = 'opening' | 'middlegame' | 'endgame'
+
 /** Resultado da análise do engine numa única posição. */
 export interface PositionAnalysis {
   ply: number
   fen: string
+  phase: Phase
   depth: number
   cp: number
   winPct: number
@@ -134,6 +138,7 @@ export interface ReviewResult {
   positions: PositionAnalysis[]
   moves: MoveAnalysis[]
   accuracy: AccuracyByColor
+  accuracyByPhase: Record<Phase, AccuracyByColor>
 }
 
 /**
