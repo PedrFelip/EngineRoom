@@ -187,6 +187,11 @@ export function computePhases(positions: { fen: string }[]): Phase[] {
  *  - `middlegameEnd`: último ply antes do Final (início do Final).
  * Fases ausentes colapsam: sem Meio-jogo, `middlegameEnd === openingEnd`
  * (faixa do meio com largura 0); sem Final, `middlegameEnd` é o último índice.
+ *
+ * Para `phases` não-vazio, os limites são sempre ≥ 0: uma partida que comece
+ * direto em Meio-jogo/Final (p.ex. PGN com `[FEN]`) colapsa as fases iniciais
+ * ausentes pra 0 (faixas de largura 0 na borda esquerda). Vetor vazio devolve
+ * o sentinela `{-1, -1}`.
  */
 export function phaseBoundaries(phases: Phase[]): {
   openingEnd: number
@@ -197,6 +202,10 @@ export function phaseBoundaries(phases: Phase[]): {
   for (let i = 0; i < phases.length; i++) {
     if (phases[i] === 'opening') openingEnd = i
     if (phases[i] === 'opening' || phases[i] === 'middlegame') middlegameEnd = i
+  }
+  if (phases.length > 0) {
+    openingEnd = Math.max(0, openingEnd)
+    middlegameEnd = Math.max(0, middlegameEnd)
   }
   return { openingEnd, middlegameEnd }
 }

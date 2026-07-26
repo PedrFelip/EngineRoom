@@ -210,4 +210,23 @@ describe('phaseBoundaries', () => {
     const p: Phase[] = ['opening', 'opening', 'endgame', 'endgame']
     expect(phaseBoundaries(p)).toEqual({ openingEnd: 1, middlegameEnd: 1 })
   })
+
+  it('sem Abertura: openingEnd colapsa pra 0 (não negativo)', () => {
+    const p: Phase[] = ['middlegame', 'middlegame', 'endgame']
+    expect(phaseBoundaries(p)).toEqual({ openingEnd: 0, middlegameEnd: 1 })
+  })
+
+  it('só Meio-jogo (sem Abertura nem Final): nenhum limite negativo', () => {
+    const p: Phase[] = ['middlegame', 'middlegame']
+    expect(phaseBoundaries(p)).toEqual({ openingEnd: 0, middlegameEnd: 1 })
+  })
+
+  it('começa direto no Final: ambos colapsam pra 0', () => {
+    const p: Phase[] = ['endgame', 'endgame']
+    expect(phaseBoundaries(p)).toEqual({ openingEnd: 0, middlegameEnd: 0 })
+  })
+
+  it('vetor vazio: sentinela {-1, -1} (não alimenta o gráfico)', () => {
+    expect(phaseBoundaries([])).toEqual({ openingEnd: -1, middlegameEnd: -1 })
+  })
 })
