@@ -87,7 +87,7 @@ export type Classification =
   | 'erro'
   | 'blunder'
 
-/** Fase do jogo determinada pelo material não-peão (escala Reinfeld). */
+/** Fase do jogo inferida a partir do FEN (material não-peão + heurísticas de desenvolvimento/contato). */
 export type Phase = 'opening' | 'middlegame' | 'endgame'
 
 /** Resultado da análise do engine numa única posição. */
