@@ -50,23 +50,19 @@ impl<'a> Cache<'a> {
         value: u32,
         multipv: u32,
     ) -> Result<Option<CachedPosition>, String> {
-        let (sql, params): (&str, Vec<Box<dyn rusqlite::ToSql>>) = match mode {
-            Mode::Time => (
-                "SELECT cp, lines_json, reached_depth FROM position_cache
+        // Os dois modos diferem só no SQL — os parâmetros (fen, value, multipv)
+        // são idênticos, bindados em ?1, ?2, ?3.
+        let sql = match mode {
+            Mode::Time => "SELECT cp, lines_json, reached_depth FROM position_cache
                  WHERE fen = ?1 AND source_mode = 'time' AND source_value >= ?2 AND multipv >= ?3
                  ORDER BY source_value ASC LIMIT 1",
-                vec![Box::new(fen.to_string()), Box::new(value), Box::new(multipv)],
-            ),
-            Mode::Depth => (
-                "SELECT cp, lines_json, reached_depth FROM position_cache
+            Mode::Depth => "SELECT cp, lines_json, reached_depth FROM position_cache
                  WHERE fen = ?1 AND reached_depth >= ?2 AND multipv >= ?3
                  ORDER BY reached_depth ASC LIMIT 1",
-                vec![Box::new(fen.to_string()), Box::new(value), Box::new(multipv)],
-            ),
         };
         let mut stmt = self.conn.prepare(sql).map_err(|e| e.to_string())?;
         let mut rows = stmt
-            .query(rusqlite::params_from_iter(params.iter().map(|b| b.as_ref())))
+            .query(rusqlite::params![fen, value, multipv])
             .map_err(|e| e.to_string())?;
         match rows.next().map_err(|e| e.to_string())? {
             Some(row) => Ok(Some(CachedPosition {
