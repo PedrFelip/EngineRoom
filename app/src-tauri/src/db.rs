@@ -809,6 +809,97 @@ mod tests {
         );
     }
 
+    /// Banco "antigo" de `games` (pré-migração `mode`): sem a coluna `mode`,
+    /// `UNIQUE (pgn, depth, multipv)`, populado com uma linha legacy.
+    fn banco_com_games_legacy() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE games (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                pgn TEXT NOT NULL,
+                white TEXT NOT NULL,
+                black TEXT NOT NULL,
+                result TEXT NOT NULL,
+                plies INTEGER NOT NULL,
+                engine_tier TEXT NOT NULL,
+                depth INTEGER NOT NULL,
+                multipv INTEGER NOT NULL,
+                accuracy_white REAL NOT NULL,
+                accuracy_black REAL NOT NULL,
+                review_json TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                UNIQUE (pgn, depth, multipv)
+             );",
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO games (pgn, white, black, result, plies, engine_tier, depth, multipv,
+                                accuracy_white, accuracy_black, review_json)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            rusqlite::params![
+                "1. e4 e5",
+                "Brancas",
+                "Pretas",
+                "1-0",
+                2,
+                "balanced",
+                20,
+                1,
+                98.5,
+                91.0,
+                r#"{"positions":[]}"#,
+            ],
+        )
+        .unwrap();
+        conn
+    }
+
+    #[test]
+    fn migracao_games_mode_preserva_dados_legacy_sem_coluna_mode() {
+        let conn = banco_com_games_legacy();
+
+        // Pré-migração: coluna `mode` ausente.
+        assert!(!has_column(&conn, "games", "mode").unwrap());
+
+        migrate(&conn).unwrap();
+
+        // Pós-migração: `mode` presente, linha legacy sobrevive com mode='depth'.
+        assert!(has_column(&conn, "games", "mode").unwrap());
+        let lista = list_games(&conn).unwrap();
+        assert_eq!(lista.len(), 1, "linha legacy deve sobreviver à migração");
+        assert_eq!(lista[0].mode, "depth", "default da migração é mode='depth'");
+        assert_eq!(lista[0].white, "Brancas");
+        assert_eq!(lista[0].depth, 20);
+    }
+
+    #[test]
+    fn migracao_games_mode_eh_idempotente() {
+        let conn = banco_com_games_legacy();
+
+        migrate(&conn).unwrap();
+        // Segunda chamada: `mode` já existe → no-op, sem duplicar.
+        migrate(&conn).unwrap();
+
+        let lista = list_games(&conn).unwrap();
+        assert_eq!(lista.len(), 1, "idempotente: sem duplicação");
+        assert_eq!(lista[0].white, "Brancas");
+    }
+
+    #[test]
+    fn migrate_em_schema_atual_eh_noop() {
+        // open_memory() já roda migrate() uma vez → schema no estado latest.
+        let conn = open_memory().unwrap();
+
+        // Rodar migrate() de novo (como ocorre a cada startup) não deve falhar.
+        migrate(&conn).unwrap();
+
+        // Tabelas acessíveis e vazias.
+        let stats = compute_storage_stats(&conn).unwrap();
+        assert_eq!(stats.cache_bytes, 0);
+        assert_eq!(stats.games_bytes, 0);
+        assert!(list_games(&conn).unwrap().is_empty());
+    }
+
     fn partida_exemplo() -> NewGame {
         NewGame {
             pgn: "1. e4 e5".to_string(),
@@ -991,5 +1082,24 @@ mod tests {
             "games_bytes deve refletir ao menos pgn + review_json: got {}",
             populado.games_bytes
         );
+    }
+
+    #[test]
+    fn storage_stats_zera_apos_clear_de_ambas_as_tabelas() {
+        let conn = open_memory().unwrap();
+        cache_store(&conn, FEN, "depth", 20, 1, 20, 35, LINES).unwrap();
+        store_game(&conn, &partida_exemplo()).unwrap();
+
+        // Pré-condição: ambas as tabelas com bytes > 0.
+        let antes = compute_storage_stats(&conn).unwrap();
+        assert!(antes.cache_bytes > 0, "pré-condição: cache populado");
+        assert!(antes.games_bytes > 0, "pré-condição: games populado");
+
+        clear_cache(&conn).unwrap();
+        clear_games(&conn).unwrap();
+
+        let depois = compute_storage_stats(&conn).unwrap();
+        assert_eq!(depois.cache_bytes, 0, "cache_bytes volta a zero após clear");
+        assert_eq!(depois.games_bytes, 0, "games_bytes volta a zero após clear");
     }
 }
