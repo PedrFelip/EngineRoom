@@ -111,7 +111,9 @@ mod tests {
         assert_eq!(vazio.cache_bytes, 0, "banco vazio: cache em zero bytes");
         assert_eq!(vazio.games_bytes, 0, "banco vazio: games em zero bytes");
 
-        Cache::new(&conn).store(FEN, Mode::Depth, 20, 1, 20, 35, LINES).unwrap();
+        Cache::new(&conn)
+            .store(FEN, Mode::Depth, 20, 1, 20, 35, LINES)
+            .unwrap();
         Store::new(&conn).save(&partida_exemplo()).unwrap();
 
         let populado = Stats::new(&conn).compute().unwrap();
@@ -122,8 +124,7 @@ mod tests {
         );
         assert!(
             populado.games_bytes
-                >= "1. e4 e5".len() as u64
-                    + r#"{"positions":[],"moves":[]}"#.len() as u64,
+                >= "1. e4 e5".len() as u64 + r#"{"positions":[],"moves":[]}"#.len() as u64,
             "games_bytes deve refletir ao menos pgn + review_json: got {}",
             populado.games_bytes
         );
@@ -132,7 +133,9 @@ mod tests {
     #[test]
     fn storage_stats_zera_apos_clear_de_ambas_as_tabelas() {
         let conn = open_memory().unwrap();
-        Cache::new(&conn).store(FEN, Mode::Depth, 20, 1, 20, 35, LINES).unwrap();
+        Cache::new(&conn)
+            .store(FEN, Mode::Depth, 20, 1, 20, 35, LINES)
+            .unwrap();
         Store::new(&conn).save(&partida_exemplo()).unwrap();
 
         // Pré-condição: ambas as tabelas com bytes > 0.

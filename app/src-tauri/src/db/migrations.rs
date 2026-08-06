@@ -158,7 +158,7 @@ fn migrate_games_mode(conn: &Connection) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::{cache::Cache, games::Store, mode::Mode, stats::Stats, open_memory};
+    use crate::db::{cache::Cache, games::Store, mode::Mode, open_memory, stats::Stats};
     use rusqlite::Connection;
 
     const FEN: &str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
@@ -321,7 +321,11 @@ mod tests {
         assert!(has_column(&conn, "games", "mode").unwrap());
         let lista = Store::new(&conn).list().unwrap();
         assert_eq!(lista.len(), 1, "linha legacy deve sobreviver à migração");
-        assert_eq!(lista[0].mode, Mode::Depth, "default da migração é mode='depth'");
+        assert_eq!(
+            lista[0].mode,
+            Mode::Depth,
+            "default da migração é mode='depth'"
+        );
         assert_eq!(lista[0].white, "Brancas");
         assert_eq!(lista[0].depth, 20);
     }

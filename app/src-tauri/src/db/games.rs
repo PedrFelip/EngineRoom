@@ -63,27 +63,28 @@ impl<'a> Store<'a> {
     }
 
     pub fn save(&self, game: &NewGame) -> Result<i64, String> {
-        self.conn.execute(
-            "INSERT OR REPLACE INTO games
+        self.conn
+            .execute(
+                "INSERT OR REPLACE INTO games
                 (pgn, white, black, result, plies, engine_tier, mode, depth, multipv,
                  accuracy_white, accuracy_black, review_json)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
-            (
-                &game.pgn,
-                &game.white,
-                &game.black,
-                &game.result,
-                game.plies,
-                &game.engine_tier,
-                game.mode,
-                game.depth,
-                game.multipv,
-                game.accuracy_white,
-                game.accuracy_black,
-                &game.review_json,
-            ),
-        )
-        .map_err(|e| e.to_string())?;
+                (
+                    &game.pgn,
+                    &game.white,
+                    &game.black,
+                    &game.result,
+                    game.plies,
+                    &game.engine_tier,
+                    game.mode,
+                    game.depth,
+                    game.multipv,
+                    game.accuracy_white,
+                    game.accuracy_black,
+                    &game.review_json,
+                ),
+            )
+            .map_err(|e| e.to_string())?;
         Ok(self.conn.last_insert_rowid())
     }
 

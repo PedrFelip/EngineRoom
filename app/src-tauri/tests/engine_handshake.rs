@@ -91,10 +91,7 @@ async fn stockfish_uci_handshake_and_bestmove() {
         }
     }
     assert!(got_uciok, "engine não respondeu `uciok` a tempo");
-    assert!(
-        name.contains("Stockfish"),
-        "id name inesperado: {name:?}"
-    );
+    assert!(name.contains("Stockfish"), "id name inesperado: {name:?}");
 
     // 2) Ask for a move from the start position.
     stdin

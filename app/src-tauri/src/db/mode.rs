@@ -30,7 +30,9 @@ impl Mode {
 
 impl ToSql for Mode {
     fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
-        Ok(ToSqlOutput::Borrowed(ValueRef::Text(self.as_str().as_bytes())))
+        Ok(ToSqlOutput::Borrowed(ValueRef::Text(
+            self.as_str().as_bytes(),
+        )))
     }
 }
 

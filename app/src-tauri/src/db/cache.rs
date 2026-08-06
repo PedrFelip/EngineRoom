@@ -53,12 +53,16 @@ impl<'a> Cache<'a> {
         // Os dois modos diferem só no SQL — os parâmetros (fen, value, multipv)
         // são idênticos, bindados em ?1, ?2, ?3.
         let sql = match mode {
-            Mode::Time => "SELECT cp, lines_json, reached_depth FROM position_cache
+            Mode::Time => {
+                "SELECT cp, lines_json, reached_depth FROM position_cache
                  WHERE fen = ?1 AND source_mode = 'time' AND source_value >= ?2 AND multipv >= ?3
-                 ORDER BY source_value ASC LIMIT 1",
-            Mode::Depth => "SELECT cp, lines_json, reached_depth FROM position_cache
+                 ORDER BY source_value ASC LIMIT 1"
+            }
+            Mode::Depth => {
+                "SELECT cp, lines_json, reached_depth FROM position_cache
                  WHERE fen = ?1 AND reached_depth >= ?2 AND multipv >= ?3
-                 ORDER BY reached_depth ASC LIMIT 1",
+                 ORDER BY reached_depth ASC LIMIT 1"
+            }
         };
         let mut stmt = self.conn.prepare(sql).map_err(|e| e.to_string())?;
         let mut rows = stmt
@@ -85,13 +89,14 @@ impl<'a> Cache<'a> {
         cp: i32,
         lines_json: &str,
     ) -> Result<(), String> {
-        self.conn.execute(
-            "INSERT OR REPLACE INTO position_cache
+        self.conn
+            .execute(
+                "INSERT OR REPLACE INTO position_cache
                 (fen, reached_depth, multipv, source_mode, source_value, cp, lines_json)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            rusqlite::params![fen, reached_depth, multipv, mode, value, cp, lines_json],
-        )
-        .map_err(|e| e.to_string())?;
+                rusqlite::params![fen, reached_depth, multipv, mode, value, cp, lines_json],
+            )
+            .map_err(|e| e.to_string())?;
         Ok(())
     }
 
@@ -168,7 +173,9 @@ mod tests {
         let conn = open_memory().unwrap();
         let cache = Cache::new(&conn);
         // Modo tempo: source_value (movetimeMs) = 5000, reached_depth (plies) = 28.
-        cache.store(FEN, Mode::Time, 5000, 1, 28, 35, LINES).unwrap();
+        cache
+            .store(FEN, Mode::Time, 5000, 1, 28, 35, LINES)
+            .unwrap();
 
         let hit = cache.lookup(FEN, Mode::Time, 5000, 1).unwrap();
 
@@ -201,7 +208,10 @@ mod tests {
 
         // Pedido de depth 15 → deve acertar (20 >= 15).
         let hit = cache.lookup(FEN, Mode::Depth, 15, 1).unwrap();
-        assert!(hit.is_some(), "depth menor deve ser coberto pela entry mais profunda");
+        assert!(
+            hit.is_some(),
+            "depth menor deve ser coberto pela entry mais profunda"
+        );
         assert_eq!(hit.unwrap().cp, 35);
     }
 
@@ -221,7 +231,9 @@ mod tests {
         let cache = Cache::new(&conn);
         // Entry de time: reached_depth=28 (source_value/movetime não importa
         // para cobrir depth, só reached_depth conta).
-        cache.store(FEN, Mode::Time, 5000, 1, 28, 35, LINES).unwrap();
+        cache
+            .store(FEN, Mode::Time, 5000, 1, 28, 35, LINES)
+            .unwrap();
 
         // Pedido de depth 20 → hit: 28 >= 20, independente do source_mode.
         let hit = cache.lookup(FEN, Mode::Depth, 20, 1).unwrap();
@@ -252,7 +264,9 @@ mod tests {
             {"multipv":3,"cp":28,"pv":["c2c4"],"san":"c4"},
             {"multipv":4,"cp":25,"pv":["g1f3"],"san":"Nf3"}
         ]"#;
-        cache.store(FEN, Mode::Depth, 20, 4, 20, 35, lines4).unwrap();
+        cache
+            .store(FEN, Mode::Depth, 20, 4, 20, 35, lines4)
+            .unwrap();
 
         // Pedido multipv=2 → coberto pela entry multipv=4.
         let hit = cache.lookup(FEN, Mode::Depth, 20, 2).unwrap();
@@ -273,7 +287,9 @@ mod tests {
     fn cache_time_coberto_por_entry_com_movetime_maior() {
         let conn = open_memory().unwrap();
         let cache = Cache::new(&conn);
-        cache.store(FEN, Mode::Time, 5000, 1, 28, 35, LINES).unwrap();
+        cache
+            .store(FEN, Mode::Time, 5000, 1, 28, 35, LINES)
+            .unwrap();
 
         // Pedido de time 3000ms → hit: 5000 >= 3000.
         let hit = cache.lookup(FEN, Mode::Time, 3000, 1).unwrap();
@@ -335,7 +351,9 @@ mod tests {
         let conn = open_memory().unwrap();
         let cache = Cache::new(&conn);
         cache.store(FEN, Mode::Depth, 20, 1, 20, 35, LINES).unwrap();
-        cache.store(FEN, Mode::Time, 5000, 1, 28, 35, LINES).unwrap();
+        cache
+            .store(FEN, Mode::Time, 5000, 1, 28, 35, LINES)
+            .unwrap();
         assert!(
             cache.lookup(FEN, Mode::Depth, 20, 1).unwrap().is_some(),
             "pré-condição: cache populado"

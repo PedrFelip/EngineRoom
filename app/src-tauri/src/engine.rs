@@ -211,11 +211,7 @@ pub fn engine_spawn(
         return Err("A engine já está em execução.".into());
     }
 
-    let kind = match path
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-    {
+    let kind = match path.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
         Some(p) => SpawnKind::Path(p.to_string()),
         None => SpawnKind::Sidecar,
     };
