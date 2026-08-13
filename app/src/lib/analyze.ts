@@ -230,6 +230,10 @@ export type EngineMode = AnalyzeControl['mode']
  * Cache de avaliações por posição, chaveado por (fen, mode, value, multipv),
  * onde `value` é `depth` (modo profundidade) ou `movetimeMs` (modo tempo).
  * `get` devolve null em caso de miss; `put` grava a avaliação alcançada.
+ *
+ * `getBulk`/`putMany` são os equivalentes em lote para uma mesma chave
+ * (mode, value, multipv): o pipeline de análise faz uma única consulta de
+ * prefetch e um único descarrego ao final, em vez de N chamadas seriais.
  */
 export interface PositionCache {
   get(
@@ -240,6 +244,20 @@ export interface PositionCache {
   ): Promise<RawPosition | null>
   put(
     pos: RawPosition,
+    mode: EngineMode,
+    value: number,
+    multipv: number,
+  ): Promise<void>
+  /** Prefetch dos hits para N fens, numa única chamada. Ordem preservada. */
+  getBulk(
+    fens: string[],
+    mode: EngineMode,
+    value: number,
+    multipv: number,
+  ): Promise<(RawPosition | null)[]>
+  /** Grava N posições numa única chamada (transação). */
+  putMany(
+    entries: RawPosition[],
     mode: EngineMode,
     value: number,
     multipv: number,

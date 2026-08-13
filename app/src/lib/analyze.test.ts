@@ -401,6 +401,18 @@ describe('analyzeGame', () => {
       async put() {
         throw new Error('cache cheio não deveria gravar')
       },
+      async getBulk(fens) {
+        return fens.map((fen) => ({
+          fen,
+          cp: 0,
+          depth: 20,
+          pv: ['e2e4'],
+          lines: [{ multipv: 1, cp: 0, pv: ['e2e4'], san: 'e4' }],
+        }))
+      },
+      async putMany() {
+        throw new Error('cache cheio não deveria gravar')
+      },
     }
 
     const review = await analyzeGame(
