@@ -27,6 +27,18 @@ pub struct CachedPosition {
     pub reached_depth: u32,
 }
 
+/// Entry de escrita em lote recebida do frontend (`cache_put_many`). Os campos
+/// de contexto (mode/value/multipv) são compartilhados por toda a partida e
+/// vêm como parâmetros do comando, não duplicados por entry.
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CachedPositionPut {
+    pub fen: String,
+    pub reached_depth: u32,
+    pub cp: i32,
+    pub lines_json: String,
+}
+
 /// Vista sobre uma [`Connection`] para operações de cache de posições.
 /// Short-lived: criada dentro do escopo trancado de um comando Tauri.
 pub struct Cache<'a> {
@@ -78,6 +90,22 @@ impl<'a> Cache<'a> {
         }
     }
 
+    /// Consulta covering em lote: um resultado por fen, na mesma ordem de
+    /// entrada. Reutiliza [`Cache::lookup`] por fen — mesmas semânticas de
+    /// cobertura (incl. depth cross-mode) e mesmo índice, sem inventar SQL.
+    pub fn lookup_bulk(
+        &self,
+        fens: &[String],
+        mode: Mode,
+        value: u32,
+        multipv: u32,
+    ) -> Result<Vec<Option<CachedPosition>>, String> {
+        fens
+            .iter()
+            .map(|fen| self.lookup(fen, mode, value, multipv))
+            .collect()
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn store(
         &self,
@@ -98,6 +126,45 @@ impl<'a> Cache<'a> {
             )
             .map_err(|e| e.to_string())?;
         Ok(())
+    }
+
+    /// Grava N entries numa única transação, com o statement preparado uma vez.
+    /// Mesma semântica de [`Cache::store`] (`INSERT OR REPLACE` na PK
+    /// `(fen, reached_depth, multipv)`), mas num commit só — bem menos fsync
+    /// que N comandos separados, e atômico.
+    pub fn store_many(
+        &self,
+        entries: &[CachedPositionPut],
+        mode: Mode,
+        value: u32,
+        multipv: u32,
+    ) -> Result<(), String> {
+        let tx = self
+            .conn
+            .unchecked_transaction()
+            .map_err(|e| e.to_string())?;
+        {
+            let mut stmt = tx
+                .prepare(
+                    "INSERT OR REPLACE INTO position_cache
+                     (fen, reached_depth, multipv, source_mode, source_value, cp, lines_json)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                )
+                .map_err(|e| e.to_string())?;
+            for e in entries {
+                stmt.execute(rusqlite::params![
+                    e.fen,
+                    e.reached_depth,
+                    multipv,
+                    mode,
+                    value,
+                    e.cp,
+                    e.lines_json,
+                ])
+                .map_err(|e| e.to_string())?;
+            }
+        }
+        tx.commit().map_err(|e| e.to_string())
     }
 
     pub fn clear(&self) -> Result<(), String> {
@@ -140,6 +207,33 @@ pub fn cache_put(
 pub fn cache_clear(state: tauri::State<'_, DbState>) -> Result<(), String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
     Cache::new(&conn).clear()
+}
+
+/// Prefetch em lote: devolve um `Option<CachedPosition>` por fen, na mesma
+/// ordem de entrada. Adquire o lock uma única vez para toda a partida.
+#[tauri::command]
+pub fn cache_get_bulk(
+    state: tauri::State<'_, DbState>,
+    fens: Vec<String>,
+    mode: Mode,
+    depth: u32,
+    multipv: u32,
+) -> Result<Vec<Option<CachedPosition>>, String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    Cache::new(&conn).lookup_bulk(&fens, mode, depth, multipv)
+}
+
+/// Descarga em lote: grava N entries numa única transação, num único lock.
+#[tauri::command]
+pub fn cache_put_many(
+    state: tauri::State<'_, DbState>,
+    entries: Vec<CachedPositionPut>,
+    mode: Mode,
+    depth: u32,
+    multipv: u32,
+) -> Result<(), String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    Cache::new(&conn).store_many(&entries, mode, depth, multipv)
 }
 
 #[cfg(test)]
@@ -399,5 +493,32 @@ mod tests {
         // fen_b desconhecido → miss.
         assert!(out[1].is_none(), "fen_b desconhecido deve ser miss");
     }
-}
+
+    #[test]
+    fn store_many_grava_todas_as_entries_numa_única_transação() {
+        let conn = open_memory().unwrap();
+        let cache = Cache::new(&conn);
+        let entries = vec![
+            CachedPositionPut {
+                fen: FEN.to_string(),
+                reached_depth: 20,
+                cp: 35,
+                lines_json: LINES.to_string(),
+            },
+            CachedPositionPut {
+                fen: FEN_B.to_string(),
+                reached_depth: 18,
+                cp: 12,
+                lines_json: "[]".to_string(),
+            },
+        ];
+
+        cache.store_many(&entries, Mode::Depth, 20, 1).unwrap();
+
+        // Ambas ficam buscáveis, com a cobertura esperada.
+        assert!(cache.lookup(FEN, Mode::Depth, 20, 1).unwrap().is_some());
+        let hit_b = cache.lookup(FEN_B, Mode::Depth, 15, 1).unwrap();
+        assert!(hit_b.is_some(), "fen_b cobre depth 15 (reached 18)");
+        assert_eq!(hit_b.unwrap().cp, 12);
+    }
 }
