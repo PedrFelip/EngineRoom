@@ -55,4 +55,4 @@ Single frontend test file: `bun run test src/lib/scoring.test.ts`.
 
 ## Tauri IPC surface
 
-Registered in `app/src-tauri/src/lib.rs`: `cache_get`, `cache_put`, `games_save`, `games_list`, `games_get`, `games_delete`, `engine_spawn`, `engine_send`, `engine_stop`, `system_resources`. The engine emits one `engine://line` Tauri event per stdout line; the frontend subscribes via `EnginePort` (`src/lib/engine-port.ts`).
+Registered in `app/src-tauri/src/lib.rs`: `cache_get`, `cache_put`, `cache_get_bulk`, `cache_put_many`, `cache_clear`, `games_save`, `games_list`, `games_get`, `games_delete`, `games_clear`, `storage_stats`, `engine_spawn`, `engine_send`, `engine_stop`, `system_resources`. `cache_get_bulk`/`cache_put_many` batch a whole game in one IPC (prefetch all hits; flush writes in one transaction) — the analysis loop no longer does per-position cache round-trips. The engine emits one `engine://line` Tauri event per stdout line; the frontend subscribes via `EnginePort` (`src/lib/engine-port.ts`).

@@ -524,7 +524,7 @@ export async function analyzeGame(
           lines: [{ multipv: 1, cp: term, pv: [] }],
         }
       } else {
-        const cached = hits[i] ?? null
+        const cached = hits[i]
         if (cached) {
           pos = cached
         } else {

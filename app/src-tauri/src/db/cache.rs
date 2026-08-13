@@ -16,6 +16,12 @@
 use crate::db::{mode::Mode, DbState};
 use rusqlite::Connection;
 
+/// `INSERT OR REPLACE` compartilhado entre [`Cache::store`] e
+/// [`Cache::store_many`] — a PK `(fen, reached_depth, multipv)` coalesce.
+const INSERT_SQL: &str = "INSERT OR REPLACE INTO position_cache
+    (fen, reached_depth, multipv, source_mode, source_value, cp, lines_json)
+    VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)";
+
 /// Avaliação cacheada de uma posição. A chave (fen, reached_depth, multipv) é
 /// conhecida por quem consulta, então só o payload volta — incluindo
 /// `reached_depth` para que o frontend reconstrua a profundidade real.
@@ -119,9 +125,7 @@ impl<'a> Cache<'a> {
     ) -> Result<(), String> {
         self.conn
             .execute(
-                "INSERT OR REPLACE INTO position_cache
-                (fen, reached_depth, multipv, source_mode, source_value, cp, lines_json)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                INSERT_SQL,
                 rusqlite::params![fen, reached_depth, multipv, mode, value, cp, lines_json],
             )
             .map_err(|e| e.to_string())?;
@@ -144,22 +148,16 @@ impl<'a> Cache<'a> {
             .unchecked_transaction()
             .map_err(|e| e.to_string())?;
         {
-            let mut stmt = tx
-                .prepare(
-                    "INSERT OR REPLACE INTO position_cache
-                     (fen, reached_depth, multipv, source_mode, source_value, cp, lines_json)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                )
-                .map_err(|e| e.to_string())?;
-            for e in entries {
+            let mut stmt = tx.prepare(INSERT_SQL).map_err(|e| e.to_string())?;
+            for entry in entries {
                 stmt.execute(rusqlite::params![
-                    e.fen,
-                    e.reached_depth,
+                    entry.fen,
+                    entry.reached_depth,
                     multipv,
                     mode,
                     value,
-                    e.cp,
-                    e.lines_json,
+                    entry.cp,
+                    entry.lines_json,
                 ])
                 .map_err(|e| e.to_string())?;
             }

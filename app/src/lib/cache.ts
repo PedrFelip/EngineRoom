@@ -31,9 +31,9 @@ export function shapeCachedPosition(
 }
 
 /**
- * PositionCache persistido no SQLite do lado Rust (comandos cache_get/cache_put).
- * Falhas de I/O propagam como erro de análise — o cache é caminho crítico,
- * não best-effort.
+ * PositionCache persistido no SQLite do lado Rust (comandos cache_get/cache_put
+ * e suas variantes em lote cache_get_bulk/cache_put_many). Falhas de I/O
+ * propagam como erro de análise — o cache é caminho crítico, não best-effort.
  */
 export function createTauriPositionCache(): PositionCache {
   return {
