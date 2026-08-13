@@ -58,5 +58,27 @@ export function createTauriPositionCache(): PositionCache {
         linesJson: JSON.stringify(pos.lines ?? []),
       })
     },
+    async getBulk(fens, mode, value, multipv) {
+      const hits = await invoke<(CachedPositionDto | null)[]>(
+        'cache_get_bulk',
+        { fens, mode, depth: value, multipv },
+      )
+      return hits.map((hit, i) =>
+        hit ? shapeCachedPosition(hit, fens[i], multipv) : null,
+      )
+    },
+    async putMany(entries, mode, value, multipv) {
+      await invoke('cache_put_many', {
+        entries: entries.map((e) => ({
+          fen: e.fen,
+          reachedDepth: e.depth,
+          cp: e.cp,
+          linesJson: JSON.stringify(e.lines ?? []),
+        })),
+        mode,
+        depth: value,
+        multipv,
+      })
+    },
   }
 }

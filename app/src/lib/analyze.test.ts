@@ -442,6 +442,14 @@ describe('analyzeGame', () => {
       async put(pos, mode, value, multipv) {
         gravadas.push({ fen: pos.fen, mode, value, multipv })
       },
+      async getBulk(fens) {
+        return fens.map(() => null)
+      },
+      async putMany(entries, mode, value, multipv) {
+        for (const pos of entries) {
+          gravadas.push({ fen: pos.fen, mode, value, multipv })
+        }
+      },
     }
 
     const review = await analyzeGame(
@@ -493,6 +501,13 @@ describe('analyzeGame', () => {
       },
       async put(pos) {
         captured = { lines: pos.lines ?? [], depth: pos.depth }
+      },
+      async getBulk(fens) {
+        return fens.map(() => null)
+      },
+      async putMany(entries) {
+        const last = entries[entries.length - 1]
+        if (last) captured = { lines: last.lines ?? [], depth: last.depth }
       },
     }
 
@@ -575,6 +590,21 @@ describe('analyzeGame', () => {
       async put() {
         throw new Error('cache hit não deveria gravar')
       },
+      async getBulk(fens, mode, value, multipv) {
+        return fens.map((fen) => {
+          gets.push({ fen, mode, value, multipv })
+          return {
+            fen,
+            cp: 0,
+            depth: 28,
+            pv: ['e2e4'],
+            lines: [{ multipv: 1, cp: 0, pv: ['e2e4'], san: 'e4' }],
+          }
+        })
+      },
+      async putMany() {
+        throw new Error('cache hit não deveria gravar')
+      },
     }
 
     await analyzeGame('1. e4 e5', { mode: 'time', movetimeMs: 5000 }, port, 1, {
@@ -587,6 +617,77 @@ describe('analyzeGame', () => {
         (g) => g.mode === 'time' && g.value === 5000 && g.multipv === 1,
       ),
     ).toBe(true)
+  })
+
+  it('prefetcha todos os hits numa única chamada getBulk e só aciona a engine nos misses', async () => {
+    let gos = 0
+    let lineCb: ((line: string) => void) | null = null
+    const port: EnginePort = {
+      send(cmd) {
+        const c = cmd.trim()
+        if (c === 'uci') lineCb?.('uciok')
+        else if (c === 'isready') lineCb?.('readyok')
+        else if (c.startsWith('go')) {
+          gos++
+          lineCb?.('info depth 20 multipv 1 score cp 0 pv e2e4 e7e5')
+          lineCb?.('bestmove e2e4')
+        }
+      },
+      onLine(handler) {
+        lineCb = handler
+        return () => {
+          lineCb = null
+        }
+      },
+    }
+    const getBulkCalls: Array<{
+      fens: string[]
+      mode: string
+      value: number
+      multipv: number
+    }> = []
+    const cache: PositionCache = {
+      async get() {
+        return null
+      },
+      async put() {},
+      async getBulk(fens, mode, value, multipv) {
+        getBulkCalls.push({ fens, mode, value, multipv })
+        // Hit só para a posição inicial; miss nas duas seguintes.
+        return fens.map((fen, i) =>
+          i === 0
+            ? {
+                fen,
+                cp: 0,
+                depth: 20,
+                pv: ['e2e4'],
+                lines: [
+                  { multipv: 1, cp: 0, pv: ['e2e4'], san: 'e4' },
+                ],
+              }
+            : null,
+        )
+      },
+      async putMany() {},
+    }
+
+    const review = await analyzeGame(
+      '1. e4 e5',
+      { mode: 'depth', depth: 20 },
+      port,
+      1,
+      { cache },
+    )
+
+    expect(getBulkCalls).toHaveLength(1)
+    expect(getBulkCalls[0].fens).toHaveLength(3)
+    expect(getBulkCalls[0]).toMatchObject({
+      mode: 'depth',
+      value: 20,
+      multipv: 1,
+    })
+    expect(gos).toBe(2)
+    expect(review.moves).toHaveLength(2)
   })
 
   it('rejeita com mensagem do `go` e envia `stop` quando a busca excede goTimeoutMs', async () => {
@@ -712,6 +813,18 @@ describe('analyzeGame — onProgress', () => {
         }
       },
       async put() {
+        throw new Error('cache hit não deveria gravar')
+      },
+      async getBulk(fens) {
+        return fens.map((fen) => ({
+          fen,
+          cp: 0,
+          depth: 20,
+          pv: ['e2e4'],
+          lines: [{ multipv: 1, cp: 0, pv: ['e2e4'], san: 'e4' }],
+        }))
+      },
+      async putMany() {
         throw new Error('cache hit não deveria gravar')
       },
     }
