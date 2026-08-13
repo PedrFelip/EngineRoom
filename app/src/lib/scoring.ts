@@ -35,6 +35,37 @@ export function cpToWinPct(cp: number): number {
   return 50 + 50 * (2 / (1 + Math.exp(-WINPCT_K * cp)) - 1)
 }
 
+/**
+ * Normaliza centipawns crus (POV do lado a jogar) para o POV das brancas.
+ * Inverte o sinal quando as pretas estão a jogar. Único lugar que decide isso.
+ */
+export function whiteCp(cp: number, stm: 'w' | 'b'): number {
+  return stm === 'w' ? cp : -cp
+}
+
+/**
+ * win% (POV brancas) a partir de um cp cru (POV do lado a jogar) e do lado a
+ * jogar. Inverte o espelho da curva logística quando as pretas jogam.
+ */
+export function whiteWinPct(cp: number, stm: 'w' | 'b'): number {
+  return stm === 'w' ? cpToWinPct(cp) : 100 - cpToWinPct(cp)
+}
+
+/**
+ * Cor do lado a jogar em `moves[ply]` (posição após `ply` lances): a cor do
+ * próximo lance, ou o oposto do último lance na posição final. Lista vazia
+ * devolve 'w' (posição inicial). Aceita qualquer lista com `color: 'w' | 'b'`.
+ */
+export function sideToMoveAtPly(
+  moves: { color: 'w' | 'b' }[],
+  ply: number,
+): 'w' | 'b' {
+  if (moves.length === 0) return 'w'
+  if (ply < moves.length) return moves[ply].color
+  const last = moves[moves.length - 1].color
+  return last === 'w' ? 'b' : 'w'
+}
+
 /** Limiar (em delta de win%) abaixo do qual o lance é Excelente. */
 const EXCELLENT_MAX_LOSS = 2
 /** Limiar (em delta de win%) abaixo do qual o lance é Bom. */

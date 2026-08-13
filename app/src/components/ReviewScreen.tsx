@@ -3,7 +3,7 @@ import { formatEngineTag } from '../lib/engine-tag'
 import { evalLabel, sideToMoveAtPly } from '../lib/eval-label'
 import { resultLabel } from '../lib/pgn'
 import { phaseBoundaries, phaseOfPosition } from '../lib/phase'
-import { cpToWinPct } from '../lib/scoring'
+import { whiteCp, whiteWinPct } from '../lib/scoring'
 import { useSettings } from '../lib/settings-context'
 import { playMoveSound } from '../lib/sound'
 import { useReview } from '../lib/use-review'
@@ -46,11 +46,7 @@ function variationToPosition(
   const primary = lines[0]
   const winPct =
     primary?.winPct ??
-    (move.afterCp !== undefined
-      ? stm === 'w'
-        ? cpToWinPct(move.afterCp)
-        : 100 - cpToWinPct(move.afterCp)
-      : 50)
+    (move.afterCp !== undefined ? whiteWinPct(move.afterCp, stm) : 50)
   const fallbackLine: PvLine = {
     multipv: 1,
     san: null,

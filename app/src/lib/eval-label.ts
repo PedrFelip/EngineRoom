@@ -6,6 +6,11 @@
  */
 
 import { Chess } from 'chess.js'
+import { whiteCp } from './scoring'
+
+// sideToMoveAtPly mora em scoring.ts (ponto único da regra de lado a jogar);
+// reexportado daqui para preservar o público existente e seus testes.
+export { sideToMoveAtPly } from './scoring'
 
 /** Teto da faixa de mate. `scoreToCp` só produz cp nesta faixa a partir de mate. */
 const MATE_FLOOR = 99_000
@@ -50,21 +55,6 @@ export function finalResultLabel(fen: string): '1-0' | '0-1' | '½-½' | null {
 }
 
 /**
- * Cor do lado a jogar em positions[ply]. positions[ply] é a posição após `ply`
- * lances, então o lado a jogar é a cor do próximo lance (moves[ply].color); na
- * última posição (ply == len) é o oposto do último lance.
- */
-export function sideToMoveAtPly(
-  moves: { color: 'w' | 'b' }[],
-  ply: number,
-): 'w' | 'b' {
-  if (moves.length === 0) return 'w'
-  if (ply < moves.length) return moves[ply].color
-  const last = moves[moves.length - 1].color
-  return last === 'w' ? 'b' : 'w'
-}
-
-/**
  * Rótulo da EvalBar para uma posição. Prioridade:
  *  1. resultado final (posição terminal)
  *  2. mate em N (cp sentinela), POV das brancas
@@ -76,7 +66,7 @@ export function evalLabel(cp: number, fen: string, stm: 'w' | 'b'): string {
   const final = finalResultLabel(fen)
   if (final) return final
 
-  const cpWhite = stm === 'w' ? cp : -cp
+  const cpWhite = whiteCp(cp, stm)
   const mate = cpToMate(cpWhite)
   if (mate !== null) return formatMate(mate)
 

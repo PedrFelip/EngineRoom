@@ -5,6 +5,9 @@ import {
   cpToWinPct,
   formatEval,
   gameAccuracy,
+  sideToMoveAtPly,
+  whiteCp,
+  whiteWinPct,
 } from './scoring'
 
 describe('cpToWinPct', () => {
@@ -29,6 +32,66 @@ describe('cpToWinPct', () => {
   it('satura em ~100% / ~0% para avaliações de xeque-mate', () => {
     expect(cpToWinPct(100000)).toBeCloseTo(100, 0)
     expect(cpToWinPct(-100000)).toBeCloseTo(0, 0)
+  })
+})
+
+describe('whiteCp', () => {
+  it('mantém o sinal quando as brancas jogam', () => {
+    expect(whiteCp(50, 'w')).toBe(50)
+    expect(whiteCp(-30, 'w')).toBe(-30)
+  })
+
+  it('inverte o sinal quando as pretas jogam', () => {
+    expect(whiteCp(50, 'b')).toBe(-50)
+    expect(whiteCp(-30, 'b')).toBe(30)
+  })
+
+  it('preserva a sentinela de mate (sem arredondar/clamp)', () => {
+    expect(whiteCp(99995, 'b')).toBe(-99995)
+    expect(whiteCp(-99997, 'b')).toBe(99997)
+  })
+})
+
+describe('whiteWinPct', () => {
+  it('é 50% em cp 0 independente do lado a jogar', () => {
+    expect(whiteWinPct(0, 'w')).toBe(50)
+    expect(whiteWinPct(0, 'b')).toBe(50)
+  })
+
+  it('cp positivo favorece as brancas em qualquer POV', () => {
+    expect(whiteWinPct(500, 'w')).toBeGreaterThan(50)
+    // cp 500 POV das pretas = brancas em desvantagem
+    expect(whiteWinPct(500, 'b')).toBeLessThan(50)
+  })
+
+  it('é simétrico: whiteWinPct(cp, b) ≈ 100 - whiteWinPct(cp, w)', () => {
+    expect(whiteWinPct(200, 'b')).toBeCloseTo(100 - whiteWinPct(200, 'w'), 5)
+  })
+})
+
+describe('sideToMoveAtPly', () => {
+  const moves = [
+    { color: 'w' as const },
+    { color: 'b' as const },
+    { color: 'w' as const },
+    { color: 'b' as const },
+  ]
+
+  it('posição inicial (ply 0) = brancas', () => {
+    expect(sideToMoveAtPly(moves, 0)).toBe('w')
+  })
+
+  it('próximo lance define o lado a jogar', () => {
+    expect(sideToMoveAtPly(moves, 1)).toBe('b')
+    expect(sideToMoveAtPly(moves, 2)).toBe('w')
+  })
+
+  it('posição final = oposto do último lance', () => {
+    expect(sideToMoveAtPly(moves, 4)).toBe('w')
+  })
+
+  it('lista vazia devolve brancas (posição inicial)', () => {
+    expect(sideToMoveAtPly([], 0)).toBe('w')
   })
 })
 
