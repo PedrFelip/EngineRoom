@@ -18,7 +18,14 @@ import type {
 } from '../types'
 import { type EcoEntry, lookupOpening } from './eco'
 import { computePhases } from './phase'
-import { classifyMove, cpToWinPct, gameAccuracy } from './scoring'
+import {
+  classifyMove,
+  cpToWinPct,
+  gameAccuracy,
+  sideToMoveAtPly,
+  whiteCp,
+  whiteWinPct,
+} from './scoring'
 import type { InfoScore } from './uci'
 import { isReadyOk, isUciOk, parseInfo, scoreToCp } from './uci'
 
@@ -57,26 +64,6 @@ export interface PlayedGame {
   moves: PlayedMove[]
 }
 
-const opposite = (c: 'w' | 'b'): 'w' | 'b' => (c === 'w' ? 'b' : 'w')
-
-function sideToMoveAt(game: PlayedGame, ply: number): 'w' | 'b' {
-  if (ply < game.moves.length) return game.moves[ply].color
-  return opposite(game.moves[game.moves.length - 1].color)
-}
-
-/**
- * win% da i-ésima posição (POV brancas): inverte o sinal quando as pretas
- * estão a jogar. Mesma regra usada por `buildReview` para `positions[i].winPct`.
- */
-function positionWinPct(
-  game: PlayedGame,
-  raw: RawPosition[],
-  i: number,
-): number {
-  const stm = sideToMoveAt(game, i)
-  return stm === 'w' ? cpToWinPct(raw[i].cp) : 100 - cpToWinPct(raw[i].cp)
-}
-
 /**
  * Constrói a revisão a partir da partida jogada e das avaliações brutas por ply.
  * `raw[i]` é a avaliação da posição após o i-ésimo ply (raw[0] = posição inicial).
@@ -90,14 +77,14 @@ export function buildReview(
   const phases = computePhases(raw.map((r) => ({ fen: r.fen })))
 
   const positions: PositionAnalysis[] = raw.map((r, i) => {
-    const stm = sideToMoveAt(game, i)
-    const winPct = stm === 'w' ? cpToWinPct(r.cp) : 100 - cpToWinPct(r.cp)
+    const stm = sideToMoveAtPly(game.moves, i)
+    const winPct = whiteWinPct(r.cp, stm)
     const rawLines = r.lines ?? [{ multipv: 1, cp: r.cp, pv: r.pv }]
     const lines: PvLine[] = rawLines.map((l) => ({
       multipv: l.multipv,
       san: l.san ?? null,
-      cp: stm === 'w' ? l.cp : -l.cp,
-      winPct: stm === 'w' ? cpToWinPct(l.cp) : 100 - cpToWinPct(l.cp),
+      cp: whiteCp(l.cp, stm),
+      winPct: whiteWinPct(l.cp, stm),
       pv: l.pv,
     }))
     return {
@@ -527,7 +514,7 @@ export async function analyzeGame(
       }
     }
     raw.push(pos)
-    winPcts.push(positionWinPct(game, raw, raw.length - 1))
+    winPcts.push(whiteWinPct(pos.cp, sideToMoveAtPly(game.moves, i)))
     opts.onProgress?.(winPcts.slice())
   }
   if (!opts.keepAlive) await port.send('quit')

@@ -13,7 +13,7 @@ import type {
   VariationMove,
 } from '../types'
 import type { RawLine, RawPosition } from './analyze'
-import { classifyMove, cpToWinPct } from './scoring'
+import { classifyMove, cpToWinPct, whiteCp, whiteWinPct } from './scoring'
 
 export interface VariationMoveJudgement {
   winPctBefore: number
@@ -54,8 +54,8 @@ function normalizeLinesToWhite(
   return rawLines.map((l) => ({
     multipv: l.multipv,
     san: l.san ?? null,
-    cp: stm === 'w' ? l.cp : -l.cp,
-    winPct: stm === 'w' ? cpToWinPct(l.cp) : 100 - cpToWinPct(l.cp),
+    cp: whiteCp(l.cp, stm),
+    winPct: whiteWinPct(l.cp, stm),
     pv: l.pv,
   }))
 }
