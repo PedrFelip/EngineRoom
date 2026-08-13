@@ -504,36 +504,47 @@ export async function analyzeGame(
     multipv,
   })
 
+  const hits = opts.cache
+    ? await opts.cache.getBulk(positionFens, control.mode, keyValue, multipv)
+    : positionFens.map(() => null)
+  const pendingPuts: RawPosition[] = []
   const raw: RawPosition[] = []
   const winPcts: number[] = []
-  for (let i = 0; i < positionFens.length; i++) {
-    const fen = positionFens[i]
-    const term = terminalCp(fen)
-    let pos: RawPosition
-    if (term !== null) {
-      pos = {
-        fen,
-        cp: term,
-        depth: 0,
-        pv: [],
-        lines: [{ multipv: 1, cp: term, pv: [] }],
-      }
-    } else {
-      const cached =
-        (await opts.cache?.get(fen, control.mode, keyValue, multipv)) ?? null
-      if (cached) {
-        pos = cached
-      } else {
-        pos = await evalPosition(port, fen, control, goTimeoutMs)
-        for (const l of pos.lines ?? []) {
-          l.san = l.pv[0] ? uciToSan(pos.fen, l.pv[0]) : null
+  try {
+    for (let i = 0; i < positionFens.length; i++) {
+      const fen = positionFens[i]
+      const term = terminalCp(fen)
+      let pos: RawPosition
+      if (term !== null) {
+        pos = {
+          fen,
+          cp: term,
+          depth: 0,
+          pv: [],
+          lines: [{ multipv: 1, cp: term, pv: [] }],
         }
-        await opts.cache?.put(pos, control.mode, keyValue, multipv)
+      } else {
+        const cached = hits[i] ?? null
+        if (cached) {
+          pos = cached
+        } else {
+          pos = await evalPosition(port, fen, control, goTimeoutMs)
+          for (const l of pos.lines ?? []) {
+            l.san = l.pv[0] ? uciToSan(pos.fen, l.pv[0]) : null
+          }
+          pendingPuts.push(pos)
+        }
       }
+      raw.push(pos)
+      winPcts.push(whiteWinPct(pos.cp, sideToMoveAtPly(game.moves, i)))
+      opts.onProgress?.(winPcts.slice())
     }
-    raw.push(pos)
-    winPcts.push(whiteWinPct(pos.cp, sideToMoveAtPly(game.moves, i)))
-    opts.onProgress?.(winPcts.slice())
+  } finally {
+    // Descarrega o buffer mesmo se a análise abortar no meio: posições já
+    // avaliadas não se perdem. O cache é caminho crítico, não best-effort.
+    if (opts.cache && pendingPuts.length) {
+      await opts.cache.putMany(pendingPuts, control.mode, keyValue, multipv)
+    }
   }
   if (!opts.keepAlive) await port.send('quit')
 

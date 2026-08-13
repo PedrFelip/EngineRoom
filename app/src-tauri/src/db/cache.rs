@@ -369,7 +369,35 @@ mod tests {
         assert_eq!(
             cache.lookup(FEN, Mode::Time, 5000, 1).unwrap(),
             None,
-            "entrada time removida"
+            "entrada time removida",
         );
     }
+
+    const FEN_B: &str = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1";
+
+    #[test]
+    fn lookup_bulk_devolve_um_resultado_por_fen_na_ordem_preservando_cobertura() {
+        let conn = open_memory().unwrap();
+        let cache = Cache::new(&conn);
+        // fen_a armazenado em reached 20; fen_b desconhecido.
+        cache.store(FEN, Mode::Depth, 20, 1, 20, 35, LINES).unwrap();
+
+        let out = cache
+            .lookup_bulk(
+                &[FEN.to_string(), FEN_B.to_string()],
+                Mode::Depth,
+                15,
+                1,
+            )
+            .unwrap();
+
+        assert_eq!(out.len(), 2, "um resultado por fen, na ordem de entrada");
+        // fen_a cobre depth 15 (reached 20 >= 15), independente de source_mode.
+        let hit_a = out[0].as_ref().expect("fen_a deve ser coberto");
+        assert_eq!(hit_a.cp, 35);
+        assert_eq!(hit_a.reached_depth, 20);
+        // fen_b desconhecido → miss.
+        assert!(out[1].is_none(), "fen_b desconhecido deve ser miss");
+    }
+}
 }

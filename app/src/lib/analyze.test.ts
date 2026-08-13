@@ -661,9 +661,7 @@ describe('analyzeGame', () => {
                 cp: 0,
                 depth: 20,
                 pv: ['e2e4'],
-                lines: [
-                  { multipv: 1, cp: 0, pv: ['e2e4'], san: 'e4' },
-                ],
+                lines: [{ multipv: 1, cp: 0, pv: ['e2e4'], san: 'e4' }],
               }
             : null,
         )
@@ -688,6 +686,99 @@ describe('analyzeGame', () => {
     })
     expect(gos).toBe(2)
     expect(review.moves).toHaveLength(2)
+  })
+
+  it('descarrega todas as gravações numa única putMany ao final, em ordem (sem chamar put)', async () => {
+    const port = fakePort(() => ({ cp: 0, pv: ['e2e4'] }))
+    let putCalls = 0
+    const putManyCalls: Array<{
+      entries: RawPosition[]
+      mode: string
+      value: number
+      multipv: number
+    }> = []
+    const cache: PositionCache = {
+      async get() {
+        return null
+      },
+      async put() {
+        putCalls++
+      },
+      async getBulk(fens) {
+        return fens.map(() => null)
+      },
+      async putMany(entries, mode, value, multipv) {
+        putManyCalls.push({ entries, mode, value, multipv })
+      },
+    }
+
+    await analyzeGame('1. e4 e5', { mode: 'depth', depth: 18 }, port, 2, {
+      cache,
+    })
+
+    expect(putCalls).toBe(0)
+    expect(putManyCalls).toHaveLength(1)
+    expect(putManyCalls[0].entries.map((p) => p.fen)).toEqual([
+      START_FEN,
+      'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1',
+      'rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2',
+    ])
+    expect(putManyCalls[0]).toMatchObject({
+      mode: 'depth',
+      value: 18,
+      multipv: 2,
+    })
+  })
+
+  it('descarrega o buffer mesmo quando a análise aborta no meio (finally)', async () => {
+    let lineCb: ((line: string) => void) | null = null
+    let goCount = 0
+    const port: EnginePort = {
+      send(cmd) {
+        const c = cmd.trim()
+        if (c === 'uci') lineCb?.('uciok')
+        else if (c === 'isready') lineCb?.('readyok')
+        else if (c.startsWith('go')) {
+          goCount++
+          if (goCount === 1) {
+            lineCb?.('info depth 20 multipv 1 score cp 0 pv e2e4 e7e5')
+            lineCb?.('bestmove e2e4')
+          } else {
+            throw new Error('engine morreu no segundo go')
+          }
+        }
+      },
+      onLine(handler) {
+        lineCb = handler
+        return () => {
+          lineCb = null
+        }
+      },
+    }
+    const putManyCalls: RawPosition[][] = []
+    const cache: PositionCache = {
+      async get() {
+        return null
+      },
+      async put() {},
+      async getBulk(fens) {
+        return fens.map(() => null)
+      },
+      async putMany(entries) {
+        putManyCalls.push(entries)
+      },
+    }
+
+    await expect(
+      analyzeGame('1. e4 e5', { mode: 'depth', depth: 20 }, port, 1, {
+        cache,
+      }),
+    ).rejects.toThrow(/engine morreu no segundo go/)
+
+    // A posição inicial já tinha sido avaliada e bufferizada antes do aborto.
+    expect(putManyCalls).toHaveLength(1)
+    expect(putManyCalls[0]).toHaveLength(1)
+    expect(putManyCalls[0][0].fen).toBe(START_FEN)
   })
 
   it('rejeita com mensagem do `go` e envia `stop` quando a busca excede goTimeoutMs', async () => {
