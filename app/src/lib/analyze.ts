@@ -230,6 +230,10 @@ export type EngineMode = AnalyzeControl['mode']
  * Cache de avaliações por posição, chaveado por (fen, mode, value, multipv),
  * onde `value` é `depth` (modo profundidade) ou `movetimeMs` (modo tempo).
  * `get` devolve null em caso de miss; `put` grava a avaliação alcançada.
+ *
+ * `getBulk`/`putMany` são os equivalentes em lote para uma mesma chave
+ * (mode, value, multipv): o pipeline de análise faz uma única consulta de
+ * prefetch e um único descarrego ao final, em vez de N chamadas seriais.
  */
 export interface PositionCache {
   get(
@@ -240,6 +244,20 @@ export interface PositionCache {
   ): Promise<RawPosition | null>
   put(
     pos: RawPosition,
+    mode: EngineMode,
+    value: number,
+    multipv: number,
+  ): Promise<void>
+  /** Prefetch dos hits para N fens, numa única chamada. Ordem preservada. */
+  getBulk(
+    fens: string[],
+    mode: EngineMode,
+    value: number,
+    multipv: number,
+  ): Promise<(RawPosition | null)[]>
+  /** Grava N posições numa única chamada (transação). */
+  putMany(
+    entries: RawPosition[],
     mode: EngineMode,
     value: number,
     multipv: number,
@@ -486,36 +504,60 @@ export async function analyzeGame(
     multipv,
   })
 
+  const hits = opts.cache
+    ? await opts.cache.getBulk(positionFens, control.mode, keyValue, multipv)
+    : positionFens.map(() => null)
+  const pendingPuts: RawPosition[] = []
   const raw: RawPosition[] = []
   const winPcts: number[] = []
-  for (let i = 0; i < positionFens.length; i++) {
-    const fen = positionFens[i]
-    const term = terminalCp(fen)
-    let pos: RawPosition
-    if (term !== null) {
-      pos = {
-        fen,
-        cp: term,
-        depth: 0,
-        pv: [],
-        lines: [{ multipv: 1, cp: term, pv: [] }],
-      }
-    } else {
-      const cached =
-        (await opts.cache?.get(fen, control.mode, keyValue, multipv)) ?? null
-      if (cached) {
-        pos = cached
-      } else {
-        pos = await evalPosition(port, fen, control, goTimeoutMs)
-        for (const l of pos.lines ?? []) {
-          l.san = l.pv[0] ? uciToSan(pos.fen, l.pv[0]) : null
+  try {
+    for (let i = 0; i < positionFens.length; i++) {
+      const fen = positionFens[i]
+      const term = terminalCp(fen)
+      let pos: RawPosition
+      if (term !== null) {
+        pos = {
+          fen,
+          cp: term,
+          depth: 0,
+          pv: [],
+          lines: [{ multipv: 1, cp: term, pv: [] }],
         }
-        await opts.cache?.put(pos, control.mode, keyValue, multipv)
+      } else {
+        const cached = hits[i]
+        if (cached) {
+          pos = cached
+        } else {
+          pos = await evalPosition(port, fen, control, goTimeoutMs)
+          for (const l of pos.lines ?? []) {
+            l.san = l.pv[0] ? uciToSan(pos.fen, l.pv[0]) : null
+          }
+          pendingPuts.push(pos)
+        }
+      }
+      raw.push(pos)
+      winPcts.push(whiteWinPct(pos.cp, sideToMoveAtPly(game.moves, i)))
+      opts.onProgress?.(winPcts.slice())
+    }
+  } catch (err) {
+    // Descarrega o buffer mesmo se a análise abortar no meio: posições já
+    // avaliadas não se perdem — mas em caráter best-effort, para a causa
+    // raiz do aborto vencer (a falha do flush vira warning).
+    if (opts.cache && pendingPuts.length) {
+      try {
+        await opts.cache.putMany(pendingPuts, control.mode, keyValue, multipv)
+      } catch (flushErr) {
+        console.warn(
+          'Falha ao descarregar o cache após aborto da análise:',
+          flushErr,
+        )
       }
     }
-    raw.push(pos)
-    winPcts.push(whiteWinPct(pos.cp, sideToMoveAtPly(game.moves, i)))
-    opts.onProgress?.(winPcts.slice())
+    throw err
+  }
+  if (opts.cache && pendingPuts.length) {
+    // Caminho de sucesso: o cache é caminho crítico, não best-effort.
+    await opts.cache.putMany(pendingPuts, control.mode, keyValue, multipv)
   }
   if (!opts.keepAlive) await port.send('quit')
 

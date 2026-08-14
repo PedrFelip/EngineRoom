@@ -22,6 +22,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             db::cache::cache_get,
             db::cache::cache_put,
+            db::cache::cache_get_bulk,
+            db::cache::cache_put_many,
             db::cache::cache_clear,
             db::games::games_save,
             db::games::games_list,

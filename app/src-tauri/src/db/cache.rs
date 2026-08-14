@@ -16,6 +16,12 @@
 use crate::db::{mode::Mode, DbState};
 use rusqlite::Connection;
 
+/// `INSERT OR REPLACE` compartilhado entre [`Cache::store`] e
+/// [`Cache::store_many`] — a PK `(fen, reached_depth, multipv)` coalesce.
+const INSERT_SQL: &str = "INSERT OR REPLACE INTO position_cache
+    (fen, reached_depth, multipv, source_mode, source_value, cp, lines_json)
+    VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)";
+
 /// Avaliação cacheada de uma posição. A chave (fen, reached_depth, multipv) é
 /// conhecida por quem consulta, então só o payload volta — incluindo
 /// `reached_depth` para que o frontend reconstrua a profundidade real.
@@ -27,6 +33,18 @@ pub struct CachedPosition {
     pub reached_depth: u32,
 }
 
+/// Entry de escrita em lote recebida do frontend (`cache_put_many`). Os campos
+/// de contexto (mode/value/multipv) são compartilhados por toda a partida e
+/// vêm como parâmetros do comando, não duplicados por entry.
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CachedPositionPut {
+    pub fen: String,
+    pub reached_depth: u32,
+    pub cp: i32,
+    pub lines_json: String,
+}
+
 /// Vista sobre uma [`Connection`] para operações de cache de posições.
 /// Short-lived: criada dentro do escopo trancado de um comando Tauri.
 pub struct Cache<'a> {
@@ -36,6 +54,44 @@ pub struct Cache<'a> {
 impl<'a> Cache<'a> {
     pub fn new(conn: &'a Connection) -> Self {
         Self { conn }
+    }
+
+    /// SQL da consulta covering por modo; os parâmetros (fen, value, multipv)
+    /// são idênticos nos dois modos, bindados em ?1, ?2, ?3.
+    fn lookup_sql(mode: Mode) -> &'static str {
+        match mode {
+            Mode::Time => {
+                "SELECT cp, lines_json, reached_depth FROM position_cache
+                 WHERE fen = ?1 AND source_mode = 'time' AND source_value >= ?2 AND multipv >= ?3
+                 ORDER BY source_value ASC LIMIT 1"
+            }
+            Mode::Depth => {
+                "SELECT cp, lines_json, reached_depth FROM position_cache
+                 WHERE fen = ?1 AND reached_depth >= ?2 AND multipv >= ?3
+                 ORDER BY reached_depth ASC LIMIT 1"
+            }
+        }
+    }
+
+    /// Executa a consulta covering num statement já preparado para o modo,
+    /// devolvendo a primeira row (ou None).
+    fn query_with_stmt(
+        stmt: &mut rusqlite::Statement<'_>,
+        fen: &str,
+        value: u32,
+        multipv: u32,
+    ) -> Result<Option<CachedPosition>, String> {
+        let mut rows = stmt
+            .query(rusqlite::params![fen, value, multipv])
+            .map_err(|e| e.to_string())?;
+        match rows.next().map_err(|e| e.to_string())? {
+            Some(row) => Ok(Some(CachedPosition {
+                cp: row.get(0).map_err(|e| e.to_string())?,
+                lines_json: row.get(1).map_err(|e| e.to_string())?,
+                reached_depth: row.get(2).map_err(|e| e.to_string())?,
+            })),
+            None => Ok(None),
+        }
     }
 
     /// Consulta covering: um pedido de depth P é coberto por qualquer entry com
@@ -50,32 +106,31 @@ impl<'a> Cache<'a> {
         value: u32,
         multipv: u32,
     ) -> Result<Option<CachedPosition>, String> {
-        // Os dois modos diferem só no SQL — os parâmetros (fen, value, multipv)
-        // são idênticos, bindados em ?1, ?2, ?3.
-        let sql = match mode {
-            Mode::Time => {
-                "SELECT cp, lines_json, reached_depth FROM position_cache
-                 WHERE fen = ?1 AND source_mode = 'time' AND source_value >= ?2 AND multipv >= ?3
-                 ORDER BY source_value ASC LIMIT 1"
-            }
-            Mode::Depth => {
-                "SELECT cp, lines_json, reached_depth FROM position_cache
-                 WHERE fen = ?1 AND reached_depth >= ?2 AND multipv >= ?3
-                 ORDER BY reached_depth ASC LIMIT 1"
-            }
-        };
-        let mut stmt = self.conn.prepare(sql).map_err(|e| e.to_string())?;
-        let mut rows = stmt
-            .query(rusqlite::params![fen, value, multipv])
+        let mut stmt = self
+            .conn
+            .prepare(Self::lookup_sql(mode))
             .map_err(|e| e.to_string())?;
-        match rows.next().map_err(|e| e.to_string())? {
-            Some(row) => Ok(Some(CachedPosition {
-                cp: row.get(0).map_err(|e| e.to_string())?,
-                lines_json: row.get(1).map_err(|e| e.to_string())?,
-                reached_depth: row.get(2).map_err(|e| e.to_string())?,
-            })),
-            None => Ok(None),
-        }
+        Self::query_with_stmt(&mut stmt, fen, value, multipv)
+    }
+
+    /// Consulta covering em lote: um resultado por fen, na mesma ordem de
+    /// entrada, com o statement preparado uma única vez (mesmo padrão de
+    /// [`Cache::store_many`]). Mesmas semânticas de [`Cache::lookup`].
+    pub fn lookup_bulk(
+        &self,
+        fens: &[String],
+        mode: Mode,
+        value: u32,
+        multipv: u32,
+    ) -> Result<Vec<Option<CachedPosition>>, String> {
+        let mut stmt = self
+            .conn
+            .prepare(Self::lookup_sql(mode))
+            .map_err(|e| e.to_string())?;
+        fens
+            .iter()
+            .map(|fen| Self::query_with_stmt(&mut stmt, fen, value, multipv))
+            .collect()
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -91,13 +146,44 @@ impl<'a> Cache<'a> {
     ) -> Result<(), String> {
         self.conn
             .execute(
-                "INSERT OR REPLACE INTO position_cache
-                (fen, reached_depth, multipv, source_mode, source_value, cp, lines_json)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                INSERT_SQL,
                 rusqlite::params![fen, reached_depth, multipv, mode, value, cp, lines_json],
             )
             .map_err(|e| e.to_string())?;
         Ok(())
+    }
+
+    /// Grava N entries numa única transação, com o statement preparado uma vez.
+    /// Mesma semântica de [`Cache::store`] (`INSERT OR REPLACE` na PK
+    /// `(fen, reached_depth, multipv)`), mas num commit só — bem menos fsync
+    /// que N comandos separados, e atômico.
+    pub fn store_many(
+        &self,
+        entries: &[CachedPositionPut],
+        mode: Mode,
+        value: u32,
+        multipv: u32,
+    ) -> Result<(), String> {
+        let tx = self
+            .conn
+            .unchecked_transaction()
+            .map_err(|e| e.to_string())?;
+        {
+            let mut stmt = tx.prepare(INSERT_SQL).map_err(|e| e.to_string())?;
+            for entry in entries {
+                stmt.execute(rusqlite::params![
+                    entry.fen,
+                    entry.reached_depth,
+                    multipv,
+                    mode,
+                    value,
+                    entry.cp,
+                    entry.lines_json,
+                ])
+                .map_err(|e| e.to_string())?;
+            }
+        }
+        tx.commit().map_err(|e| e.to_string())
     }
 
     pub fn clear(&self) -> Result<(), String> {
@@ -140,6 +226,33 @@ pub fn cache_put(
 pub fn cache_clear(state: tauri::State<'_, DbState>) -> Result<(), String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
     Cache::new(&conn).clear()
+}
+
+/// Prefetch em lote: devolve um `Option<CachedPosition>` por fen, na mesma
+/// ordem de entrada. Adquire o lock uma única vez para toda a partida.
+#[tauri::command]
+pub fn cache_get_bulk(
+    state: tauri::State<'_, DbState>,
+    fens: Vec<String>,
+    mode: Mode,
+    depth: u32,
+    multipv: u32,
+) -> Result<Vec<Option<CachedPosition>>, String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    Cache::new(&conn).lookup_bulk(&fens, mode, depth, multipv)
+}
+
+/// Descarga em lote: grava N entries numa única transação, num único lock.
+#[tauri::command]
+pub fn cache_put_many(
+    state: tauri::State<'_, DbState>,
+    entries: Vec<CachedPositionPut>,
+    mode: Mode,
+    depth: u32,
+    multipv: u32,
+) -> Result<(), String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    Cache::new(&conn).store_many(&entries, mode, depth, multipv)
 }
 
 #[cfg(test)]
@@ -369,7 +482,62 @@ mod tests {
         assert_eq!(
             cache.lookup(FEN, Mode::Time, 5000, 1).unwrap(),
             None,
-            "entrada time removida"
+            "entrada time removida",
         );
+    }
+
+    const FEN_B: &str = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1";
+
+    #[test]
+    fn lookup_bulk_devolve_um_resultado_por_fen_na_ordem_preservando_cobertura() {
+        let conn = open_memory().unwrap();
+        let cache = Cache::new(&conn);
+        // fen_a armazenado em reached 20; fen_b desconhecido.
+        cache.store(FEN, Mode::Depth, 20, 1, 20, 35, LINES).unwrap();
+
+        let out = cache
+            .lookup_bulk(
+                &[FEN.to_string(), FEN_B.to_string()],
+                Mode::Depth,
+                15,
+                1,
+            )
+            .unwrap();
+
+        assert_eq!(out.len(), 2, "um resultado por fen, na ordem de entrada");
+        // fen_a cobre depth 15 (reached 20 >= 15), independente de source_mode.
+        let hit_a = out[0].as_ref().expect("fen_a deve ser coberto");
+        assert_eq!(hit_a.cp, 35);
+        assert_eq!(hit_a.reached_depth, 20);
+        // fen_b desconhecido → miss.
+        assert!(out[1].is_none(), "fen_b desconhecido deve ser miss");
+    }
+
+    #[test]
+    fn store_many_grava_todas_as_entries_numa_única_transação() {
+        let conn = open_memory().unwrap();
+        let cache = Cache::new(&conn);
+        let entries = vec![
+            CachedPositionPut {
+                fen: FEN.to_string(),
+                reached_depth: 20,
+                cp: 35,
+                lines_json: LINES.to_string(),
+            },
+            CachedPositionPut {
+                fen: FEN_B.to_string(),
+                reached_depth: 18,
+                cp: 12,
+                lines_json: "[]".to_string(),
+            },
+        ];
+
+        cache.store_many(&entries, Mode::Depth, 20, 1).unwrap();
+
+        // Ambas ficam buscáveis, com a cobertura esperada.
+        assert!(cache.lookup(FEN, Mode::Depth, 20, 1).unwrap().is_some());
+        let hit_b = cache.lookup(FEN_B, Mode::Depth, 15, 1).unwrap();
+        assert!(hit_b.is_some(), "fen_b cobre depth 15 (reached 18)");
+        assert_eq!(hit_b.unwrap().cp, 12);
     }
 }

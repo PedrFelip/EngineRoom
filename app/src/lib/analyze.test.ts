@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   analyzeGame,
   buildReview,
@@ -282,6 +282,75 @@ function fakePort(
   }
 }
 
+/** Cache falso de base: miss em toda leitura, gravações no-op. */
+function fakeCache(overrides: Partial<PositionCache> = {}): PositionCache {
+  return {
+    async get() {
+      return null
+    },
+    async put() {},
+    async getBulk(fens) {
+      return fens.map(() => null)
+    },
+    async putMany() {},
+    ...overrides,
+  }
+}
+
+/** Cache falso que acerta todas as posições com avaliação neutra (depth 20)
+ * e trata qualquer gravação como erro — hits não deveriam gravar. */
+function allHitsCache(): PositionCache {
+  const hit = (fen: string) => ({
+    fen,
+    cp: 0,
+    depth: 20,
+    pv: ['e2e4'],
+    lines: [{ multipv: 1, cp: 0, pv: ['e2e4'], san: 'e4' }],
+  })
+  return fakeCache({
+    async get(fen) {
+      return hit(fen)
+    },
+    async put() {
+      throw new Error('cache hit não deveria gravar')
+    },
+    async getBulk(fens) {
+      return fens.map(hit)
+    },
+    async putMany() {
+      throw new Error('cache hit não deveria gravar')
+    },
+  })
+}
+
+/** Port que responde o primeiro `go` e morre no segundo. */
+function portDyingOnSecondGo(): EnginePort {
+  let lineCb: ((line: string) => void) | null = null
+  let goCount = 0
+  return {
+    send(cmd) {
+      const c = cmd.trim()
+      if (c === 'uci') lineCb?.('uciok')
+      else if (c === 'isready') lineCb?.('readyok')
+      else if (c.startsWith('go')) {
+        goCount++
+        if (goCount === 1) {
+          lineCb?.('info depth 20 multipv 1 score cp 0 pv e2e4 e7e5')
+          lineCb?.('bestmove e2e4')
+        } else {
+          throw new Error('engine morreu no segundo go')
+        }
+      }
+    },
+    onLine(handler) {
+      lineCb = handler
+      return () => {
+        lineCb = null
+      }
+    },
+  }
+}
+
 describe('analyzeGame', () => {
   it('aciona o engine por ply e devolve a revisão', async () => {
     const port = fakePort(() => ({ cp: 0, pv: ['e2e4'] }))
@@ -388,20 +457,7 @@ describe('analyzeGame', () => {
         }
       },
     }
-    const cache: PositionCache = {
-      async get(fen) {
-        return {
-          fen,
-          cp: 0,
-          depth: 20,
-          pv: ['e2e4'],
-          lines: [{ multipv: 1, cp: 0, pv: ['e2e4'], san: 'e4' }],
-        }
-      },
-      async put() {
-        throw new Error('cache cheio não deveria gravar')
-      },
-    }
+    const cache = allHitsCache()
 
     const review = await analyzeGame(
       '1. e4 e5',
@@ -423,14 +479,13 @@ describe('analyzeGame', () => {
       value: number
       multipv: number
     }[] = []
-    const cache: PositionCache = {
-      async get() {
-        return null
+    const cache = fakeCache({
+      async putMany(entries, mode, value, multipv) {
+        for (const pos of entries) {
+          gravadas.push({ fen: pos.fen, mode, value, multipv })
+        }
       },
-      async put(pos, mode, value, multipv) {
-        gravadas.push({ fen: pos.fen, mode, value, multipv })
-      },
-    }
+    })
 
     const review = await analyzeGame(
       '1. e4 e5',
@@ -475,14 +530,12 @@ describe('analyzeGame', () => {
       },
     }
     let captured: { lines: RawLine[]; depth: number } | null = null
-    const cache: PositionCache = {
-      async get() {
-        return null
+    const cache = fakeCache({
+      async putMany(entries) {
+        const last = entries[entries.length - 1]
+        if (last) captured = { lines: last.lines ?? [], depth: last.depth }
       },
-      async put(pos) {
-        captured = { lines: pos.lines ?? [], depth: pos.depth }
-      },
-    }
+    })
 
     await analyzeGame('1. e4', { mode: 'depth', depth: 20 }, port, 2, { cache })
 
@@ -549,21 +602,27 @@ describe('analyzeGame', () => {
         }
       },
     }
-    const cache: PositionCache = {
-      async get(fen, mode, value, multipv) {
-        gets.push({ fen, mode, value, multipv })
-        return {
-          fen,
-          cp: 0,
-          depth: 28,
-          pv: ['e2e4'],
-          lines: [{ multipv: 1, cp: 0, pv: ['e2e4'], san: 'e4' }],
-        }
-      },
+    const hit = (fen: string) => ({
+      fen,
+      cp: 0,
+      depth: 28,
+      pv: ['e2e4'],
+      lines: [{ multipv: 1, cp: 0, pv: ['e2e4'], san: 'e4' }],
+    })
+    const cache = fakeCache({
       async put() {
         throw new Error('cache hit não deveria gravar')
       },
-    }
+      async getBulk(fens, mode, value, multipv) {
+        return fens.map((fen) => {
+          gets.push({ fen, mode, value, multipv })
+          return hit(fen)
+        })
+      },
+      async putMany() {
+        throw new Error('cache hit não deveria gravar')
+      },
+    })
 
     await analyzeGame('1. e4 e5', { mode: 'time', movetimeMs: 5000 }, port, 1, {
       cache,
@@ -575,6 +634,166 @@ describe('analyzeGame', () => {
         (g) => g.mode === 'time' && g.value === 5000 && g.multipv === 1,
       ),
     ).toBe(true)
+  })
+
+  it('prefetcha todos os hits numa única chamada getBulk e só aciona a engine nos misses', async () => {
+    let gos = 0
+    let lineCb: ((line: string) => void) | null = null
+    const port: EnginePort = {
+      send(cmd) {
+        const c = cmd.trim()
+        if (c === 'uci') lineCb?.('uciok')
+        else if (c === 'isready') lineCb?.('readyok')
+        else if (c.startsWith('go')) {
+          gos++
+          lineCb?.('info depth 20 multipv 1 score cp 0 pv e2e4 e7e5')
+          lineCb?.('bestmove e2e4')
+        }
+      },
+      onLine(handler) {
+        lineCb = handler
+        return () => {
+          lineCb = null
+        }
+      },
+    }
+    const getBulkCalls: Array<{
+      fens: string[]
+      mode: string
+      value: number
+      multipv: number
+    }> = []
+    const cache = fakeCache({
+      async getBulk(fens, mode, value, multipv) {
+        getBulkCalls.push({ fens, mode, value, multipv })
+        // Hit só para a posição inicial; miss nas duas seguintes.
+        return fens.map((fen, i) =>
+          i === 0
+            ? {
+                fen,
+                cp: 0,
+                depth: 20,
+                pv: ['e2e4'],
+                lines: [{ multipv: 1, cp: 0, pv: ['e2e4'], san: 'e4' }],
+              }
+            : null,
+        )
+      },
+    })
+
+    const review = await analyzeGame(
+      '1. e4 e5',
+      { mode: 'depth', depth: 20 },
+      port,
+      1,
+      { cache },
+    )
+
+    expect(getBulkCalls).toHaveLength(1)
+    expect(getBulkCalls[0].fens).toHaveLength(3)
+    expect(getBulkCalls[0]).toMatchObject({
+      mode: 'depth',
+      value: 20,
+      multipv: 1,
+    })
+    expect(gos).toBe(2)
+    expect(review.moves).toHaveLength(2)
+  })
+
+  it('descarrega todas as gravações numa única putMany ao final, em ordem (sem chamar put)', async () => {
+    const port = fakePort(() => ({ cp: 0, pv: ['e2e4'] }))
+    let putCalls = 0
+    const putManyCalls: Array<{
+      entries: RawPosition[]
+      mode: string
+      value: number
+      multipv: number
+    }> = []
+    const cache = fakeCache({
+      async put() {
+        putCalls++
+      },
+      async putMany(entries, mode, value, multipv) {
+        putManyCalls.push({ entries, mode, value, multipv })
+      },
+    })
+
+    await analyzeGame('1. e4 e5', { mode: 'depth', depth: 18 }, port, 2, {
+      cache,
+    })
+
+    expect(putCalls).toBe(0)
+    expect(putManyCalls).toHaveLength(1)
+    expect(putManyCalls[0].entries.map((p) => p.fen)).toEqual([
+      START_FEN,
+      'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1',
+      'rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2',
+    ])
+    expect(putManyCalls[0]).toMatchObject({
+      mode: 'depth',
+      value: 18,
+      multipv: 2,
+    })
+  })
+
+  it('descarrega o buffer mesmo quando a análise aborta no meio (finally)', async () => {
+    const port = portDyingOnSecondGo()
+    const putManyCalls: RawPosition[][] = []
+    const cache = fakeCache({
+      async putMany(entries) {
+        putManyCalls.push(entries)
+      },
+    })
+
+    await expect(
+      analyzeGame('1. e4 e5', { mode: 'depth', depth: 20 }, port, 1, {
+        cache,
+      }),
+    ).rejects.toThrow(/engine morreu no segundo go/)
+
+    // A posição inicial já tinha sido avaliada e bufferizada antes do aborto.
+    expect(putManyCalls).toHaveLength(1)
+    expect(putManyCalls[0]).toHaveLength(1)
+    expect(putManyCalls[0][0].fen).toBe(START_FEN)
+  })
+
+  it('propaga a causa raiz da análise quando o descarrego do cache também falha', async () => {
+    const port = portDyingOnSecondGo()
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    let putManyCalls = 0
+    const cache = fakeCache({
+      async putMany() {
+        putManyCalls++
+        throw new Error('disk full')
+      },
+    })
+
+    await expect(
+      analyzeGame('1. e4 e5', { mode: 'depth', depth: 20 }, port, 1, {
+        cache,
+      }),
+    ).rejects.toThrow(/engine morreu no segundo go/)
+
+    // O flush foi tentado uma vez e falhou como warning, sem substituir a
+    // causa raiz (o erro da engine).
+    expect(putManyCalls).toBe(1)
+    expect(warn).toHaveBeenCalled()
+    warn.mockRestore()
+  })
+
+  it('rejeita com o erro do descarrego quando a análise teve sucesso', async () => {
+    const port = fakePort(() => ({ cp: 0, pv: ['e2e4'] }))
+    const cache = fakeCache({
+      async putMany() {
+        throw new Error('disk full')
+      },
+    })
+
+    await expect(
+      analyzeGame('1. e4 e5', { mode: 'depth', depth: 20 }, port, 1, {
+        cache,
+      }),
+    ).rejects.toThrow(/disk full/)
   })
 
   it('rejeita com mensagem do `go` e envia `stop` quando a busca excede goTimeoutMs', async () => {
@@ -689,20 +908,7 @@ describe('analyzeGame — onProgress', () => {
         }
       },
     }
-    const cache: PositionCache = {
-      async get(fen) {
-        return {
-          fen,
-          cp: 0,
-          depth: 20,
-          pv: ['e2e4'],
-          lines: [{ multipv: 1, cp: 0, pv: ['e2e4'], san: 'e4' }],
-        }
-      },
-      async put() {
-        throw new Error('cache hit não deveria gravar')
-      },
-    }
+    const cache = allHitsCache()
     const snapshots: number[][] = []
     await analyzeGame('1. e4 e5', { mode: 'depth', depth: 20 }, port, 1, {
       cache,
