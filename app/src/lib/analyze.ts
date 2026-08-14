@@ -539,12 +539,25 @@ export async function analyzeGame(
       winPcts.push(whiteWinPct(pos.cp, sideToMoveAtPly(game.moves, i)))
       opts.onProgress?.(winPcts.slice())
     }
-  } finally {
+  } catch (err) {
     // Descarrega o buffer mesmo se a análise abortar no meio: posições já
-    // avaliadas não se perdem. O cache é caminho crítico, não best-effort.
+    // avaliadas não se perdem — mas em caráter best-effort, para a causa
+    // raiz do aborto vencer (a falha do flush vira warning).
     if (opts.cache && pendingPuts.length) {
-      await opts.cache.putMany(pendingPuts, control.mode, keyValue, multipv)
+      try {
+        await opts.cache.putMany(pendingPuts, control.mode, keyValue, multipv)
+      } catch (flushErr) {
+        console.warn(
+          'Falha ao descarregar o cache após aborto da análise:',
+          flushErr,
+        )
+      }
     }
+    throw err
+  }
+  if (opts.cache && pendingPuts.length) {
+    // Caminho de sucesso: o cache é caminho crítico, não best-effort.
+    await opts.cache.putMany(pendingPuts, control.mode, keyValue, multipv)
   }
   if (!opts.keepAlive) await port.send('quit')
 

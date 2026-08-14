@@ -56,21 +56,10 @@ impl<'a> Cache<'a> {
         Self { conn }
     }
 
-    /// Consulta covering: um pedido de depth P é coberto por qualquer entry com
-    /// `reached_depth >= P` (independente do source_mode — entries de time
-    /// também servem depth); um pedido de time T só é coberto por entries de
-    /// time com `source_value >= T`. Em ambos os casos exige `multipv >=` e
-    /// desempata pela entry mais rasa (menor overkill).
-    pub fn lookup(
-        &self,
-        fen: &str,
-        mode: Mode,
-        value: u32,
-        multipv: u32,
-    ) -> Result<Option<CachedPosition>, String> {
-        // Os dois modos diferem só no SQL — os parâmetros (fen, value, multipv)
-        // são idênticos, bindados em ?1, ?2, ?3.
-        let sql = match mode {
+    /// SQL da consulta covering por modo; os parâmetros (fen, value, multipv)
+    /// são idênticos nos dois modos, bindados em ?1, ?2, ?3.
+    fn lookup_sql(mode: Mode) -> &'static str {
+        match mode {
             Mode::Time => {
                 "SELECT cp, lines_json, reached_depth FROM position_cache
                  WHERE fen = ?1 AND source_mode = 'time' AND source_value >= ?2 AND multipv >= ?3
@@ -81,8 +70,17 @@ impl<'a> Cache<'a> {
                  WHERE fen = ?1 AND reached_depth >= ?2 AND multipv >= ?3
                  ORDER BY reached_depth ASC LIMIT 1"
             }
-        };
-        let mut stmt = self.conn.prepare(sql).map_err(|e| e.to_string())?;
+        }
+    }
+
+    /// Executa a consulta covering num statement já preparado para o modo,
+    /// devolvendo a primeira row (ou None).
+    fn query_with_stmt(
+        stmt: &mut rusqlite::Statement<'_>,
+        fen: &str,
+        value: u32,
+        multipv: u32,
+    ) -> Result<Option<CachedPosition>, String> {
         let mut rows = stmt
             .query(rusqlite::params![fen, value, multipv])
             .map_err(|e| e.to_string())?;
@@ -96,9 +94,28 @@ impl<'a> Cache<'a> {
         }
     }
 
+    /// Consulta covering: um pedido de depth P é coberto por qualquer entry com
+    /// `reached_depth >= P` (independente do source_mode — entries de time
+    /// também servem depth); um pedido de time T só é coberto por entries de
+    /// time com `source_value >= T`. Em ambos os casos exige `multipv >=` e
+    /// desempata pela entry mais rasa (menor overkill).
+    pub fn lookup(
+        &self,
+        fen: &str,
+        mode: Mode,
+        value: u32,
+        multipv: u32,
+    ) -> Result<Option<CachedPosition>, String> {
+        let mut stmt = self
+            .conn
+            .prepare(Self::lookup_sql(mode))
+            .map_err(|e| e.to_string())?;
+        Self::query_with_stmt(&mut stmt, fen, value, multipv)
+    }
+
     /// Consulta covering em lote: um resultado por fen, na mesma ordem de
-    /// entrada. Reutiliza [`Cache::lookup`] por fen — mesmas semânticas de
-    /// cobertura (incl. depth cross-mode) e mesmo índice, sem inventar SQL.
+    /// entrada, com o statement preparado uma única vez (mesmo padrão de
+    /// [`Cache::store_many`]). Mesmas semânticas de [`Cache::lookup`].
     pub fn lookup_bulk(
         &self,
         fens: &[String],
@@ -106,9 +123,13 @@ impl<'a> Cache<'a> {
         value: u32,
         multipv: u32,
     ) -> Result<Vec<Option<CachedPosition>>, String> {
+        let mut stmt = self
+            .conn
+            .prepare(Self::lookup_sql(mode))
+            .map_err(|e| e.to_string())?;
         fens
             .iter()
-            .map(|fen| self.lookup(fen, mode, value, multipv))
+            .map(|fen| Self::query_with_stmt(&mut stmt, fen, value, multipv))
             .collect()
     }
 
