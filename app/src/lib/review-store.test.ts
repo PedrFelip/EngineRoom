@@ -256,7 +256,7 @@ describe('createReviewStore — navegação em variações', () => {
     expect(store.getSnapshot().currentPly).toBe(2)
   })
 
-  it('makeMove dentro da variação anexa lance pendente e foca o novo ply', () => {
+  it('makeMove no fim da variação anexa lance pendente e foca o novo ply', () => {
     const store = storeWithVariation()
     const v0 = store.getSnapshot().variations[1][0]
 
@@ -270,6 +270,44 @@ describe('createReviewStore — navegação em variações', () => {
       variationId: v0.id,
       parentPly: 1,
       ply: 3,
+    })
+  })
+
+  it('makeMove no meio da variação trunca a cauda e insere no ply seguinte ao foco', () => {
+    const store = storeWithVariation()
+    const v0 = store.getSnapshot().variations[1][0]
+    store.goToVariation(v0.id, 1, 1) // exibe a posição após c5, antes de Nf3
+
+    store.makeMove('d2d4') // diverge do lance 2 existente (g1f3)
+
+    const snap = store.getSnapshot()
+    const v = snap.variations[1].find((x) => x.id === v0.id)
+    expect(v?.moves).toHaveLength(2)
+    expect(v?.moves[1].san).toBe('d4')
+    expect(v?.moves[1].fenBefore).toBe(v?.moves[0].fenAfter)
+    expect(v?.moves[1].ply).toBe(2)
+    expect(snap.currentVariation).toEqual({
+      variationId: v0.id,
+      parentPly: 1,
+      ply: 2,
+    })
+  })
+
+  it('makeMove que coincide com o próximo lance da variação apenas avança o foco', () => {
+    const store = storeWithVariation()
+    const v0 = store.getSnapshot().variations[1][0]
+    store.goToVariation(v0.id, 1, 1)
+
+    store.makeMove('g1f3') // igual ao lance 2 existente
+
+    const snap = store.getSnapshot()
+    const v = snap.variations[1].find((x) => x.id === v0.id)
+    expect(v?.moves).toHaveLength(2)
+    expect(v?.moves[1].san).toBe('Nf3')
+    expect(snap.currentVariation).toEqual({
+      variationId: v0.id,
+      parentPly: 1,
+      ply: 2,
     })
   })
 })

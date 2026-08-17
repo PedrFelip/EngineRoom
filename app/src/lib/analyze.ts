@@ -533,6 +533,18 @@ export async function analyzeGame(
             l.san = l.pv[0] ? uciToSan(pos.fen, l.pv[0]) : null
           }
           pendingPuts.push(pos)
+          // Flush incremental: limita a perda num crash do processo a ~8
+          // posições. Falha propaga (caminho crítico) e cai no catch abaixo,
+          // cujo retry best-effort do buffer restante preserva a causa raiz.
+          if (opts.cache && pendingPuts.length >= 8) {
+            await opts.cache.putMany(
+              pendingPuts,
+              control.mode,
+              keyValue,
+              multipv,
+            )
+            pendingPuts.length = 0
+          }
         }
       }
       raw.push(pos)

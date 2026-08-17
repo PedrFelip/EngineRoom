@@ -137,15 +137,28 @@ export function createReviewStore(): ReviewStore {
     const played = validateMove(uci)
     if (!played) return
 
-    // Dentro de variação: acrescenta à variação em foco.
+    // Dentro de variação: avança se coincide com o próximo lance; senão
+    // trunca o que vem depois do foco e insere (no fim == acrescentar).
+    // O foco no ply k exibe a posição APÓS o lance k, então o novo lance
+    // entra no ply k+1.
     if (currentVariation) {
       const list = variations[currentVariation.parentPly] ?? []
       const vIdx = list.findIndex((v) => v.id === currentVariation.variationId)
       if (vIdx === -1) return
       const v = list[vIdx]
+      if (v.moves[currentVariation.ply]?.uci === uci) {
+        commit({
+          currentVariation: {
+            variationId: v.id,
+            parentPly: v.parentPly,
+            ply: currentVariation.ply + 1,
+          },
+        })
+        return
+      }
       const newMove: VariationMove = {
         id: nextId('m'),
-        ply: v.moves.length + 1,
+        ply: currentVariation.ply + 1,
         color: played.color,
         san: played.san,
         uci,
@@ -154,7 +167,10 @@ export function createReviewStore(): ReviewStore {
       }
       const newList = [
         ...list.slice(0, vIdx),
-        { ...v, moves: [...v.moves, newMove] },
+        {
+          ...v,
+          moves: [...v.moves.slice(0, currentVariation.ply), newMove],
+        },
         ...list.slice(vIdx + 1),
       ]
       commit({

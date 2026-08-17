@@ -736,6 +736,58 @@ describe('analyzeGame', () => {
     })
   })
 
+  it('descarrega incrementalmente a cada 8 posições e o restante ao final', async () => {
+    const port = fakePort(() => ({ cp: 0, pv: ['e2e4'] }))
+    const putManyCalls: RawPosition[][] = []
+    const cache = fakeCache({
+      async putMany(entries) {
+        // Cópia: o buffer real é esvaziado por referência após cada flush.
+        putManyCalls.push([...entries])
+      },
+    })
+
+    // 8 lances = 9 posições avaliadas: flush incremental com 8 + final com 1.
+    await analyzeGame(
+      '1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6',
+      { mode: 'depth', depth: 18 },
+      port,
+      1,
+      { cache },
+    )
+
+    expect(putManyCalls.map((entries) => entries.length)).toEqual([8, 1])
+    const fens = putManyCalls.flat().map((p) => p.fen)
+    expect(fens[0]).toBe(START_FEN)
+    expect(new Set(fens).size).toBe(9)
+  })
+
+  it('rejeita a análise quando um flush incremental falha (retry do catch vira warning)', async () => {
+    const port = fakePort(() => ({ cp: 0, pv: ['e2e4'] }))
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    let putManyCalls = 0
+    const cache = fakeCache({
+      async putMany() {
+        putManyCalls++
+        throw new Error('disk full')
+      },
+    })
+
+    await expect(
+      analyzeGame(
+        '1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6',
+        { mode: 'depth', depth: 18 },
+        port,
+        1,
+        { cache },
+      ),
+    ).rejects.toThrow(/disk full/)
+
+    // Flush incremental na 8ª posição + retry best-effort no catch.
+    expect(putManyCalls).toBe(2)
+    expect(warn).toHaveBeenCalled()
+    warn.mockRestore()
+  })
+
   it('descarrega o buffer mesmo quando a análise aborta no meio (finally)', async () => {
     const port = portDyingOnSecondGo()
     const putManyCalls: RawPosition[][] = []
