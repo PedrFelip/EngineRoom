@@ -28,7 +28,7 @@ cargo test
 ```
 There is no CI and no pre-commit hook — verification is manual.
 
-Single frontend test file: `bun run test src/lib/scoring.test.ts`.
+Frontend tests run under Vitest (19 files, all pure logic — no component tests). To run one module's tests: `bun run test src/lib/<module>.test.ts`.
 
 ## Gotchas
 
@@ -44,6 +44,7 @@ Single frontend test file: `bun run test src/lib/scoring.test.ts`.
 ## Architectural invariants (don't break)
 
 - **`EnginePort` is the test seam.** `analyzeGame` in `src/lib/analyze.ts` takes `port: { send, onLine }`. The whole pipeline (win%, classification, accuracy, multipv, cache) is tested with a fake port — never with the real Stockfish. Extend analysis through this seam; don't hardcode the Tauri adapter (`createTauriEnginePort`).
+- **The review decomposes into store + session + glue.** State and transitions (cursor, variations, `makeMove`) live in `review-store.ts` (pure, no React); I/O orchestration (engine boot, sizing, analysis, persistence, live refinement) lives in `review-session.ts` behind the `Backend` seam (`backend.ts`: engine port factory, system resources, position cache, games store — two adapters: Tauri and test fakes). `use-review.ts` is view glue only (rAF progress coalescing, orientation, settings) — don't move I/O back into the hook; extend through store/session, tested with fakes.
 - **Pure core vs. injected I/O.** `lib/uci.ts`, `lib/scoring.ts`, `lib/eco.ts`, and `buildReview` are side-effect-free. Engine, cache, and DB are always injected — keep them that way.
 - **PGN is the single source of truth** for game metadata (Elo, event, result). Don't duplicate into the DB or settings.
 
