@@ -11,9 +11,9 @@
  * developer / CI run fetches the right one for their platform.
  */
 import { execSync } from "node:child_process";
-import { createWriteStream, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
+import { copyFileSync, createWriteStream, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { exec as execCb } from "node:child_process";
 import { promisify } from "node:util";
@@ -77,6 +77,9 @@ async function extractZip(archivePath, outDir) {
 /** Find the actual stockfish executable inside the extracted dir. */
 function findBinary(dir, ext) {
   const entries = readdirSync(dir, { recursive: true });
+  // Prefer the largest file whose basename starts with stockfish (the real binary is ~100MB, AUTHORS is 6KB)
+  let best = null
+  let bestSize = -1
   for (const entry of entries) {
     const full = join(dir, String(entry));
     try {
@@ -84,11 +87,22 @@ function findBinary(dir, ext) {
     } catch {
       continue;
     }
-    const name = String(entry);
+    const name = basename(String(entry));
     if (!/^stockfish/i.test(name)) continue;
-    if (ext ? name.endsWith(ext) : !name.endsWith(".exe")) return full;
+    if (ext ? !name.endsWith(ext) : name.endsWith(".exe")) continue;
+    // Skip known non-binary docs that happen to be under a stockfish/ folder
+    if (/^AUTHORS|README|Copying|CITATION/i.test(name)) continue;
+    try {
+      const size = statSync(full).size;
+      if (size > bestSize) {
+        bestSize = size;
+        best = full;
+      }
+    } catch {
+      if (!best) best = full;
+    }
   }
-  return null;
+  return best;
 }
 
 async function main() {
@@ -119,7 +133,14 @@ async function main() {
   if (!bin) throw new Error("Binário do Stockfish não encontrado no pacote extraído.");
 
   if (!ext) await exec(`chmod +x "${bin}"`);
-  renameSync(bin, finalPath);
+  try {
+    renameSync(bin, finalPath)
+  } catch (e) {
+    if (e.code === 'EXDEV') {
+      copyFileSync(bin, finalPath)
+      if (!ext) await exec(`chmod +x "${finalPath}"`)
+    } else throw e
+  }
   rmSync(tmp, { recursive: true, force: true });
 
   console.log("✓ Stockfish instalado em:", finalPath);
