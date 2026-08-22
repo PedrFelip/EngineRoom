@@ -190,7 +190,7 @@ describe('createReviewSession — análise nova', () => {
     ).toBe(true)
   })
 
-  it('persiste a revisão exatamente uma vez e mantém a engine viva (sem quit)', async () => {
+  it('persiste a revisão exatamente uma vez e encerra a engine (quit)', async () => {
     const port = fakeEnginePort()
     const backend = fakeBackend(port)
     const config = depthConfig()
@@ -202,7 +202,8 @@ describe('createReviewSession — análise nova', () => {
     const [savedConfig, savedResult] = backend.saveReview.mock.calls[0]
     expect(savedConfig).toBe(config)
     expect(savedResult.moves).toHaveLength(2)
-    expect(port.sent).not.toContain('quit')
+    expect(port.sent).toContain('quit')
+    expect(port.sent).toContain('__disposed__')
   })
 })
 
@@ -236,7 +237,7 @@ describe('createReviewSession — reabertura do store', () => {
     expect(port.sent.some((c) => c.startsWith('go depth'))).toBe(false)
   })
 
-  it('ainda faz o handshake e sobe o refino ao vivo (go infinite)', async () => {
+  it('não sobe engine nem faz handshake ao reabrir (sem refino ao vivo)', async () => {
     const { port, backend } = reopenBackend()
     const { session } = startSession({
       config: depthConfig({ initialResult: existingResult() }),
@@ -245,11 +246,9 @@ describe('createReviewSession — reabertura do store', () => {
 
     await session.start()
 
-    expect(port.sent).toContain('uci')
-    expect(port.sent).toContain('isready')
-    expect(port.sent).toContain('go infinite')
-    // Sizing aplicado no handshake (recursos do fake backend).
-    expect(port.sent).toContain('setoption name Threads value 4')
+    expect(port.sent).not.toContain('uci')
+    expect(port.sent).not.toContain('isready')
+    expect(port.sent).not.toContain('go infinite')
   })
 })
 
@@ -317,7 +316,7 @@ describe('createReviewSession — falhas', () => {
 describe('createReviewSession — descarte e cancelamento', () => {
   const tick = () => new Promise<void>((r) => setTimeout(r, 0))
 
-  it('dispose após análise concluída para o refino e encerra a engine', async () => {
+  it('dispose após análise concluída encerra a engine', async () => {
     const port = fakeEnginePort()
     const { session } = startSession({
       config: depthConfig(),
@@ -328,7 +327,8 @@ describe('createReviewSession — descarte e cancelamento', () => {
     session.dispose()
     await tick()
 
-    expect(port.sent).toContain('stop')
+    // após start, port já foi disposto via finally (quit + disposed)
+    expect(port.sent).toContain('quit')
     expect(port.sent).toContain('__disposed__')
   })
 
@@ -371,107 +371,5 @@ describe('createReviewSession — descarte e cancelamento', () => {
 
     expect(port.sent).toContain('__disposed__')
     expect(port.sent).not.toContain('uci')
-  })
-})
-
-describe('createReviewSession — refino ao vivo', () => {
-  const tick = () => new Promise<void>((r) => setTimeout(r, 0))
-
-  it('setDisplayedFen reponta a engine: stop + position fen + go infinite', async () => {
-    const port = fakeEnginePort()
-    const { session } = startSession({
-      config: depthConfig(),
-      backend: fakeBackend(port),
-    })
-    await session.start()
-    const len = port.sent.length
-
-    session.setDisplayedFen(
-      'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
-    )
-    await tick()
-
-    expect(port.sent.slice(len)).toEqual([
-      'stop',
-      'position fen rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
-      'go infinite',
-    ])
-  })
-
-  it('setDisplayedFen com o mesmo FEN é no-op (não reprepara a engine)', async () => {
-    const port = fakeEnginePort()
-    const { session } = startSession({
-      config: depthConfig(),
-      backend: fakeBackend(port),
-    })
-    await session.start()
-    const fen = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1'
-
-    session.setDisplayedFen(fen)
-    await tick()
-    const afterFirst = port.sent.length
-
-    session.setDisplayedFen(fen)
-    await tick()
-
-    expect(port.sent.length).toBe(afterFirst)
-  })
-
-  it('info da engine classifica o lance de variação pendente no store', async () => {
-    const port = fakeEnginePort()
-    const store = createReviewStore()
-    const { session } = startSession({
-      config: depthConfig(),
-      backend: fakeBackend(port),
-      store,
-    })
-    await session.start()
-
-    // Usuário explora 1...c5 (variação no ply 1, lance pendente, focado).
-    store.goTo(1)
-    store.makeMove('c7c5')
-    const v = store.getSnapshot().variations[1][0]
-    expect(v.moves[0].classification).toBeUndefined()
-
-    // A engine (fake) emite info para a posição em foco.
-    port.emit('info depth 22 multipv 1 score cp -50 pv g1f3 d7d6')
-
-    const vDepois = store.getSnapshot().variations[1][0]
-    expect(vDepois.moves[0].afterCp).toBe(-50)
-    expect(vDepois.moves[0].classification).toBeDefined()
-    expect(vDepois.moves[0].bestUci).toBe('g1f3')
-  })
-
-  it('refino nasce apontando para o FEN exibido, não o final da partida', async () => {
-    const port = fakeEnginePort()
-    const backend = fakeBackend(port)
-    let resolveSpawn!: (p: EnginePortHandle) => void
-    backend.createEnginePort = () =>
-      new Promise((resolve) => {
-        resolveSpawn = resolve
-      })
-    const store = createReviewStore()
-    const { session } = startSession({
-      config: depthConfig({ initialResult: existingResult() }),
-      backend,
-      store,
-    })
-    const startPromise = session.start()
-    await tick()
-
-    // Reabertura instantânea: resultado já no store; usuário navega ao ply 0
-    // enquanto a engine ainda não subiu.
-    expect(store.getSnapshot().result).not.toBeNull()
-    store.goTo(0)
-
-    resolveSpawn(port)
-    await startPromise
-
-    const lastPos = port.sent.findLastIndex((c) => c.startsWith('position fen'))
-    // posição exibida (ply 0), não a final (ply 2)
-    expect(port.sent[lastPos]).toBe(
-      'position fen rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
-    )
-    expect(port.sent[lastPos + 1]).toBe('go infinite')
   })
 })

@@ -2,18 +2,11 @@ import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
 import { formatEngineTag } from '../lib/engine-tag'
 import { evalLabel, sideToMoveAtPly } from '../lib/eval-label'
 import { resultLabel } from '../lib/pgn'
-import { phaseBoundaries, phaseOfPosition } from '../lib/phase'
-import { whiteWinPct } from '../lib/scoring'
+import { phaseBoundaries } from '../lib/phase'
 import { useSettings } from '../lib/settings-context'
 import { playMoveSound } from '../lib/sound'
 import { useReview } from '../lib/use-review'
-import type {
-  Classification,
-  PositionAnalysis,
-  PvLine,
-  ReviewConfig,
-  VariationMove,
-} from '../types'
+import type { Classification, ReviewConfig } from '../types'
 import Board from './Board'
 import CandidateLines from './CandidateLines'
 import EvalBar from './EvalBar'
@@ -31,84 +24,19 @@ function uciToSquares(uci: string): [string, string] | null {
   return [uci.slice(0, 2), uci.slice(2, 4)]
 }
 
-/**
- * Constrói um PositionAnalysis de exibição a partir de um lance de variação
- * (sem posição-base da linha principal). Reusa os campos que o refino
- * preencheu no lance: afterCp (POV do lado a jogar) e lines (POV das brancas).
- * Retorna null enquanto o lance está pendente (sem eval ainda).
- */
-function variationToPosition(
-  move: VariationMove,
-  stm: 'w' | 'b',
-): PositionAnalysis | null {
-  if (move.afterCp === undefined && !(move.lines?.length ?? 0)) return null
-  const lines = move.lines ?? []
-  const primary = lines[0]
-  const winPct =
-    primary?.winPct ??
-    (move.afterCp !== undefined ? whiteWinPct(move.afterCp, stm) : 50)
-  const fallbackLine: PvLine = {
-    multipv: 1,
-    san: null,
-    cp: move.afterCp ?? 0,
-    winPct,
-    pv: move.bestUci ? [move.bestUci] : [],
-  }
-  return {
-    ply: 0,
-    fen: move.fenAfter,
-    phase: phaseOfPosition(move.fenAfter),
-    depth: move.depth ?? 0,
-    cp: move.afterCp ?? 0,
-    winPct,
-    pv: primary?.pv ?? fallbackLine.pv,
-    lines: lines.length > 0 ? lines : [fallbackLine],
-  }
-}
-
 export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
   const review = useReview(config)
   const { settings } = useSettings()
-  const {
-    result,
-    status,
-    error,
-    partialWinPcts,
-    currentPly,
-    orientation,
-    variations,
-    currentVariation,
-    currentVariationMove,
-    dests,
-    turnColor,
-    makeMove,
-    goToVariation,
-    exitVariation,
-  } = review
+  const { result, status, error, partialWinPcts, currentPly, orientation } =
+    review
 
-  const basePosition = result?.positions[currentPly] ?? null
-  const inVariation = !!currentVariationMove
-
-  // Posição exibida: variação tem sua própria posição sintetizada; linha
-  // principal mostra só o resultado do analyzeGame (sem refino ao vivo).
-  let position: PositionAnalysis | null
-  let stm: 'w' | 'b'
-  let lastMoveUci: string | null
-  let lastMoveClassification: Classification | null
-
-  if (currentVariationMove) {
-    stm = currentVariationMove.color === 'w' ? 'b' : 'w'
-    position = variationToPosition(currentVariationMove, stm)
-    lastMoveUci = currentVariationMove.uci
-    lastMoveClassification = currentVariationMove.classification ?? null
-  } else {
-    stm = result ? sideToMoveAtPly(result.moves, currentPly) : 'w'
-    position = basePosition
-    const currentMove =
-      currentPly > 0 ? (result?.moves[currentPly - 1] ?? null) : null
-    lastMoveUci = currentMove?.uci ?? null
-    lastMoveClassification = currentMove?.classification ?? null
-  }
+  const position = result?.positions[currentPly] ?? null
+  const stm = result ? sideToMoveAtPly(result.moves, currentPly) : 'w'
+  const currentMove =
+    currentPly > 0 ? (result?.moves[currentPly - 1] ?? null) : null
+  const lastMoveUci = currentMove?.uci ?? null
+  const lastMoveClassification: Classification | null =
+    currentMove?.classification ?? null
 
   const opening = result?.moves.find((m) => m.eco)?.eco ?? null
   const evalBarLabel =
@@ -212,9 +140,6 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
               engineTier: config.engine.id,
             })}
             {opening ? ` · ${opening.code} ${opening.name}` : ''}
-            {inVariation && currentVariationMove?.depth
-              ? ` · VARIAÇÃO d${currentVariationMove.depth}`
-              : ''}
           </p>
         </div>
         <button
@@ -260,14 +185,10 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
                     lastMove={lastMoveUci ? uciToSquares(lastMoveUci) : null}
                     arrows={bestArrow ? [bestArrow] : []}
                     lastMoveClassification={lastMoveClassification}
-                    interactive={status === 'done'}
-                    turnColor={turnColor}
-                    dests={dests}
-                    onUserMove={makeMove}
                   />
                 ) : (
                   <div className='flex aspect-square w-full items-center justify-center rounded-lg border border-edge bg-panel-2/60 text-ink-dim'>
-                    {inVariation ? 'Analisando jogada…' : '—'}
+                    —
                   </div>
                 )}
               </div>
@@ -299,16 +220,13 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
             </NavBtn>
             <NavBtn
               onClick={review.prev}
-              disabled={!result || (currentPly === 0 && !inVariation)}
+              disabled={!result || currentPly === 0}
             >
               ‹
             </NavBtn>
             <NavBtn
               onClick={review.next}
-              disabled={
-                !result ||
-                (currentPly >= (result?.moves.length ?? 0) && !inVariation)
-              }
+              disabled={!result || currentPly >= (result?.moves.length ?? 0)}
             >
               ›
             </NavBtn>
@@ -319,9 +237,6 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
               ⏭
             </NavBtn>
             <NavBtn onClick={review.flip}>⇅</NavBtn>
-            {inVariation ? (
-              <NavBtn onClick={exitVariation}>✕ variação</NavBtn>
-            ) : null}
           </div>
         </div>
 
@@ -333,9 +248,6 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
                 moves={result.moves}
                 currentPly={currentPly}
                 onSelect={review.goTo}
-                variations={variations}
-                currentVariation={currentVariation}
-                onSelectVariation={goToVariation}
               />
             </div>
           )}
