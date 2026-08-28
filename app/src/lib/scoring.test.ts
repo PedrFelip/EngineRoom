@@ -3,6 +3,7 @@ import {
   CLASSIFICATION_LABELS,
   classifyMove,
   cpToWinPct,
+  detectBrilliant,
   formatEval,
   gameAccuracy,
   sideToMoveAtPly,
@@ -125,6 +126,45 @@ describe('classifyMove', () => {
   })
 })
 
+describe('detectBrilliant', () => {
+  const ok = {
+    winPctLoss: 0,
+    winPctBefore: 52,
+    winPctAfter: 50,
+    materialDelta: -2,
+    hasSecondLine: false,
+  }
+
+  it('aceita o melhor lance com sacrifício de 2 peões', () => {
+    expect(detectBrilliant(ok)).toBe(true)
+  })
+
+  it('exige sacrifício de pelo menos 2 peões', () => {
+    expect(detectBrilliant({ ...ok, materialDelta: -1.99 })).toBe(false)
+    expect(detectBrilliant({ ...ok, materialDelta: 0 })).toBe(false)
+  })
+
+  it('rejeita quem fica em posição ruim depois do lance', () => {
+    expect(detectBrilliant({ ...ok, winPctAfter: 34.9 })).toBe(false)
+    expect(detectBrilliant({ ...ok, winPctAfter: 35 })).toBe(true)
+  })
+
+  it('rejeita quem já partiu de vitória esmagadora', () => {
+    expect(detectBrilliant({ ...ok, winPctBefore: 85 })).toBe(true)
+    expect(detectBrilliant({ ...ok, winPctBefore: 85.1 })).toBe(false)
+  })
+
+  it('exige o lance exato sem 2ª linha; com ela tolera quase-melhor', () => {
+    expect(detectBrilliant({ ...ok, winPctLoss: 0.1 })).toBe(false)
+    expect(
+      detectBrilliant({ ...ok, winPctLoss: 0.5, hasSecondLine: true }),
+    ).toBe(true)
+    expect(
+      detectBrilliant({ ...ok, winPctLoss: 0.6, hasSecondLine: true }),
+    ).toBe(false)
+  })
+})
+
 describe('gameAccuracy', () => {
   it('partida perfeita (todos loss 0) tem precisão 100', () => {
     expect(gameAccuracy([0, 0, 0])).toBe(100)
@@ -140,6 +180,7 @@ describe('gameAccuracy', () => {
 
 describe('CLASSIFICATION_LABELS', () => {
   it('mapeia cada classificação ao seu rótulo em pt-BR', () => {
+    expect(CLASSIFICATION_LABELS.brilhante).toBe('Brilhante')
     expect(CLASSIFICATION_LABELS.melhor).toBe('Melhor')
     expect(CLASSIFICATION_LABELS.excelente).toBe('Excelente')
     expect(CLASSIFICATION_LABELS.bom).toBe('Bom')

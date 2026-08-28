@@ -17,10 +17,12 @@ import type {
   ReviewResult,
 } from '../types'
 import { type EcoEntry, lookupOpening } from './eco'
+import { materialDeltaAfterReplies } from './material'
 import { computePhases } from './phase'
 import {
   classifyMove,
   cpToWinPct,
+  detectBrilliant,
   gameAccuracy,
   sideToMoveAtPly,
   whiteCp,
@@ -106,13 +108,33 @@ export function buildReview(
     const winPctAfter = 100 - cpToWinPct(after.cp)
     const winPctLoss = Math.max(0, winPctBefore - winPctAfter)
     const isBook = !!book && m.ply <= book.maxPly
+    const base = classifyMove(winPctLoss, isBook)
+    // Brilhante: melhor/quase melhor que sacrifica material, medido após a
+    // melhor resposta do oponente (primeira PV da posição após o lance) para
+    // incluir a recaptura esperada. Lance de livro nunca é Brilhante.
+    const materialDelta = materialDeltaAfterReplies(
+      m.fenBefore,
+      m.uci,
+      after.pv[0] ?? null,
+    )
+    const classification =
+      !isBook &&
+      detectBrilliant({
+        winPctLoss,
+        winPctBefore,
+        winPctAfter,
+        materialDelta,
+        hasSecondLine: (before.lines?.length ?? 1) >= 2,
+      })
+        ? 'brilhante'
+        : base
     return {
       ply: m.ply,
       color: m.color,
       san: m.san,
       uci: m.uci,
       fenBefore: m.fenBefore,
-      classification: classifyMove(winPctLoss, isBook),
+      classification,
       winPctBefore,
       winPctAfter,
       winPctLoss,

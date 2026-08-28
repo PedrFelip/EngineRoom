@@ -1,7 +1,8 @@
 /**
  * Conversão de avaliação (centipawns, POV do lado a jogar) em:
  *  - probabilidade de vitória (win%) via curva logística;
- *  - classificação de lances (Melhor/Excelente/Bom/Imprecisão/Erro/Blunder/Livro);
+ *  - classificação de lances (Brilhante/Melhor/Excelente/Bom/Imprecisão/Erro/
+ *    Blunder/Livro);
  *  - precisão agregada da partida (0–100%).
  *
  * Modelo Lichess: thresholds sobre delta de win% e fórmula de acurácia
@@ -18,6 +19,7 @@ const WINPCT_K = 0.00368208
 
 /** Rótulos em pt-BR exibidos na UI (badges, resumo). */
 export const CLASSIFICATION_LABELS: Record<Classification, string> = {
+  brilhante: 'Brilhante',
   livro: 'Livro',
   melhor: 'Melhor',
   excelente: 'Excelente',
@@ -90,6 +92,50 @@ export function classifyMove(
   if (winPctLoss <= INACCURACY_MAX_LOSS) return 'imprecisao'
   if (winPctLoss <= MISTAKE_MAX_LOSS) return 'erro'
   return 'blunder'
+}
+
+/**
+ * Regras do lance Brilhante (estilo chess.com): o melhor lance da posição —
+ * ou quase isso, quando a 2ª linha candidata confirma — que además sacrifica
+ * material, sem deixar quem jogou em posição ruim nem partir de vitória
+ * esmagadora. Quando aplicável, substitui a classificação corrente.
+ */
+
+/** Sacrifício mínimo (em peões, POV de quem jogou) para o lance ser Brilhante. */
+export const BRILLIANT_MIN_SACRIFICE = 2
+/** win% mínimo (POV de quem jogou) após o lance — não pode ficar em posição ruim. */
+export const BRILLIANT_MIN_WINPCT_AFTER = 35
+/** win% máximo (POV de quem jogou) antes do lance — não pode já estar ganhando. */
+export const BRILLIANT_MAX_WINPCT_BEFORE = 85
+/** Perda de win% tolerada com 2ª linha candidata; sem ela, exige o lance exato. */
+const BRILLIANT_MAX_LOSS_WITH_2ND_LINE = 0.5
+
+export interface BrilliantInput {
+  /** Perda de win% do lance jogado vs o melhor (POV de quem jogou). */
+  winPctLoss: number
+  /** win% antes do lance, POV de quem jogou. */
+  winPctBefore: number
+  /** win% depois do lance, POV de quem jogou. */
+  winPctAfter: number
+  /**
+   * Δ material de quem jogou (em peões) após o lance + a melhor resposta do
+   * oponente. Negativo = entregou material (sacrifício).
+   */
+  materialDelta: number
+  /** true quando há 2ª linha candidata (multipv ≥ 2) confirmando o "quase melhor". */
+  hasSecondLine: boolean
+}
+
+/**
+ * Verifica se um lance é Brilhante. Melhor/quase melhor + sacrifício bom,
+ * sem ficar mal depois nem partir de posição já ganha. Puro.
+ */
+export function detectBrilliant(input: BrilliantInput): boolean {
+  if (input.materialDelta > -BRILLIANT_MIN_SACRIFICE) return false
+  if (input.winPctAfter < BRILLIANT_MIN_WINPCT_AFTER) return false
+  if (input.winPctBefore > BRILLIANT_MAX_WINPCT_BEFORE) return false
+  const maxLoss = input.hasSecondLine ? BRILLIANT_MAX_LOSS_WITH_2ND_LINE : 0
+  return input.winPctLoss <= maxLoss
 }
 
 /** Constantes da fórmula de acurácia (modelo Lichess). */
