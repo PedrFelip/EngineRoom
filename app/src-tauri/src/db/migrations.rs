@@ -28,19 +28,21 @@ pub(super) fn migrate(conn: &Connection) -> Result<(), String> {
             plies INTEGER NOT NULL,
             engine_tier TEXT NOT NULL,
             mode TEXT NOT NULL DEFAULT 'depth',
+            analysis_kind TEXT NOT NULL DEFAULT 'manual',
             depth INTEGER NOT NULL,
             multipv INTEGER NOT NULL,
             accuracy_white REAL NOT NULL,
             accuracy_black REAL NOT NULL,
             review_json TEXT NOT NULL,
             created_at TEXT NOT NULL DEFAULT (datetime('now')),
-            UNIQUE (pgn, mode, depth, multipv)
+            UNIQUE (pgn, analysis_kind, mode, depth, multipv)
         );",
     )
     .map_err(|e| e.to_string())?;
     migrate_position_cache_mode(conn)?;
     migrate_position_cache_reached_depth(conn)?;
-    migrate_games_mode(conn)
+    migrate_games_mode(conn)?;
+    migrate_games_analysis_kind(conn)
 }
 
 /// `true` se a coluna existe na tabela (via `PRAGMA table_info`).
@@ -149,6 +151,45 @@ fn migrate_games_mode(conn: &Connection) -> Result<(), String> {
                 depth, multipv, accuracy_white, accuracy_black, review_json, created_at)
             SELECT id, pgn, white, black, result, plies, engine_tier, 'depth',
                 depth, multipv, accuracy_white, accuracy_black, review_json, created_at
+            FROM games_old;
+         DROP TABLE games_old;",
+    )
+    .map_err(|e| e.to_string())
+}
+
+/// Adiciona a estratégia da revisão à tabela de partidas e à chave UNIQUE.
+/// Revisões existentes continuam sendo controles manuais.
+fn migrate_games_analysis_kind(conn: &Connection) -> Result<(), String> {
+    if has_column(conn, "games", "analysis_kind")? {
+        return Ok(());
+    }
+
+    conn.execute_batch(
+        "ALTER TABLE games RENAME TO games_old;
+         CREATE TABLE games (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            pgn TEXT NOT NULL,
+            white TEXT NOT NULL,
+            black TEXT NOT NULL,
+            result TEXT NOT NULL,
+            plies INTEGER NOT NULL,
+            engine_tier TEXT NOT NULL,
+            mode TEXT NOT NULL DEFAULT 'depth',
+            analysis_kind TEXT NOT NULL DEFAULT 'manual',
+            depth INTEGER NOT NULL,
+            multipv INTEGER NOT NULL,
+            accuracy_white REAL NOT NULL,
+            accuracy_black REAL NOT NULL,
+            review_json TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            UNIQUE (pgn, analysis_kind, mode, depth, multipv)
+         );
+         INSERT INTO games (id, pgn, white, black, result, plies, engine_tier, mode,
+                analysis_kind, depth, multipv, accuracy_white, accuracy_black,
+                review_json, created_at)
+            SELECT id, pgn, white, black, result, plies, engine_tier, mode,
+                'manual', depth, multipv, accuracy_white, accuracy_black,
+                review_json, created_at
             FROM games_old;
          DROP TABLE games_old;",
     )
@@ -328,6 +369,7 @@ mod tests {
         );
         assert_eq!(lista[0].white, "Brancas");
         assert_eq!(lista[0].depth, 20);
+        assert_eq!(lista[0].analysis_kind, "manual");
     }
 
     #[test]
