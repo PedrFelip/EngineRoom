@@ -3,6 +3,9 @@ export type EngineTierId = 'fast' | 'balanced' | 'deep' | 'custom'
 /** Modo de análise: profundidade fixa ou tempo fixo por lance. */
 export type EngineMode = 'depth' | 'time'
 
+/** Estratégia da revisão: controles manuais ou orçamento adaptativo em duas passagens. */
+export type AnalysisKind = 'manual' | 'auto-fast' | 'auto-deep'
+
 export interface EngineTier {
   id: EngineTierId
   label: string
@@ -47,6 +50,8 @@ export interface ReviewConfig {
   engine: EngineTier
   /** Modo da análise: 'depth' usa `engine.depth`, 'time' usa `movetimeMs`. */
   mode: EngineMode
+  /** Omitido em revisões antigas; equivale a `manual`. */
+  analysisKind?: AnalysisKind
   /** Milissegundos por lance quando `mode === 'time'` (ignorado em 'depth'). */
   movetimeMs?: number
   lines: number
@@ -63,6 +68,8 @@ export interface GameSummary {
   plies: number
   engineTier: string
   mode: EngineMode
+  /** Estratégia persistida; ausente em dados antigos equivale a `manual`. */
+  analysisKind?: AnalysisKind
   /** Profundidade (mode='depth') ou milissegundos por lance (mode='time'). */
   depth: number
   multipv: number

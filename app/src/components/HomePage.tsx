@@ -1,8 +1,17 @@
 import { useEffect, useMemo, useState } from 'react'
+import {
+  ADAPTIVE_PROFILES,
+  adaptiveProfileForKind,
+} from '../lib/adaptive-analysis'
 import { resolveEngineTier } from '../lib/engine-tier'
 import { deleteGame, getGame, listGames, storedToConfig } from '../lib/games'
 import { parsePgn, resultLabel } from '../lib/pgn'
-import type { EngineMode, GameSummary, ReviewConfig } from '../types'
+import type {
+  AnalysisKind,
+  EngineMode,
+  GameSummary,
+  ReviewConfig,
+} from '../types'
 import EngineTierSelector, { DEFAULT_TIME_MS } from './EngineTierSelector'
 import PgnImporter from './PgnImporter'
 import ReviewedGamesList from './ReviewedGamesList'
@@ -18,6 +27,7 @@ export default function HomePage({ onStart }: Props) {
   const [mode, setMode] = useState<EngineMode>('depth')
   const [movetimeMs, setMovetimeMs] = useState<number>(DEFAULT_TIME_MS)
   const [lines, setLines] = useState(1)
+  const [analysisKind, setAnalysisKind] = useState<AnalysisKind>('auto-fast')
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [games, setGames] = useState<GameSummary[]>([])
 
@@ -25,6 +35,7 @@ export default function HomePage({ onStart }: Props) {
   const engine = useMemo(() => resolveEngineTier(depth), [depth])
   const canStart = parse.ok && pgn.trim().length > 0
   const plies = parse.ok ? parse.meta.plies : 0
+  const adaptiveProfile = adaptiveProfileForKind(analysisKind)
 
   useEffect(() => {
     let cancelled = false
@@ -63,6 +74,19 @@ export default function HomePage({ onStart }: Props) {
   }
 
   const hasGames = games.length > 0
+
+  const startReview = () => {
+    if (!parse.ok) return
+    onStart({
+      pgn,
+      meta: parse.meta,
+      engine,
+      mode: adaptiveProfile ? 'time' : mode,
+      analysisKind,
+      ...(!adaptiveProfile && mode === 'time' ? { movetimeMs } : {}),
+      lines: adaptiveProfile?.triageMultipv ?? lines,
+    })
+  }
 
   return (
     <div className='flex min-h-full flex-col items-center overflow-x-hidden px-4 py-8 md:px-6 md:py-10 lg:px-8'>
@@ -177,32 +201,99 @@ export default function HomePage({ onStart }: Props) {
 
             <div className='my-5 h-px bg-edge-soft' />
 
-            <EngineTierSelector
-              mode={mode}
-              depth={depth}
-              movetimeMs={movetimeMs}
-              lines={lines}
-              plies={plies}
-              onModeChange={setMode}
-              onDepthChange={setDepth}
-              onMovetimeChange={setMovetimeMs}
-              onLinesChange={setLines}
-            />
+            <div className='mb-3 grid grid-cols-2 gap-1 rounded-lg bg-panel-3/60 p-1'>
+              <button
+                type='button'
+                onClick={() =>
+                  setAnalysisKind((current) =>
+                    current === 'manual' ? 'auto-fast' : current,
+                  )
+                }
+                className={`rounded-md px-3 py-2 text-sm font-semibold transition ${
+                  analysisKind !== 'manual'
+                    ? 'bg-brand text-bg shadow'
+                    : 'text-ink-dim hover:text-ink'
+                }`}
+              >
+                Automático
+              </button>
+              <button
+                type='button'
+                onClick={() => setAnalysisKind('manual')}
+                className={`rounded-md px-3 py-2 text-sm font-semibold transition ${
+                  analysisKind === 'manual'
+                    ? 'bg-brand text-bg shadow'
+                    : 'text-ink-dim hover:text-ink'
+                }`}
+              >
+                Manual
+              </button>
+            </div>
+
+            {analysisKind === 'manual' ? (
+              <EngineTierSelector
+                mode={mode}
+                depth={depth}
+                movetimeMs={movetimeMs}
+                lines={lines}
+                plies={plies}
+                onModeChange={setMode}
+                onDepthChange={setDepth}
+                onMovetimeChange={setMovetimeMs}
+                onLinesChange={setLines}
+              />
+            ) : (
+              <div className='rounded-xl border border-edge bg-panel-2/60 p-5'>
+                <div className='mb-4'>
+                  <h3 className='text-sm font-semibold uppercase tracking-wide text-ink-dim'>
+                    Perfil automático
+                  </h3>
+                  <p className='mt-0.5 text-xs text-ink-faint'>
+                    Mapeia alternativas e aprofunda somente posições críticas
+                  </p>
+                </div>
+                <div className='grid grid-cols-2 gap-2'>
+                  {(['auto-fast', 'auto-deep'] as const).map((kind) => {
+                    const profile =
+                      ADAPTIVE_PROFILES[kind === 'auto-fast' ? 'fast' : 'deep']
+                    const active = analysisKind === kind
+                    return (
+                      <button
+                        key={kind}
+                        type='button'
+                        onClick={() => setAnalysisKind(kind)}
+                        className={`rounded-lg px-3 py-3 text-left transition ${
+                          active
+                            ? 'bg-brand/15 ring-1 ring-brand/50'
+                            : 'bg-panel-3/40 hover:bg-panel-3'
+                        }`}
+                      >
+                        <span
+                          className={`block text-sm font-semibold ${
+                            active ? 'text-brand' : 'text-ink'
+                          }`}
+                        >
+                          {profile.id === 'fast' ? 'Rápido' : 'Profundo'}
+                        </span>
+                        <span className='mt-1 block text-[11px] text-ink-faint'>
+                          Triagem MultiPV {profile.triageMultipv} · até{' '}
+                          {profile.highMs / 1000}s nos críticos
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
+                <p className='mt-3 text-center text-xs text-ink-dim'>
+                  A segunda passagem revisita apenas os pares antes/depois dos
+                  lances prioritários.
+                </p>
+              </div>
+            )}
 
             <button
               type='button'
               disabled={!canStart}
-              onClick={() =>
-                parse.ok &&
-                onStart({
-                  pgn,
-                  meta: parse.meta,
-                  engine,
-                  mode,
-                  ...(mode === 'time' ? { movetimeMs } : {}),
-                  lines,
-                })
-              }
+              onClick={startReview}
               className={`mt-5 flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold transition ${
                 canStart
                   ? 'bg-brand text-bg hover:bg-brand-strong active:scale-[0.99]'

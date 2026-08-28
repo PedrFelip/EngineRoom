@@ -138,6 +138,7 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
                   ? (config.movetimeMs ?? 0)
                   : config.engine.depth,
               engineTier: config.engine.id,
+              analysisKind: config.analysisKind,
             })}
             {opening ? ` · ${opening.code} ${opening.name}` : ''}
           </p>
