@@ -20,8 +20,12 @@ export function formatEngineTag({
   engineTier,
   analysisKind = 'manual',
 }: EngineTagInput): string {
-  if (analysisKind === 'auto-fast') return 'Automático · Rápido'
-  if (analysisKind === 'auto-deep') return 'Automático · Profundo'
+  switch (analysisKind) {
+    case 'auto-fast':
+      return 'Automático · Rápido'
+    case 'auto-deep':
+      return 'Automático · Profundo'
+  }
   if (mode === 'time') {
     const seconds = Math.max(1, Math.round(depth / 1000))
     return `Tempo · ${seconds}s/lance`

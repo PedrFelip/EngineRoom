@@ -7,7 +7,11 @@
 
 import type { ReviewConfig, ReviewResult } from '../types'
 import { adaptiveProfileForKind } from './adaptive-analysis'
-import { analyzeGame, analyzeGameAdaptive } from './analyze'
+import {
+  type AnalyzeControl,
+  analyzeGame,
+  analyzeGameAdaptive,
+} from './analyze'
 import type { Backend } from './backend'
 import type { ReviewStore } from './review-store'
 import { recommendedHashMb } from './system'
@@ -32,6 +36,13 @@ export interface ReviewSession {
   start(): Promise<void>
   /** Aborta tudo: engine, listeners. Assíncrono por dentro. */
   dispose(): void
+}
+
+function manualAnalysisControl(config: ReviewConfig): AnalyzeControl {
+  if (config.mode === 'time') {
+    return { mode: 'time', movetimeMs: config.movetimeMs ?? 5000 }
+  }
+  return { mode: 'depth', depth: config.engine.depth }
 }
 
 export function createReviewSession(opts: ReviewSessionOpts): ReviewSession {
@@ -92,16 +103,9 @@ export function createReviewSession(opts: ReviewSessionOpts): ReviewSession {
           analysisOpts,
         )
       } else {
-        const control =
-          config.mode === 'time'
-            ? {
-                mode: 'time' as const,
-                movetimeMs: config.movetimeMs ?? 5000,
-              }
-            : { mode: 'depth' as const, depth: config.engine.depth }
         review = await analyzeGame(
           config.pgn,
-          control,
+          manualAnalysisControl(config),
           port,
           config.lines,
           analysisOpts,

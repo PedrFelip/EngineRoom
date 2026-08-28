@@ -486,6 +486,16 @@ function progressWinPcts(raw: RawPosition[], moves: PlayedMove[]): number[] {
   )
 }
 
+function terminalPosition(fen: string, cp: number): RawPosition {
+  return {
+    fen,
+    cp,
+    depth: 0,
+    pv: [],
+    lines: [{ multipv: 1, cp, pv: [] }],
+  }
+}
+
 function terminalCp(fen: string): number | null {
   try {
     const c = new Chess(fen)
@@ -664,6 +674,17 @@ export async function analyzeGameAdaptive(
   const raw: RawPosition[] = []
   const triagePuts: RawPosition[] = []
 
+  async function flushTriagePuts(): Promise<void> {
+    if (!opts.cache || !triagePuts.length) return
+    await opts.cache.putMany(
+      triagePuts,
+      'time',
+      profile.triageMs,
+      profile.triageMultipv,
+    )
+    triagePuts.length = 0
+  }
+
   try {
     for (let index = 0; index < positionFens.length; index++) {
       const fen = positionFens[index]
@@ -671,13 +692,7 @@ export async function analyzeGameAdaptive(
       const cached = triageHits[index]
       let pos: RawPosition
       if (term !== null) {
-        pos = {
-          fen,
-          cp: term,
-          depth: 0,
-          pv: [],
-          lines: [{ multipv: 1, cp: term, pv: [] }],
-        }
+        pos = terminalPosition(fen, term)
       } else if (cached) {
         pos = cached
       } else {
@@ -689,29 +704,13 @@ export async function analyzeGameAdaptive(
         )
         addSanToLines(pos)
         triagePuts.push(pos)
-        if (opts.cache && triagePuts.length >= 8) {
-          await opts.cache.putMany(
-            triagePuts,
-            'time',
-            profile.triageMs,
-            profile.triageMultipv,
-          )
-          triagePuts.length = 0
-        }
+        if (triagePuts.length >= 8) await flushTriagePuts()
       }
       raw.push(pos)
       opts.onProgress?.(progressWinPcts(raw, moves))
     }
 
-    if (opts.cache && triagePuts.length) {
-      await opts.cache.putMany(
-        triagePuts,
-        'time',
-        profile.triageMs,
-        profile.triageMultipv,
-      )
-      triagePuts.length = 0
-    }
+    await flushTriagePuts()
 
     const opening = await lookupOpening(moves.map((move) => move.san))
     const book: BookInfo | undefined = opening
@@ -778,14 +777,9 @@ export async function analyzeGameAdaptive(
     if (!opts.keepAlive) await port.send('quit')
     return buildReview(game, raw, book)
   } catch (err) {
-    if (opts.cache && triagePuts.length) {
+    if (triagePuts.length) {
       try {
-        await opts.cache.putMany(
-          triagePuts,
-          'time',
-          profile.triageMs,
-          profile.triageMultipv,
-        )
+        await flushTriagePuts()
       } catch (flushErr) {
         console.warn(
           'Falha ao descarregar a triagem adaptativa após aborto:',
