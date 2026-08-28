@@ -2,6 +2,7 @@ import { CLASSIFICATION_LABELS } from '../lib/scoring'
 import type { Classification, Phase, ReviewResult } from '../types'
 
 const ORDER: Classification[] = [
+  'brilhante',
   'livro',
   'melhor',
   'excelente',
@@ -26,6 +27,7 @@ const PHASE_DOT: Record<Phase, string> = {
 }
 
 const BADGE_COLOR: Record<Classification, string> = {
+  brilhante: 'bg-great',
   livro: 'bg-book',
   melhor: 'bg-best',
   excelente: 'bg-excellent',

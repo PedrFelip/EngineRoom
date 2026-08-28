@@ -2,6 +2,7 @@ import { CLASSIFICATION_LABELS } from '../lib/scoring'
 import type { Classification } from '../types'
 
 const BADGE_COLOR: Record<Classification, string> = {
+  brilhante: 'bg-great',
   livro: 'bg-book',
   melhor: 'bg-best',
   excelente: 'bg-excellent',

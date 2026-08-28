@@ -79,6 +79,7 @@ export interface StoredGame extends GameSummary {
 
 /** Classificação de um lance, no vocabulário pt-BR do projeto. */
 export type Classification =
+  | 'brilhante'
   | 'livro'
   | 'melhor'
   | 'excelente'
