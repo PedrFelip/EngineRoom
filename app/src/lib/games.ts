@@ -6,6 +6,7 @@ import type {
   ReviewResult,
   StoredGame,
 } from '../types'
+import { adaptiveProfileForKind } from './adaptive-analysis'
 import { accuracyByPhaseOf } from './analyze'
 import { resolveEngineTier } from './engine-tier'
 import { parsePgn } from './pgn'
@@ -39,8 +40,11 @@ export function saveReview(
   config: ReviewConfig,
   result: ReviewResult,
 ): Promise<number> {
-  const controlValue =
-    config.mode === 'time' ? (config.movetimeMs ?? 0) : config.engine.depth
+  const analysisKind = config.analysisKind ?? 'manual'
+  const adaptiveProfile = adaptiveProfileForKind(analysisKind)
+  let controlValue = config.engine.depth
+  if (adaptiveProfile) controlValue = adaptiveProfile.highMs
+  else if (config.mode === 'time') controlValue = config.movetimeMs ?? 0
   return invoke('games_save', {
     game: {
       pgn: config.pgn,
@@ -48,8 +52,9 @@ export function saveReview(
       black: config.meta.black,
       result: config.meta.result,
       plies: config.meta.plies,
-      engineTier: config.engine.id,
+      engineTier: analysisKind === 'manual' ? config.engine.id : analysisKind,
       mode: config.mode,
+      analysisKind,
       depth: controlValue,
       multipv: config.lines,
       accuracyWhite: result.accuracy.white,
@@ -88,7 +93,9 @@ function normalizeReview(result: ReviewResult): ReviewResult {
  */
 export function storedToConfig(game: StoredGame): ReviewConfig {
   const mode = game.mode ?? 'depth'
-  const movetimeMs = mode === 'time' ? game.depth : undefined
+  const analysisKind = game.analysisKind ?? 'manual'
+  const movetimeMs =
+    analysisKind === 'manual' && mode === 'time' ? game.depth : undefined
   const engine =
     mode === 'depth' ? resolveEngineTier(game.depth) : resolveEngineTier(20)
 
@@ -110,6 +117,7 @@ export function storedToConfig(game: StoredGame): ReviewConfig {
     meta,
     engine,
     mode,
+    analysisKind,
     ...(movetimeMs !== undefined ? { movetimeMs } : {}),
     lines: game.multipv,
     initialResult: normalizeReview(JSON.parse(game.reviewJson) as ReviewResult),

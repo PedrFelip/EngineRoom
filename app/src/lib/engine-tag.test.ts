@@ -31,4 +31,23 @@ describe('formatEngineTag', () => {
       formatEngineTag({ mode: 'time', depth: 12000, engineTier: 'time' }),
     ).toBe('Tempo · 12s/lance')
   })
+
+  it('mostra o perfil automático sem expor os orçamentos internos', () => {
+    expect(
+      formatEngineTag({
+        mode: 'time',
+        depth: 1500,
+        engineTier: 'auto-fast',
+        analysisKind: 'auto-fast',
+      }),
+    ).toBe('Automático · Rápido')
+    expect(
+      formatEngineTag({
+        mode: 'time',
+        depth: 4000,
+        engineTier: 'auto-deep',
+        analysisKind: 'auto-deep',
+      }),
+    ).toBe('Automático · Profundo')
+  })
 })

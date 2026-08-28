@@ -1,10 +1,11 @@
-import { ENGINE_TIERS, type EngineMode } from '../types'
+import { type AnalysisKind, ENGINE_TIERS, type EngineMode } from '../types'
 
 export interface EngineTagInput {
   mode: EngineMode
   /** Profundidade (mode='depth') ou milissegundos (mode='time'). */
   depth: number
   engineTier: string
+  analysisKind?: AnalysisKind
 }
 
 /**
@@ -17,7 +18,10 @@ export function formatEngineTag({
   mode,
   depth,
   engineTier,
+  analysisKind = 'manual',
 }: EngineTagInput): string {
+  if (analysisKind === 'auto-fast') return 'Automático · Rápido'
+  if (analysisKind === 'auto-deep') return 'Automático · Profundo'
   if (mode === 'time') {
     const seconds = Math.max(1, Math.round(depth / 1000))
     return `Tempo · ${seconds}s/lance`

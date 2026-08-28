@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
   analyzeGame,
+  analyzeGameAdaptive,
   buildReview,
   configureEngine,
   defaultGoTimeout,
@@ -1118,6 +1119,57 @@ describe('defaultGoTimeout', () => {
   it('modo time: 3·movetimeMs + 10s de folga — engine se auto-limita a movetimeMs', () => {
     expect(defaultGoTimeout({ mode: 'time', movetimeMs: 1000 })).toBe(13_000)
     expect(defaultGoTimeout({ mode: 'time', movetimeMs: 5000 })).toBe(25_000)
+  })
+})
+
+describe('analyzeGameAdaptive', () => {
+  it('aprofunda só a posição decisiva, sem repetir a partida inteira', async () => {
+    const sent: string[] = []
+    let lineCb: ((line: string) => void) | null = null
+    let currentFen = ''
+    let triageCount = 0
+    let criticalFen = ''
+    const port: EnginePort = {
+      send(cmd) {
+        const command = cmd.trim()
+        sent.push(command)
+        if (command === 'uci') lineCb?.('uciok')
+        else if (command === 'isready') lineCb?.('readyok')
+        else if (command.startsWith('position fen')) {
+          currentFen = command.slice('position fen'.length).trim()
+        } else if (command.startsWith('go movetime')) {
+          if (command === 'go movetime 120') {
+            triageCount++
+            if (triageCount === 11) criticalFen = currentFen
+          }
+          const cp = currentFen === criticalFen && criticalFen ? 500 : 0
+          lineCb?.(`info depth 12 multipv 1 score cp ${cp} pv e2e4`)
+          lineCb?.('info depth 12 multipv 2 score cp -20 pv d2d4')
+          lineCb?.('bestmove e2e4')
+        }
+      },
+      onLine(handler) {
+        lineCb = handler
+        return () => {
+          lineCb = null
+        }
+      },
+    }
+
+    const review = await analyzeGameAdaptive(
+      '1. a3 a6 2. h3 h6 3. f3 f6 4. g3 g6 5. Kf2 Kf7',
+      'fast',
+      port,
+    )
+
+    expect(review.positions).toHaveLength(11)
+    expect(
+      sent.filter((command) => command === 'go movetime 120'),
+    ).toHaveLength(11)
+    expect(
+      sent.filter((command) => command === 'go movetime 1500'),
+    ).toHaveLength(2)
+    expect(sent).not.toContain('go movetime 600')
   })
 })
 

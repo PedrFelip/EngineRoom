@@ -5,8 +5,9 @@
  * sobre o seam `Backend`, testável com fakes (mesma disciplina do `EnginePort`).
  */
 
-import type { ReviewConfig } from '../types'
-import { analyzeGame } from './analyze'
+import type { ReviewConfig, ReviewResult } from '../types'
+import { adaptiveProfileForKind } from './adaptive-analysis'
+import { analyzeGame, analyzeGameAdaptive } from './analyze'
 import type { Backend } from './backend'
 import type { ReviewStore } from './review-store'
 import { recommendedHashMb } from './system'
@@ -73,27 +74,39 @@ export function createReviewSession(opts: ReviewSessionOpts): ReviewSession {
         /* fallback: defaults */
       }
 
-      const control =
-        config.mode === 'time'
-          ? {
-              mode: 'time' as const,
-              movetimeMs: config.movetimeMs ?? 5000,
-            }
-          : { mode: 'depth' as const, depth: config.engine.depth }
-      const review = await analyzeGame(
-        config.pgn,
-        control,
-        port,
-        config.lines,
-        {
-          ...sizing,
-          cache: backend.createPositionCache(),
-          keepAlive: false,
-          onProgress: (wp) => {
-            if (!cancelled) opts.onProgress(wp)
-          },
+      const analysisOpts = {
+        ...sizing,
+        cache: backend.createPositionCache(),
+        keepAlive: false,
+        onProgress: (wp: number[]) => {
+          if (!cancelled) opts.onProgress(wp)
         },
-      )
+      }
+      const profile = adaptiveProfileForKind(config.analysisKind)
+      let review: ReviewResult
+      if (profile) {
+        review = await analyzeGameAdaptive(
+          config.pgn,
+          profile.id,
+          port,
+          analysisOpts,
+        )
+      } else {
+        const control =
+          config.mode === 'time'
+            ? {
+                mode: 'time' as const,
+                movetimeMs: config.movetimeMs ?? 5000,
+              }
+            : { mode: 'depth' as const, depth: config.engine.depth }
+        review = await analyzeGame(
+          config.pgn,
+          control,
+          port,
+          config.lines,
+          analysisOpts,
+        )
+      }
       if (cancelled) return
       store.setResult(review)
       notify({ status: 'done', error: null })

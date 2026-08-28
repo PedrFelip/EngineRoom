@@ -16,6 +16,12 @@ import type {
   PvLine,
   ReviewResult,
 } from '../types'
+import {
+  ADAPTIVE_PROFILES,
+  type AdaptiveProfileId,
+  rankCriticalMoves,
+  selectRefinementTargets,
+} from './adaptive-analysis'
 import { type EcoEntry, lookupOpening } from './eco'
 import { materialDeltaAfterReplies } from './material'
 import { computePhases } from './phase'
@@ -468,6 +474,18 @@ async function evalPosition(
   }
 }
 
+function addSanToLines(pos: RawPosition): void {
+  for (const line of pos.lines ?? []) {
+    line.san = line.pv[0] ? uciToSan(pos.fen, line.pv[0]) : null
+  }
+}
+
+function progressWinPcts(raw: RawPosition[], moves: PlayedMove[]): number[] {
+  return raw.map((pos, index) =>
+    whiteWinPct(pos.cp, sideToMoveAtPly(moves, index)),
+  )
+}
+
 function terminalCp(fen: string): number | null {
   try {
     const c = new Chess(fen)
@@ -601,4 +619,180 @@ export async function analyzeGame(
     : undefined
 
   return buildReview(game, raw, book)
+}
+
+/**
+ * Revisão adaptativa em duas passagens. A triagem cobre todas as posições com
+ * MultiPV > 1; apenas pares antes/depois de lances críticos recebem uma busca
+ * maior. O resultado final mistura posições de profundidades diferentes.
+ */
+export async function analyzeGameAdaptive(
+  pgn: string,
+  profileId: AdaptiveProfileId,
+  port: EnginePort,
+  opts: {
+    threads?: number
+    hashMb?: number
+    cache?: PositionCache
+    keepAlive?: boolean
+    goTimeoutMs?: number
+    onProgress?: (winPcts: number[]) => void
+  } = {},
+): Promise<ReviewResult> {
+  const profile = ADAPTIVE_PROFILES[profileId]
+  const { positionFens, moves } = extractGame(pgn)
+  const game = { startFen: positionFens[0], moves }
+  const triageControl: AnalyzeControl = {
+    mode: 'time',
+    movetimeMs: profile.triageMs,
+  }
+
+  await configureEngine(port, {
+    threads: opts.threads,
+    hashMb: opts.hashMb,
+    multipv: profile.triageMultipv,
+  })
+
+  const triageHits = opts.cache
+    ? await opts.cache.getBulk(
+        positionFens,
+        'time',
+        profile.triageMs,
+        profile.triageMultipv,
+      )
+    : positionFens.map(() => null)
+  const raw: RawPosition[] = []
+  const triagePuts: RawPosition[] = []
+
+  try {
+    for (let index = 0; index < positionFens.length; index++) {
+      const fen = positionFens[index]
+      const term = terminalCp(fen)
+      const cached = triageHits[index]
+      let pos: RawPosition
+      if (term !== null) {
+        pos = {
+          fen,
+          cp: term,
+          depth: 0,
+          pv: [],
+          lines: [{ multipv: 1, cp: term, pv: [] }],
+        }
+      } else if (cached) {
+        pos = cached
+      } else {
+        pos = await evalPosition(
+          port,
+          fen,
+          triageControl,
+          opts.goTimeoutMs ?? defaultGoTimeout(triageControl),
+        )
+        addSanToLines(pos)
+        triagePuts.push(pos)
+        if (opts.cache && triagePuts.length >= 8) {
+          await opts.cache.putMany(
+            triagePuts,
+            'time',
+            profile.triageMs,
+            profile.triageMultipv,
+          )
+          triagePuts.length = 0
+        }
+      }
+      raw.push(pos)
+      opts.onProgress?.(progressWinPcts(raw, moves))
+    }
+
+    if (opts.cache && triagePuts.length) {
+      await opts.cache.putMany(
+        triagePuts,
+        'time',
+        profile.triageMs,
+        profile.triageMultipv,
+      )
+      triagePuts.length = 0
+    }
+
+    const opening = await lookupOpening(moves.map((move) => move.san))
+    const book: BookInfo | undefined = opening
+      ? { maxPly: opening.moves.length, eco: opening }
+      : undefined
+    const criticalMoves = rankCriticalMoves(moves, raw, book?.maxPly ?? 0)
+    const targets = selectRefinementTargets(
+      criticalMoves,
+      positionFens.length,
+      profile,
+    )
+
+    if (targets.length > 0) {
+      if (profile.refinementMultipv !== profile.triageMultipv) {
+        await port.send(
+          `setoption name Multipv value ${profile.refinementMultipv}`,
+        )
+        await ask(port, 'isready', isReadyOk)
+      }
+
+      for (const budget of ['high', 'medium'] as const) {
+        const movetimeMs = budget === 'high' ? profile.highMs : profile.mediumMs
+        const control: AnalyzeControl = { mode: 'time', movetimeMs }
+        const group = targets.filter((target) => target.budget === budget)
+        const refinementPuts: RawPosition[] = []
+
+        for (const target of group) {
+          const index = target.positionIndex
+          const fen = positionFens[index]
+          if (terminalCp(fen) !== null) continue
+          let pos = opts.cache
+            ? await opts.cache.get(
+                fen,
+                'time',
+                movetimeMs,
+                profile.refinementMultipv,
+              )
+            : null
+          if (!pos) {
+            pos = await evalPosition(
+              port,
+              fen,
+              control,
+              opts.goTimeoutMs ?? defaultGoTimeout(control),
+            )
+            addSanToLines(pos)
+            refinementPuts.push(pos)
+          }
+          raw[index] = pos
+          opts.onProgress?.(progressWinPcts(raw, moves))
+        }
+
+        if (opts.cache && refinementPuts.length) {
+          await opts.cache.putMany(
+            refinementPuts,
+            'time',
+            movetimeMs,
+            profile.refinementMultipv,
+          )
+        }
+      }
+    }
+
+    if (!opts.keepAlive) await port.send('quit')
+    return buildReview(game, raw, book)
+  } catch (err) {
+    if (opts.cache && triagePuts.length) {
+      try {
+        await opts.cache.putMany(
+          triagePuts,
+          'time',
+          profile.triageMs,
+          profile.triageMultipv,
+        )
+      } catch (flushErr) {
+        console.warn(
+          'Falha ao descarregar a triagem adaptativa após aborto:',
+          flushErr,
+        )
+      }
+    }
+    throw err
+  }
 }
