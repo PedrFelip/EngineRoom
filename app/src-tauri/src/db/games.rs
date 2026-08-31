@@ -14,6 +14,7 @@ pub struct NewGame {
     pub plies: u32,
     pub engine_tier: String,
     pub mode: Mode,
+    pub analysis_kind: String,
     pub depth: u32,
     pub multipv: u32,
     pub accuracy_white: f64,
@@ -32,6 +33,7 @@ pub struct GameSummary {
     pub plies: u32,
     pub engine_tier: String,
     pub mode: Mode,
+    pub analysis_kind: String,
     pub depth: u32,
     pub multipv: u32,
     pub accuracy_white: f64,
@@ -54,7 +56,7 @@ pub struct Store<'a> {
     conn: &'a Connection,
 }
 
-const SUMMARY_COLS: &str = "id, white, black, result, plies, engine_tier, mode, depth, multipv,
+const SUMMARY_COLS: &str = "id, white, black, result, plies, engine_tier, mode, analysis_kind, depth, multipv,
         accuracy_white, accuracy_black, created_at";
 
 impl<'a> Store<'a> {
@@ -66,9 +68,9 @@ impl<'a> Store<'a> {
         self.conn
             .execute(
                 "INSERT OR REPLACE INTO games
-                (pgn, white, black, result, plies, engine_tier, mode, depth, multipv,
-                 accuracy_white, accuracy_black, review_json)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                (pgn, white, black, result, plies, engine_tier, mode, analysis_kind,
+                 depth, multipv, accuracy_white, accuracy_black, review_json)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
                 (
                     &game.pgn,
                     &game.white,
@@ -77,6 +79,7 @@ impl<'a> Store<'a> {
                     game.plies,
                     &game.engine_tier,
                     game.mode,
+                    &game.analysis_kind,
                     game.depth,
                     game.multipv,
                     game.accuracy_white,
@@ -142,19 +145,20 @@ fn summary_from_row(row: &rusqlite::Row<'_>) -> Result<GameSummary, String> {
         plies: row.get(4).map_err(|e| e.to_string())?,
         engine_tier: row.get(5).map_err(|e| e.to_string())?,
         mode: row.get(6).map_err(|e| e.to_string())?,
-        depth: row.get(7).map_err(|e| e.to_string())?,
-        multipv: row.get(8).map_err(|e| e.to_string())?,
-        accuracy_white: row.get(9).map_err(|e| e.to_string())?,
-        accuracy_black: row.get(10).map_err(|e| e.to_string())?,
-        created_at: row.get(11).map_err(|e| e.to_string())?,
+        analysis_kind: row.get(7).map_err(|e| e.to_string())?,
+        depth: row.get(8).map_err(|e| e.to_string())?,
+        multipv: row.get(9).map_err(|e| e.to_string())?,
+        accuracy_white: row.get(10).map_err(|e| e.to_string())?,
+        accuracy_black: row.get(11).map_err(|e| e.to_string())?,
+        created_at: row.get(12).map_err(|e| e.to_string())?,
     })
 }
 
 fn stored_from_row(row: &rusqlite::Row<'_>) -> Result<StoredGame, String> {
     Ok(StoredGame {
         summary: summary_from_row(row)?,
-        pgn: row.get(12).map_err(|e| e.to_string())?,
-        review_json: row.get(13).map_err(|e| e.to_string())?,
+        pgn: row.get(13).map_err(|e| e.to_string())?,
+        review_json: row.get(14).map_err(|e| e.to_string())?,
     })
 }
 
@@ -202,6 +206,7 @@ mod tests {
             plies: 2,
             engine_tier: "balanced".to_string(),
             mode: Mode::Depth,
+            analysis_kind: "manual".to_string(),
             depth: 20,
             multipv: 1,
             accuracy_white: 98.5,
@@ -243,6 +248,27 @@ mod tests {
 
         let lista = store.list().unwrap();
         assert_eq!(lista.len(), 2, "mesma PGN, modos diferentes = 2 entradas");
+    }
+
+    #[test]
+    fn perfil_automatico_coexiste_com_tempo_manual_na_mesma_pgn() {
+        let conn = open_memory().unwrap();
+        let store = Store::new(&conn);
+        let mut manual = partida_exemplo();
+        manual.mode = Mode::Time;
+        manual.depth = 1500;
+        store.save(&manual).unwrap();
+
+        let mut automatico = partida_exemplo();
+        automatico.mode = Mode::Time;
+        automatico.analysis_kind = "auto-fast".to_string();
+        automatico.depth = 1500;
+        store.save(&automatico).unwrap();
+
+        let lista = store.list().unwrap();
+        assert_eq!(lista.len(), 2);
+        assert!(lista.iter().any(|game| game.analysis_kind == "auto-fast"));
+        assert!(lista.iter().any(|game| game.analysis_kind == "manual"));
     }
 
     #[test]

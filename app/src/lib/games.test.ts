@@ -62,6 +62,22 @@ describe('storedToConfig', () => {
     expect(config.initialResult).toEqual(REVIEW)
   })
 
+  it('reabre perfil automático sem tratar orçamento máximo como tempo manual', () => {
+    const config = storedToConfig(
+      stored({
+        mode: 'time',
+        analysisKind: 'auto-deep',
+        engineTier: 'auto-deep',
+        depth: 4000,
+        multipv: 3,
+      }),
+    )
+
+    expect(config.analysisKind).toBe('auto-deep')
+    expect(config.movetimeMs).toBeUndefined()
+    expect(config.lines).toBe(3)
+  })
+
   it('normaliza revisão antiga (sem phase/accuracyByPhase) ao reabrir', () => {
     const START = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1'
     const AFTER_E4 =

@@ -205,6 +205,28 @@ describe('createReviewSession — análise nova', () => {
     expect(port.sent).toContain('quit')
     expect(port.sent).toContain('__disposed__')
   })
+
+  it('modo automático faz triagem MultiPV sem repassar posições estáveis', async () => {
+    const port = fakeEnginePort()
+    const { session } = startSession({
+      config: depthConfig({
+        mode: 'time',
+        analysisKind: 'auto-fast',
+        lines: 2,
+      }),
+      backend: fakeBackend(port),
+    })
+
+    await session.start()
+
+    expect(port.sent).toContain('setoption name Multipv value 2')
+    expect(
+      port.sent.filter((command) => command === 'go movetime 120'),
+    ).toHaveLength(3)
+    expect(port.sent.some((command) => command === 'go movetime 1500')).toBe(
+      false,
+    )
+  })
 })
 
 describe('createReviewSession — reabertura do store', () => {

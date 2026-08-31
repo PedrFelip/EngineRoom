@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
   analyzeGame,
+  analyzeGameAdaptive,
   buildReview,
   configureEngine,
   defaultGoTimeout,
@@ -250,6 +251,125 @@ describe('buildReview', () => {
       black: 100,
     })
     expect(review.accuracyByPhase.endgame).toEqual({ white: 100, black: 100 })
+  })
+})
+
+describe('buildReview — lance brilhante', () => {
+  // Bispo em c4 captura o peão de f7; rei recaptura: -2 peões (sacrifício).
+  const SAC_BEFORE =
+    'rnbqkbnr/pppppppp/8/8/2B1P3/8/PPPP1PPP/RNBQK1NR w KQkq - 0 1'
+  const SAC_AFTER = 'rnbqkbnr/ppppBppp/8/8/4P3/8/PPPP1PPP/RNBQK1NR b KQkq - 0 1'
+  // exd5 Qxd5: troca simétrica de peões, delta material zero.
+  const TRADE_BEFORE =
+    'rnbqkbnr/ppp1pppp/8/3p4/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 3'
+  const TRADE_AFTER =
+    'rnbqkbnr/ppp1pppp/8/3P4/8/8/PPPP1PPP/RNBQKBNR b KQkq - 0 3'
+  const sacGame = {
+    startFen: SAC_BEFORE,
+    moves: [
+      {
+        ply: 1,
+        color: 'w' as const,
+        san: 'Bxf7+',
+        uci: 'c4f7',
+        fenBefore: SAC_BEFORE,
+      },
+    ],
+  }
+
+  it('classifica sacrifício de peça com avaliação estável como Brilhante', () => {
+    const raw = [
+      { fen: SAC_BEFORE, cp: 30, depth: 20, pv: ['c4f7'] },
+      { fen: SAC_AFTER, cp: -30, depth: 20, pv: ['e8f7'] },
+    ]
+
+    const review = buildReview(sacGame, raw)
+
+    expect(review.moves[0].classification).toBe('brilhante')
+    expect(review.moves[0].winPctLoss).toBe(0)
+  })
+
+  it('troca simétrica de peões não é Brilhante', () => {
+    const game = {
+      startFen: TRADE_BEFORE,
+      moves: [
+        {
+          ply: 1,
+          color: 'w' as const,
+          san: 'exd5',
+          uci: 'e4d5',
+          fenBefore: TRADE_BEFORE,
+        },
+      ],
+    }
+    const raw = [
+      { fen: TRADE_BEFORE, cp: 30, depth: 20, pv: ['e4d5'] },
+      { fen: TRADE_AFTER, cp: -30, depth: 20, pv: ['d8d5'] },
+    ]
+
+    expect(buildReview(game, raw).moves[0].classification).toBe('melhor')
+  })
+
+  it('não é Brilhante partindo de posição já ganha', () => {
+    const raw = [
+      { fen: SAC_BEFORE, cp: 600, depth: 20, pv: ['c4f7'] },
+      { fen: SAC_AFTER, cp: -600, depth: 20, pv: ['e8f7'] },
+    ]
+
+    expect(buildReview(sacGame, raw).moves[0].classification).toBe('melhor')
+  })
+
+  it('não é Brilhante quando o lance deixa a posição ruim', () => {
+    const raw = [
+      { fen: SAC_BEFORE, cp: 30, depth: 20, pv: ['c4f7'] },
+      { fen: SAC_AFTER, cp: 300, depth: 20, pv: ['e8f7'] },
+    ]
+
+    // cp +300 no POV das pretas ≈ win% 17 para as brancas → Blunder.
+    expect(buildReview(sacGame, raw).moves[0].classification).toBe('blunder')
+  })
+
+  it('quase-melhor só vale Brilhante com 2ª linha candidata', () => {
+    const rawSingle = [
+      { fen: SAC_BEFORE, cp: 30, depth: 20, pv: ['c4f7'] },
+      { fen: SAC_AFTER, cp: -28, depth: 20, pv: ['e8f7'] },
+    ]
+    // Perda ~0,2 win% sem 2ª linha → Excelente, não Brilhante.
+    expect(buildReview(sacGame, rawSingle).moves[0].classification).toBe(
+      'excelente',
+    )
+
+    const rawMulti = [
+      {
+        fen: SAC_BEFORE,
+        cp: 30,
+        depth: 20,
+        pv: ['c4f7'],
+        lines: [
+          { multipv: 1, cp: 30, pv: ['c4f7'] },
+          { multipv: 2, cp: 25, pv: ['d2d4'] },
+        ],
+      },
+      { fen: SAC_AFTER, cp: -28, depth: 20, pv: ['e8f7'] },
+    ]
+    expect(buildReview(sacGame, rawMulti).moves[0].classification).toBe(
+      'brilhante',
+    )
+  })
+
+  it('lance de livro nunca é Brilhante', () => {
+    const raw = [
+      { fen: SAC_BEFORE, cp: 30, depth: 20, pv: ['c4f7'] },
+      { fen: SAC_AFTER, cp: -30, depth: 20, pv: ['e8f7'] },
+    ]
+    const book = {
+      maxPly: 1,
+      eco: { code: 'C00', name: 'Gambito', moves: ['Bxf7+'] },
+    }
+
+    expect(buildReview(sacGame, raw, book).moves[0].classification).toBe(
+      'livro',
+    )
   })
 })
 
@@ -999,6 +1119,57 @@ describe('defaultGoTimeout', () => {
   it('modo time: 3·movetimeMs + 10s de folga — engine se auto-limita a movetimeMs', () => {
     expect(defaultGoTimeout({ mode: 'time', movetimeMs: 1000 })).toBe(13_000)
     expect(defaultGoTimeout({ mode: 'time', movetimeMs: 5000 })).toBe(25_000)
+  })
+})
+
+describe('analyzeGameAdaptive', () => {
+  it('aprofunda só a posição decisiva, sem repetir a partida inteira', async () => {
+    const sent: string[] = []
+    let lineCb: ((line: string) => void) | null = null
+    let currentFen = ''
+    let triageCount = 0
+    let criticalFen = ''
+    const port: EnginePort = {
+      send(cmd) {
+        const command = cmd.trim()
+        sent.push(command)
+        if (command === 'uci') lineCb?.('uciok')
+        else if (command === 'isready') lineCb?.('readyok')
+        else if (command.startsWith('position fen')) {
+          currentFen = command.slice('position fen'.length).trim()
+        } else if (command.startsWith('go movetime')) {
+          if (command === 'go movetime 120') {
+            triageCount++
+            if (triageCount === 11) criticalFen = currentFen
+          }
+          const cp = currentFen === criticalFen && criticalFen ? 500 : 0
+          lineCb?.(`info depth 12 multipv 1 score cp ${cp} pv e2e4`)
+          lineCb?.('info depth 12 multipv 2 score cp -20 pv d2d4')
+          lineCb?.('bestmove e2e4')
+        }
+      },
+      onLine(handler) {
+        lineCb = handler
+        return () => {
+          lineCb = null
+        }
+      },
+    }
+
+    const review = await analyzeGameAdaptive(
+      '1. a3 a6 2. h3 h6 3. f3 f6 4. g3 g6 5. Kf2 Kf7',
+      'fast',
+      port,
+    )
+
+    expect(review.positions).toHaveLength(11)
+    expect(
+      sent.filter((command) => command === 'go movetime 120'),
+    ).toHaveLength(11)
+    expect(
+      sent.filter((command) => command === 'go movetime 1500'),
+    ).toHaveLength(2)
+    expect(sent).not.toContain('go movetime 600')
   })
 })
 

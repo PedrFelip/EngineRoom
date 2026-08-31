@@ -27,6 +27,7 @@ function tierLabel(game: GameSummary): string {
     mode: game.mode ?? 'depth',
     depth: game.depth,
     engineTier: game.engineTier,
+    analysisKind: game.analysisKind,
   })
 }
 

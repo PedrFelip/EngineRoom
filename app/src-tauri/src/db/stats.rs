@@ -96,6 +96,7 @@ mod tests {
             plies: 2,
             engine_tier: "balanced".to_string(),
             mode: Mode::Depth,
+            analysis_kind: "manual".to_string(),
             depth: 20,
             multipv: 1,
             accuracy_white: 98.5,
