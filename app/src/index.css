@@ -51,6 +51,7 @@
   --color-excellent: var(--excellent);
   --color-best: var(--best);
   --color-great: var(--great);
+  --color-otimo: var(--otimo);
   --color-book: var(--book);
   --color-mistake: var(--mistake);
   --color-erro: var(--erro);
@@ -121,6 +122,7 @@
   --excellent: #34d399;
   --best: #38bdf8;
   --great: #2dd4bf;
+  --otimo: #22c55e;
   --book: #a78bfa;
   --mistake: #fbbf24;
   --erro: #fb923c;

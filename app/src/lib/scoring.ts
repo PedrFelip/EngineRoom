@@ -1,14 +1,4 @@
-/**
- * Conversão de avaliação (centipawns, POV do lado a jogar) em:
- *  - probabilidade de vitória (win%) via curva logística;
- *  - classificação de lances (Brilhante/Melhor/Excelente/Bom/Imprecisão/Erro/
- *    Blunder/Livro);
- *  - precisão agregada da partida (0–100%) pelo modelo completo do Lichess.
- *
- * Classificação e precisão usam delta de win%. A precisão da partida combina
- * accuracy por lance, volatilidade e média harmônica. Mantido puro e sem
- * efeitos colaterais.
- */
+/** Funções puras de avaliação, classificação e precisão baseadas no Lichess. */
 
 import type { AccuracyByColor, Classification } from '../types'
 
@@ -21,9 +11,9 @@ export const LICHESS_CP_CEILING = 1000
 /** Avaliação convencional da posição inicial usada pelo agregador do Lichess. */
 export const LICHESS_INITIAL_CP = 15
 
-/** Rótulos em pt-BR exibidos na UI (badges, resumo). */
 export const CLASSIFICATION_LABELS: Record<Classification, string> = {
   brilhante: 'Brilhante',
+  otimo: 'Ótimo',
   livro: 'Livro',
   melhor: 'Melhor',
   excelente: 'Excelente',
@@ -33,10 +23,7 @@ export const CLASSIFICATION_LABELS: Record<Classification, string> = {
   blunder: 'Blunder',
 }
 
-/**
- * Converte centipawns (POV do lado a jogar) em probabilidade de vitória (0–100%).
- * Curva logística centrada em 50% para cp = 0.
- */
+/** Converte centipawns do lado a jogar em win% pela curva do Lichess. */
 export function cpToWinPct(cp: number): number {
   const ceiledCp = Math.min(
     LICHESS_CP_CEILING,
@@ -45,18 +32,12 @@ export function cpToWinPct(cp: number): number {
   return 50 + 50 * (2 / (1 + Math.exp(-WINPCT_K * ceiledCp)) - 1)
 }
 
-/**
- * Normaliza centipawns crus (POV do lado a jogar) para o POV das brancas.
- * Inverte o sinal quando as pretas estão a jogar. Único lugar que decide isso.
- */
+/** Normaliza centipawns do lado a jogar para o POV das brancas. */
 export function whiteCp(cp: number, stm: 'w' | 'b'): number {
   return stm === 'w' ? cp : -cp
 }
 
-/**
- * win% (POV brancas) a partir de um cp cru (POV do lado a jogar) e do lado a
- * jogar. Inverte o espelho da curva logística quando as pretas jogam.
- */
+/** Converte centipawns do lado a jogar em win% do POV das brancas. */
 export function whiteWinPct(cp: number, stm: 'w' | 'b'): number {
   return stm === 'w' ? cpToWinPct(cp) : 100 - cpToWinPct(cp)
 }
@@ -76,13 +57,10 @@ export function sideToMoveAtPly(
   return last === 'w' ? 'b' : 'w'
 }
 
-/** Limiar (em delta de win%) abaixo do qual o lance é Excelente. */
+/** Limites de perda de win% para as classificações comuns. */
 const EXCELLENT_MAX_LOSS = 2
-/** Limiar (em delta de win%) abaixo do qual o lance é Bom. */
 const GOOD_MAX_LOSS = 5
-/** Limiar (em delta de win%) abaixo do qual o lance é Imprecisão. */
 const INACCURACY_MAX_LOSS = 10
-/** Limiar (em delta de win%) abaixo do qual o lance é Erro. */
 const MISTAKE_MAX_LOSS = 20
 
 /**
@@ -144,6 +122,51 @@ export function detectBrilliant(input: BrilliantInput): boolean {
   if (input.winPctBefore > BRILLIANT_MAX_WINPCT_BEFORE) return false
   const maxLoss = input.hasSecondLine ? BRILLIANT_MAX_LOSS_WITH_2ND_LINE : 0
   return input.winPctLoss <= maxLoss
+}
+
+/** Limites de resultado provável, no POV de quem joga. */
+export const GREAT_EQUAL_MIN_WINPCT = 35
+export const GREAT_WINNING_MIN_WINPCT = 65
+/** Evita promover diferenças pequenas e instáveis entre buscas MultiPV. */
+export const GREAT_MIN_GAP = 15
+/** Um quase-melhor confirmado ainda pode ser essencial. */
+const GREAT_MAX_LOSS = 0.5
+
+export interface GreatMoveInput {
+  winPctLoss: number
+  playedUci: string
+  bestUci: string | null
+  /** Win% das duas melhores linhas, ambas no POV de quem joga. */
+  bestWinPct: number
+  secondWinPct: number | null
+}
+
+/** A primeira linha é a única que preserva uma faixa de resultado melhor. */
+export function preservesOutcomeWithOnlyMove(
+  bestWinPct: number,
+  secondWinPct: number | null,
+): boolean {
+  if (secondWinPct === null) return false
+  if (bestWinPct - secondWinPct < GREAT_MIN_GAP) return false
+
+  return (
+    (bestWinPct >= GREAT_EQUAL_MIN_WINPCT &&
+      secondWinPct < GREAT_EQUAL_MIN_WINPCT) ||
+    (bestWinPct >= GREAT_WINNING_MIN_WINPCT &&
+      secondWinPct < GREAT_WINNING_MIN_WINPCT)
+  )
+}
+
+/**
+ * Detecta um Ótimo lance: melhor (ou praticamente igual) e a única linha que
+ * preserva uma faixa de resultado melhor. Exige MultiPV 2 para não inferir
+ * "único lance" sem evidência.
+ */
+export function detectGreatMove(input: GreatMoveInput): boolean {
+  const nearBest =
+    input.playedUci === input.bestUci || input.winPctLoss <= GREAT_MAX_LOSS
+  if (!nearBest) return false
+  return preservesOutcomeWithOnlyMove(input.bestWinPct, input.secondWinPct)
 }
 
 /**

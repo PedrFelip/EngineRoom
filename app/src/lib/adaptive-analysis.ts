@@ -2,7 +2,7 @@ import { Chess } from 'chess.js'
 import type { AnalysisKind } from '../types'
 import type { PlayedMove, RawPosition } from './analyze'
 import { materialDeltaAfterReplies } from './material'
-import { cpToWinPct } from './scoring'
+import { cpToWinPct, preservesOutcomeWithOnlyMove } from './scoring'
 
 export type AdaptiveProfileId = 'fast' | 'deep'
 
@@ -58,6 +58,7 @@ export interface CriticalMove {
   score: number
   hard: boolean
   brilliantCandidate: boolean
+  greatCandidate: boolean
   reasons: string[]
 }
 
@@ -119,6 +120,7 @@ export function rankCriticalMoves(
         score: 0,
         hard: false,
         brilliantCandidate: false,
+        greatCandidate: false,
         reasons: [],
       }
     }
@@ -143,6 +145,12 @@ export function rankCriticalMoves(
     const bestUci = before.pv[0] ?? null
     const nearBest = bestUci === move.uci || loss <= 2
     const brilliantCandidate = sacrificed >= 2 && nearBest && winAfter >= 35
+    const first = before.lines?.find((line) => line.multipv === 1)
+    const second = before.lines?.find((line) => line.multipv === 2)
+    const bestLineWinPct = cpToWinPct(first?.cp ?? before.cp)
+    const secondLineWinPct = second ? cpToWinPct(second.cp) : null
+    const greatCandidate =
+      nearBest && preservesOutcomeWithOnlyMove(bestLineWinPct, secondLineWinPct)
 
     let score = 0
     const reasons: string[] = []
@@ -160,7 +168,11 @@ export function rankCriticalMoves(
     if (brilliantCandidate) {
       score += 15
       reasons.push('candidato a brilhante')
-    } else if (isCapture || givesCheck || promotes) {
+    }
+    if (greatCandidate) {
+      if (!brilliantCandidate) score += 15
+      reasons.push('candidato a ótimo')
+    } else if (!brilliantCandidate && (isCapture || givesCheck || promotes)) {
       reasons.push('sequência tática')
     }
 
@@ -189,12 +201,18 @@ export function rankCriticalMoves(
     }
 
     const hard =
-      loss >= 10 || swing >= 15 || mateSignal || promotes || brilliantCandidate
+      loss >= 10 ||
+      swing >= 15 ||
+      mateSignal ||
+      promotes ||
+      brilliantCandidate ||
+      greatCandidate
     return {
       ply: move.ply,
       score: Math.min(100, Math.round(score)),
       hard,
       brilliantCandidate,
+      greatCandidate,
       reasons,
     }
   })

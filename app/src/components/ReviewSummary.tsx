@@ -16,6 +16,7 @@ import {
 
 const ORDER: Classification[] = [
   'brilhante',
+  'otimo',
   'livro',
   'melhor',
   'excelente',

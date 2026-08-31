@@ -14,6 +14,7 @@ import type { Classification } from '../types'
 
 const BADGE_COLOR: Record<Classification, string> = {
   brilhante: 'bg-great',
+  otimo: 'bg-otimo',
   livro: 'bg-book',
   melhor: 'bg-best',
   excelente: 'bg-excellent',
@@ -25,9 +26,10 @@ const BADGE_COLOR: Record<Classification, string> = {
 
 const BADGE_GLYPH: Record<Classification, LucideIcon> = {
   brilhante: Sparkles,
+  otimo: Star,
   livro: BookOpen,
   melhor: Target,
-  excelente: Star,
+  excelente: ThumbsUp,
   bom: ThumbsUp,
   imprecisao: CircleAlert,
   erro: TriangleAlert,

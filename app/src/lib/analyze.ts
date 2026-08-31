@@ -1,11 +1,4 @@
-/**
- * Orquestração da revisão: converte uma partida jogada + avaliações brutas do
- * engine em um ReviewResult completo (win%, classificação de lances e precisão).
- *
- * `buildReview` é puro (sem engine, sem async) — toda a matemática de sinal,
- * perda de win% e classificação mora aqui. `analyzeGame` é a cola de I/O que
- * aciona o engine via um "port" injetável (testável com engine falso).
- */
+/** Pipeline de análise: núcleo puro para a revisão e I/O via EnginePort. */
 
 import { Chess } from 'chess.js'
 import type {
@@ -31,6 +24,7 @@ import {
   classifyMove,
   cpToWinPct,
   detectBrilliant,
+  detectGreatMove,
   gameAccuracy,
   sideToMoveAtPly,
   whiteCp,
@@ -118,15 +112,13 @@ export function buildReview(
     const cpLoss = centipawnLoss(before.cp, after.cp)
     const isBook = !!book && m.ply <= book.maxPly
     const base = classifyMove(winPctLoss, isBook)
-    // Brilhante: melhor/quase melhor que sacrifica material, medido após a
-    // melhor resposta do oponente (primeira PV da posição após o lance) para
-    // incluir a recaptura esperada. Lance de livro nunca é Brilhante.
+    // Inclui a melhor resposta adversária para medir o sacrifício líquido.
     const materialDelta = materialDeltaAfterReplies(
       m.fenBefore,
       m.uci,
       after.pv[0] ?? null,
     )
-    const classification =
+    const brilliant =
       !isBook &&
       detectBrilliant({
         winPctLoss,
@@ -135,8 +127,18 @@ export function buildReview(
         materialDelta,
         hasSecondLine: (before.lines?.length ?? 1) >= 2,
       })
-        ? 'brilhante'
-        : base
+    const firstLine = before.lines?.find((line) => line.multipv === 1)
+    const secondLine = before.lines?.find((line) => line.multipv === 2)
+    const great =
+      !isBook &&
+      detectGreatMove({
+        winPctLoss,
+        playedUci: m.uci,
+        bestUci: before.pv[0] ?? null,
+        bestWinPct: cpToWinPct(firstLine?.cp ?? before.cp),
+        secondWinPct: secondLine ? cpToWinPct(secondLine.cp) : null,
+      })
+    const classification = brilliant ? 'brilhante' : great ? 'otimo' : base
     return {
       ply: m.ply,
       color: m.color,
@@ -318,15 +320,7 @@ function extractGame(pgn: string): ExtractedGame {
   return { positionFens, moves }
 }
 
-/**
- * Handshake UCI de uma engine já spawnada: aguarda `uciok`/`readyok` e aplica
- * `setoption` de Threads, Hash e Multipv. Reutilizável entre `analyzeGame`
- * (análise nova) e a reabertura do store (só handshake, sem análise).
- *
- * Lança `Error('A engine não respondeu…')` se a engine não responder em
- * `timeoutMs` (default 10s) — sem isso, uma engine morta/travada deixaria o
- * hook pendurado para sempre.
- */
+/** Faz o handshake UCI e configura Threads, Hash e MultiPV. */
 export async function configureEngine(
   port: EnginePort,
   opts: {
@@ -348,12 +342,7 @@ export async function configureEngine(
   await port.send(`setoption name Multipv value ${Math.max(1, opts.multipv)}`)
 }
 
-/**
- * Envia `cmd` pra engine e resolve quando uma linha satisfaz `done`, rejeita
- * após `timeoutMs` (default 10s) se a engine não responder, ou rejeita na hora
- * se a engine morrer (via `port.onExit`). O listener é registrado antes do send
- * pra nunca perder a resposta.
- */
+/** Aguarda uma resposta UCI, falhando por timeout ou término da engine. */
 function ask(
   port: EnginePort,
   cmd: string,
@@ -506,21 +495,7 @@ function terminalCp(fen: string): number | null {
   }
 }
 
-/**
- * Aciona o engine posição a posição e devolve a revisão completa.
- * `port` abstrai o processo UCI (sidecar Tauri ou engine falso em testes).
- * `control` define como a engine busca cada posição: profundidade fixa
- * (`go depth N`) ou tempo fixo (`go movetime N`), este último no estilo
- * "Maximum Time" do chess.com.
- * `multipv` define quantas linhas candidatas o engine retorna por lance.
- * `opts.threads` / `opts.hashMb` dimensionam a engine (Threads/Hash) para o uso
- * ideal de CPU/RAM. Omitir mantém os defaults do Stockfish.
- * Posições terminais (xeque-mate/afogamento) são resolvidas sem chamar a engine.
- *
- * Timeout do `go` por posição: `opts.goTimeoutMs` ou `defaultGoTimeout(control)`
- * (180s no modo depth, 3·movetimeMs + 10s no modo time). Em timeout, envia
- * `stop` para destravar a engine e rejeita — handshake continua com 10s próprios.
- */
+/** Analisa todas as posições com controle fixo e devolve a revisão completa. */
 export async function analyzeGame(
   pgn: string,
   control: AnalyzeControl,

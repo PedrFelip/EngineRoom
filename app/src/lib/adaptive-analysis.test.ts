@@ -62,6 +62,25 @@ describe('política de análise adaptativa', () => {
     expect(targets.every((target) => target.budget === 'high')).toBe(true)
   })
 
+  it('marca como duro um candidato a único lance bom', () => {
+    const candidateRaw: RawPosition[] = [
+      {
+        ...raw[0],
+        cp: 0,
+        lines: [
+          { multipv: 1, cp: 0, pv: ['c4f7'] },
+          { multipv: 2, cp: -200, pv: ['d2d4'] },
+        ],
+      },
+      { ...raw[1], cp: 0 },
+    ]
+    const [critical] = rankCriticalMoves([move], candidateRaw)
+
+    expect(critical.greatCandidate).toBe(true)
+    expect(critical.hard).toBe(true)
+    expect(critical.reasons).toContain('candidato a ótimo')
+  })
+
   it('não aprofunda lance que ainda pertence ao livro', () => {
     const [critical] = rankCriticalMoves([move], raw, 1)
 

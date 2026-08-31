@@ -379,6 +379,79 @@ describe('buildReview — lance brilhante', () => {
   })
 })
 
+describe('buildReview — lance ótimo', () => {
+  const game = {
+    startFen: START_FEN,
+    moves: [
+      {
+        ply: 1,
+        color: 'w' as const,
+        san: 'e4',
+        uci: 'e2e4',
+        fenBefore: START_FEN,
+      },
+    ],
+  }
+
+  it('promove o único lance que mantém a igualdade', () => {
+    const raw = [
+      {
+        fen: START_FEN,
+        cp: 0,
+        depth: 20,
+        pv: ['e2e4'],
+        lines: [
+          { multipv: 1, cp: 0, pv: ['e2e4'] },
+          { multipv: 2, cp: -200, pv: ['d2d4'] },
+        ],
+      },
+      { fen: AFTER_E4, cp: 0, depth: 20, pv: ['e7e5'] },
+    ]
+
+    expect(buildReview(game, raw).moves[0].classification).toBe('otimo')
+  })
+
+  it('não promove sem uma segunda linha que atravesse a faixa de resultado', () => {
+    const raw = [
+      {
+        fen: START_FEN,
+        cp: 0,
+        depth: 20,
+        pv: ['e2e4'],
+        lines: [
+          { multipv: 1, cp: 0, pv: ['e2e4'] },
+          { multipv: 2, cp: -100, pv: ['d2d4'] },
+        ],
+      },
+      { fen: AFTER_E4, cp: 0, depth: 20, pv: ['e7e5'] },
+    ]
+
+    expect(buildReview(game, raw).moves[0].classification).toBe('melhor')
+  })
+
+  it('mantém Livro acima de Ótimo na precedência', () => {
+    const raw = [
+      {
+        fen: START_FEN,
+        cp: 0,
+        depth: 20,
+        pv: ['e2e4'],
+        lines: [
+          { multipv: 1, cp: 0, pv: ['e2e4'] },
+          { multipv: 2, cp: -200, pv: ['d2d4'] },
+        ],
+      },
+      { fen: AFTER_E4, cp: 0, depth: 20, pv: ['e7e5'] },
+    ]
+    const book = {
+      maxPly: 1,
+      eco: { code: 'B00', name: 'Abertura', moves: ['e4'] },
+    }
+
+    expect(buildReview(game, raw, book).moves[0].classification).toBe('livro')
+  })
+})
+
 function fakePort(
   evalFor: (fen: string) => { cp: number; pv: string[]; depth?: number },
 ): EnginePort {

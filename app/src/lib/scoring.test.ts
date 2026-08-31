@@ -5,6 +5,7 @@ import {
   classifyMove,
   cpToWinPct,
   detectBrilliant,
+  detectGreatMove,
   formatEval,
   gameAccuracy,
   lichessVolatilityWeights,
@@ -170,6 +171,44 @@ describe('detectBrilliant', () => {
   })
 })
 
+describe('detectGreatMove', () => {
+  const base = {
+    winPctLoss: 0,
+    playedUci: 'e2e4',
+    bestUci: 'e2e4',
+    bestWinPct: 50,
+    secondWinPct: 30,
+  }
+
+  it('aceita o único lance que salva uma posição igual', () => {
+    expect(detectGreatMove(base)).toBe(true)
+  })
+
+  it('aceita o único lance que preserva uma posição vencedora', () => {
+    expect(detectGreatMove({ ...base, bestWinPct: 70, secondWinPct: 50 })).toBe(
+      true,
+    )
+  })
+
+  it('exige uma segunda linha e uma mudança de faixa relevante', () => {
+    expect(detectGreatMove({ ...base, secondWinPct: null })).toBe(false)
+    expect(detectGreatMove({ ...base, secondWinPct: 40 })).toBe(false)
+    expect(detectGreatMove({ ...base, bestWinPct: 60, secondWinPct: 40 })).toBe(
+      false,
+    )
+  })
+
+  it('rejeita lance que não é melhor nem praticamente equivalente', () => {
+    expect(
+      detectGreatMove({
+        ...base,
+        playedUci: 'd2d4',
+        winPctLoss: 0.6,
+      }),
+    ).toBe(false)
+  })
+})
+
 describe('gameAccuracy', () => {
   const move = (color: 'w' | 'b') => ({ color })
   const initialWinPct = cpToWinPct(15)
@@ -262,6 +301,7 @@ describe('centipawnLoss', () => {
 describe('CLASSIFICATION_LABELS', () => {
   it('mapeia cada classificação ao seu rótulo em pt-BR', () => {
     expect(CLASSIFICATION_LABELS.brilhante).toBe('Brilhante')
+    expect(CLASSIFICATION_LABELS.otimo).toBe('Ótimo')
     expect(CLASSIFICATION_LABELS.melhor).toBe('Melhor')
     expect(CLASSIFICATION_LABELS.excelente).toBe('Excelente')
     expect(CLASSIFICATION_LABELS.bom).toBe('Bom')
