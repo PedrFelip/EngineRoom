@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import {
   CLASSIFICATION_LABELS,
+  centipawnLoss,
   classifyMove,
   cpToWinPct,
   detectBrilliant,
   formatEval,
   gameAccuracy,
+  lichessVolatilityWeights,
+  moveAccuracy,
   sideToMoveAtPly,
   whiteCp,
   whiteWinPct,
@@ -30,9 +33,11 @@ describe('cpToWinPct', () => {
     expect(cpToWinPct(150) + cpToWinPct(-150)).toBeCloseTo(100, 5)
   })
 
-  it('satura em ~100% / ~0% para avaliações de xeque-mate', () => {
-    expect(cpToWinPct(100000)).toBeCloseTo(100, 0)
-    expect(cpToWinPct(-100000)).toBeCloseTo(0, 0)
+  it('limita avaliações, inclusive mate, a ±1000 cp', () => {
+    expect(cpToWinPct(100000)).toBe(cpToWinPct(1000))
+    expect(cpToWinPct(-100000)).toBe(cpToWinPct(-1000))
+    expect(cpToWinPct(100000)).toBeCloseTo(97.5, 1)
+    expect(cpToWinPct(-100000)).toBeCloseTo(2.5, 1)
   })
 })
 
@@ -166,15 +171,91 @@ describe('detectBrilliant', () => {
 })
 
 describe('gameAccuracy', () => {
-  it('partida perfeita (todos loss 0) tem precisão 100', () => {
-    expect(gameAccuracy([0, 0, 0])).toBe(100)
-    expect(gameAccuracy([])).toBe(100)
+  const move = (color: 'w' | 'b') => ({ color })
+  const initialWinPct = cpToWinPct(15)
+
+  it('partida perfeita tem precisão 100 para ambos os lados', () => {
+    expect(
+      gameAccuracy(
+        [move('w'), move('b'), move('w')],
+        [50, initialWinPct, initialWinPct, initialWinPct],
+      ),
+    ).toEqual({ white: 100, black: 100 })
+    expect(gameAccuracy([], [50])).toEqual({ white: 100, black: 100 })
   })
 
-  it('calibra com a fórmula do Lichess (103.1668·exp(-0.04354·loss) - 3)', () => {
-    expect(gameAccuracy([10])).toBeCloseTo(63.7, 1)
-    expect(gameAccuracy([0, 10])).toBeCloseTo(80.0, 1)
-    expect(gameAccuracy([30])).toBeCloseTo(24.9, 1)
+  it('combina média ponderada e harmônica das accuracies por lance', () => {
+    const result = gameAccuracy(
+      [move('w'), move('b'), move('w')],
+      [50, initialWinPct, initialWinPct, initialWinPct - 10],
+    )
+    const badMove = moveAccuracy(10)
+    const weights = lichessVolatilityWeights(
+      [initialWinPct, initialWinPct, initialWinPct, initialWinPct - 10],
+      3,
+    )
+    const weighted =
+      (100 * weights[0] + badMove * weights[2]) / (weights[0] + weights[2])
+    const harmonic = 2 / (1 / 100 + 1 / badMove)
+
+    expect(result.white).toBeCloseTo((weighted + harmonic) / 2, 10)
+    expect(result.black).toBe(100)
+  })
+
+  it('usa piso 1 na média harmônica quando um lance tem accuracy zero', () => {
+    const result = gameAccuracy(
+      [move('w'), move('b'), move('w')],
+      [50, initialWinPct - 100, initialWinPct - 100, initialWinPct - 100],
+    )
+    const weights = lichessVolatilityWeights(
+      [
+        initialWinPct,
+        initialWinPct - 100,
+        initialWinPct - 100,
+        initialWinPct - 100,
+      ],
+      3,
+    )
+    const weightedMean = (100 * weights[2]) / (weights[0] + weights[2])
+    const harmonicMean = 2 / (1 / 1 + 1 / 100)
+
+    expect(result.white).toBeCloseTo((weightedMean + harmonicMean) / 2, 10)
+  })
+})
+
+describe('moveAccuracy', () => {
+  it('reproduz a curva do Lichess com bônus de incerteza e clamp', () => {
+    expect(moveAccuracy(0)).toBe(100)
+    expect(moveAccuracy(5)).toBeCloseTo(80.82, 2)
+    expect(moveAccuracy(10)).toBeCloseTo(64.58, 2)
+    expect(moveAccuracy(20)).toBeCloseTo(41.02, 2)
+    expect(moveAccuracy(100)).toBe(0)
+  })
+})
+
+describe('lichessVolatilityWeights', () => {
+  it('usa janelas deslizantes e limita os pesos entre 0,5 e 12', () => {
+    expect(lichessVolatilityWeights([50, 50, 80], 2)).toEqual([0.5, 12])
+  })
+
+  it('produz um peso para cada lance', () => {
+    const winPcts = Array.from({ length: 31 }, (_, index) => 50 + (index % 3))
+    expect(lichessVolatilityWeights(winPcts, 30)).toHaveLength(30)
+  })
+})
+
+describe('centipawnLoss', () => {
+  it('compara o melhor score com o lance jogado no mesmo POV', () => {
+    expect(centipawnLoss(40, -10)).toBe(30)
+    expect(centipawnLoss(20, 80)).toBe(100)
+  })
+
+  it('não pune melhora aparente causada por ruído entre buscas', () => {
+    expect(centipawnLoss(20, -30)).toBe(0)
+  })
+
+  it('preserva uma perda de mate para o limitador da accuracy', () => {
+    expect(centipawnLoss(99997, 0)).toBe(99997)
   })
 })
 

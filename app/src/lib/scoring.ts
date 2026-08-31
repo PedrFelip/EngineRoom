@@ -3,19 +3,23 @@
  *  - probabilidade de vitória (win%) via curva logística;
  *  - classificação de lances (Brilhante/Melhor/Excelente/Bom/Imprecisão/Erro/
  *    Blunder/Livro);
- *  - precisão agregada da partida (0–100%).
+ *  - precisão agregada da partida (0–100%) pelo modelo completo do Lichess.
  *
- * Modelo Lichess: thresholds sobre delta de win% e fórmula de acurácia
- * 103.1668·exp(-0.04354·loss) - 3 aplicada sobre a média das perdas.
- * Mantido puro e sem efeitos colaterais.
+ * Classificação e precisão usam delta de win%. A precisão da partida combina
+ * accuracy por lance, volatilidade e média harmônica. Mantido puro e sem
+ * efeitos colaterais.
  */
 
-import type { Classification } from '../types'
+import type { AccuracyByColor, Classification } from '../types'
 
 export type { Classification }
 
 /** Inclinação da curva logística cp→win% (constante do modelo Lichess). */
 const WINPCT_K = 0.00368208
+/** O Lichess limita avaliações antes de convertê-las em chance de vitória. */
+export const LICHESS_CP_CEILING = 1000
+/** Avaliação convencional da posição inicial usada pelo agregador do Lichess. */
+export const LICHESS_INITIAL_CP = 15
 
 /** Rótulos em pt-BR exibidos na UI (badges, resumo). */
 export const CLASSIFICATION_LABELS: Record<Classification, string> = {
@@ -34,7 +38,11 @@ export const CLASSIFICATION_LABELS: Record<Classification, string> = {
  * Curva logística centrada em 50% para cp = 0.
  */
 export function cpToWinPct(cp: number): number {
-  return 50 + 50 * (2 / (1 + Math.exp(-WINPCT_K * cp)) - 1)
+  const ceiledCp = Math.min(
+    LICHESS_CP_CEILING,
+    Math.max(-LICHESS_CP_CEILING, cp),
+  )
+  return 50 + 50 * (2 / (1 + Math.exp(-WINPCT_K * ceiledCp)) - 1)
 }
 
 /**
@@ -138,20 +146,135 @@ export function detectBrilliant(input: BrilliantInput): boolean {
   return input.winPctLoss <= maxLoss
 }
 
-/** Constantes da fórmula de acurácia (modelo Lichess). */
-const ACCURACY_CEIL = 103.1668
-const ACCURACY_DECAY = 0.04354
+/**
+ * Perda em centipawns do lance jogado contra o melhor lance da posição.
+ *
+ * As duas avaliações chegam no POV do lado a jogar. Depois do lance o turno
+ * muda, portanto `-afterCp` é a avaliação do lance jogado no mesmo POV de
+ * `bestCp`. Valores negativos são ruído de buscas independentes e viram zero.
+ */
+export function centipawnLoss(bestCp: number, afterCp: number): number {
+  return Math.max(0, bestCp + afterCp)
+}
+
+/** Identifica revisões persistidas que já usam o algoritmo atual. */
+export const ACCURACY_MODEL_VERSION = 'lichess-2026-08'
+
+const MOVE_ACCURACY_CEIL = 103.1668100711649
+const MOVE_ACCURACY_DECAY = 0.04354415386753951
+const MOVE_ACCURACY_OFFSET = -3.166924740191411
+const UNCERTAINTY_BONUS = 1
+const MIN_VOLATILITY_WEIGHT = 0.5
+const MAX_VOLATILITY_WEIGHT = 12
 
 /**
- * Precisão agregada da partida (0–100%) a partir das perdas de win% por lance.
- * Aplica a fórmula do Lichess (103.1668·exp(-0.04354·loss) - 3) sobre a média
- * das perdas, não por lance — evita o viés convexo de transformar-então-média.
+ * Accuracy de um lance a partir da perda de Win%. Constantes e bônus de
+ * incerteza reproduzem `AccuracyPercent.fromWinPercents` do Lichess.
  */
-export function gameAccuracy(winPctLosses: number[]): number {
-  if (winPctLosses.length === 0) return 100
-  const meanLoss =
-    winPctLosses.reduce((acc, loss) => acc + loss, 0) / winPctLosses.length
-  return Math.min(100, ACCURACY_CEIL * Math.exp(-ACCURACY_DECAY * meanLoss) - 3)
+export function moveAccuracy(winPctLoss: number): number {
+  if (winPctLoss <= 0) return 100
+  const raw =
+    MOVE_ACCURACY_CEIL * Math.exp(-MOVE_ACCURACY_DECAY * winPctLoss) +
+    MOVE_ACCURACY_OFFSET +
+    UNCERTAINTY_BONUS
+  return Math.min(100, Math.max(0, raw))
+}
+
+function standardDeviation(values: number[]): number {
+  if (values.length === 0) return 0
+  const mean = values.reduce((sum, value) => sum + value, 0) / values.length
+  const variance =
+    values.reduce((sum, value) => sum + (value - mean) ** 2, 0) / values.length
+  return Math.sqrt(variance)
+}
+
+/**
+ * Peso de cada ply pela volatilidade de Win% numa janela deslizante. A janela
+ * cresce com a partida (2–8 posições) e o peso é limitado a 0,5–12, exatamente
+ * como no agregador do Lichess.
+ */
+export function lichessVolatilityWeights(
+  positionWinPcts: number[],
+  moveCount: number,
+): number[] {
+  if (moveCount === 0) return []
+  const values = positionWinPcts.slice(0, moveCount + 1)
+  const windowSize = Math.min(8, Math.max(2, Math.floor(moveCount / 10)))
+  const windows: number[][] = []
+  const repeatedInitialWindows = Math.max(
+    0,
+    Math.min(windowSize, values.length) - 2,
+  )
+
+  for (let i = 0; i < repeatedInitialWindows; i++) {
+    windows.push(values.slice(0, windowSize))
+  }
+  for (let start = 0; start + windowSize <= values.length; start++) {
+    windows.push(values.slice(start, start + windowSize))
+  }
+
+  const weights = windows.map((window) =>
+    Math.min(
+      MAX_VOLATILITY_WEIGHT,
+      Math.max(MIN_VOLATILITY_WEIGHT, standardDeviation(window)),
+    ),
+  )
+  while (weights.length < moveCount) weights.push(MIN_VOLATILITY_WEIGHT)
+  return weights.slice(0, moveCount)
+}
+
+interface AccuracyMove {
+  color: 'w' | 'b'
+}
+
+function aggregateAccuracies(
+  accuracies: { value: number; weight: number }[],
+): number {
+  if (accuracies.length === 0) return 100
+  const weightSum = accuracies.reduce((sum, item) => sum + item.weight, 0)
+  const weightedMean =
+    accuracies.reduce((sum, item) => sum + item.value * item.weight, 0) /
+    weightSum
+  const harmonicMean =
+    accuracies.length /
+    accuracies.reduce((sum, item) => sum + 1 / Math.max(1, item.value), 0)
+  return (weightedMean + harmonicMean) / 2
+}
+
+/**
+ * Accuracy completa por cor. Calcula a accuracy de cada lance e tira a média
+ * entre (a) média ponderada pela volatilidade e (b) média harmônica.
+ */
+export function gameAccuracy(
+  moves: AccuracyMove[],
+  positionWinPcts: number[],
+): AccuracyByColor {
+  const winPcts = [
+    cpToWinPct(LICHESS_INITIAL_CP),
+    ...positionWinPcts.slice(1, moves.length + 1),
+  ]
+  const weights = lichessVolatilityWeights(winPcts, moves.length)
+  const forColor = (color: 'w' | 'b') =>
+    aggregateAccuracies(
+      moves.flatMap((move, index) =>
+        move.color === color
+          ? [
+              {
+                value: moveAccuracy(
+                  Math.max(
+                    0,
+                    move.color === 'w'
+                      ? winPcts[index] - winPcts[index + 1]
+                      : winPcts[index + 1] - winPcts[index],
+                  ),
+                ),
+                weight: weights[index],
+              },
+            ]
+          : [],
+      ),
+    )
+  return { white: forColor('w'), black: forColor('b') }
 }
 
 /** Limiar acima do qual um cp é considerado xeque-mate (mate-in-N mapeado por scoreToCp). */

@@ -26,6 +26,8 @@ import { type EcoEntry, lookupOpening } from './eco'
 import { materialDeltaAfterReplies } from './material'
 import { computePhases } from './phase'
 import {
+  ACCURACY_MODEL_VERSION,
+  centipawnLoss,
   classifyMove,
   cpToWinPct,
   detectBrilliant,
@@ -113,6 +115,7 @@ export function buildReview(
     const winPctBefore = cpToWinPct(before.cp)
     const winPctAfter = 100 - cpToWinPct(after.cp)
     const winPctLoss = Math.max(0, winPctBefore - winPctAfter)
+    const cpLoss = centipawnLoss(before.cp, after.cp)
     const isBook = !!book && m.ply <= book.maxPly
     const base = classifyMove(winPctLoss, isBook)
     // Brilhante: melhor/quase melhor que sacrifica material, medido após a
@@ -144,6 +147,7 @@ export function buildReview(
       winPctBefore,
       winPctAfter,
       winPctLoss,
+      cpLoss,
       bestUci: before.pv[0] ?? null,
       isBook,
       eco:
@@ -153,45 +157,40 @@ export function buildReview(
     }
   })
 
-  const accuracy: AccuracyByColor = {
-    white: gameAccuracy(
-      moves
-        .filter((m) => m.color === 'w' && !m.isBook)
-        .map((m) => m.winPctLoss),
-    ),
-    black: gameAccuracy(
-      moves
-        .filter((m) => m.color === 'b' && !m.isBook)
-        .map((m) => m.winPctLoss),
-    ),
+  const positionWinPcts = positions.map((position) => position.winPct)
+  const accuracy: AccuracyByColor = gameAccuracy(moves, positionWinPcts)
+
+  const accuracyByPhase = accuracyByPhaseOf(moves, phases, positionWinPcts)
+
+  return {
+    positions,
+    moves,
+    accuracyModel: ACCURACY_MODEL_VERSION,
+    accuracy,
+    accuracyByPhase,
   }
-
-  const accuracyByPhase = accuracyByPhaseOf(moves, phases)
-
-  return { positions, moves, accuracy, accuracyByPhase }
 }
 
 /**
  * Acurácia agregada (0–100) por fase do jogo. Um lance pertence à fase da
- * posição de onde partiu (`phases[ply - 1]`). Lances de livro são excluídos,
- * espelhando a acurácia geral. Reaproveitada na normalização de partidas
- * antigas vindas do store (sem `accuracyByPhase` persistido).
+ * posição de onde partiu (`phases[ply - 1]`). Cada fase reaplica o agregador
+ * completo sobre seu trecho, seguindo `phaseAccuracies` do Lichess. Lances de
+ * livro continuam incluídos.
  */
 export function accuracyByPhaseOf(
   moves: MoveAnalysis[],
   phases: Phase[],
+  positionWinPcts: number[],
 ): Record<Phase, AccuracyByColor> {
   const forPhase = (phase: Phase): AccuracyByColor => {
-    const losses = (color: 'w' | 'b') =>
-      moves
-        .filter(
-          (m) => m.color === color && !m.isBook && phases[m.ply - 1] === phase,
-        )
-        .map((m) => m.winPctLoss)
-    return {
-      white: gameAccuracy(losses('w')),
-      black: gameAccuracy(losses('b')),
-    }
+    const phaseMoves = moves.filter((move) => phases[move.ply - 1] === phase)
+    if (phaseMoves.length === 0) return gameAccuracy([], [50])
+    const firstPosition = phaseMoves[0].ply - 1
+    const phaseWinPcts = [
+      positionWinPcts[firstPosition],
+      ...phaseMoves.map((move) => positionWinPcts[move.ply]),
+    ]
+    return gameAccuracy(phaseMoves, phaseWinPcts)
   }
   return {
     opening: forPhase('opening'),

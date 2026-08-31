@@ -38,8 +38,8 @@ describe('buildReview', () => {
     }
     const raw = [
       { fen: START_FEN, cp: 0, depth: 20, pv: ['e2e4', 'e7e5'] },
-      { fen: AFTER_E4, cp: 0, depth: 20, pv: ['e7e5'] },
-      { fen: AFTER_E5, cp: 0, depth: 20, pv: [] },
+      { fen: AFTER_E4, cp: -15, depth: 20, pv: ['e7e5'] },
+      { fen: AFTER_E5, cp: 15, depth: 20, pv: [] },
     ]
 
     const review = buildReview(game, raw)
@@ -49,6 +49,8 @@ describe('buildReview', () => {
     expect(review.moves[0].classification).toBe('melhor')
     expect(review.moves[1].classification).toBe('melhor')
     expect(review.moves[0].winPctLoss).toBe(0)
+    expect(review.moves[0].cpLoss).toBe(0)
+    expect(review.moves[1].cpLoss).toBe(0)
     expect(review.accuracy).toEqual({ white: 100, black: 100 })
   })
 
@@ -75,8 +77,9 @@ describe('buildReview', () => {
     expect(review.moves[0].classification).toBe('blunder')
     expect(review.moves[0].winPctAfter).toBeCloseTo(13.7, 1)
     expect(review.moves[0].winPctLoss).toBeCloseTo(36.3, 1)
+    expect(review.moves[0].cpLoss).toBe(500)
     expect(review.moves[0].bestUci).toBe('e2e4')
-    expect(review.accuracy.white).toBeLessThan(30)
+    expect(review.accuracy.white).toBeCloseTo(17.8, 1)
     expect(review.accuracy.black).toBe(100)
   })
 
@@ -135,11 +138,12 @@ describe('buildReview', () => {
     expect(review.moves[0].classification).toBe('melhor')
     expect(review.moves[1].classification).toBe('blunder')
     expect(review.moves[1].winPctLoss).toBeCloseTo(36.3, 1)
-    expect(review.accuracy.black).toBeLessThan(30)
-    expect(review.accuracy.white).toBe(100)
+    expect(review.moves[1].cpLoss).toBe(500)
+    expect(review.accuracy.black).toBeCloseTo(19.1, 1)
+    expect(review.accuracy.white).toBeCloseTo(95, 0)
   })
 
-  it('marca lances de abertura como Livro e exclui da precisão', () => {
+  it('marca lances de abertura como Livro e os inclui na precisão', () => {
     const game = {
       startFen: START_FEN,
       moves: [
@@ -161,8 +165,8 @@ describe('buildReview', () => {
     }
     const raw = [
       { fen: START_FEN, cp: 0, depth: 20, pv: ['e2e4'] },
-      { fen: AFTER_E4, cp: 0, depth: 20, pv: ['e7e5'] },
-      { fen: AFTER_E5, cp: 500, depth: 20, pv: ['e4e5'] },
+      { fen: AFTER_E4, cp: 100, depth: 20, pv: ['e7e5'] },
+      { fen: AFTER_E5, cp: -100, depth: 20, pv: ['g1f3'] },
     ]
     const book = {
       maxPly: 1,
@@ -174,10 +178,11 @@ describe('buildReview', () => {
     expect(review.moves[0].classification).toBe('livro')
     expect(review.moves[0].isBook).toBe(true)
     expect(review.moves[0].eco).toEqual({ code: 'B00', name: "King's Pawn" })
-    expect(review.moves[1].classification).toBe('blunder')
+    expect(review.moves[1].classification).toBe('melhor')
     expect(review.moves[1].isBook).toBe(false)
     expect(review.moves[1].eco).toBeNull()
-    expect(review.accuracy.black).toBeLessThan(30)
+    expect(review.accuracy.white).toBeLessThan(100)
+    expect(review.accuracy.black).toBe(100)
   })
 
   it('não pune o lance que dá xeque-mate (fora do livro)', () => {
@@ -207,8 +212,9 @@ describe('buildReview', () => {
     const review = buildReview(game, raw)
 
     expect(review.moves[0].winPctLoss).toBe(0)
+    expect(review.moves[0].cpLoss).toBe(0)
     expect(review.moves[0].classification).toBe('melhor')
-    expect(review.positions[1].winPct).toBeCloseTo(100, 0)
+    expect(review.positions[1].winPct).toBeCloseTo(97.5, 1)
   })
 
   it('preenche phase das posições e accuracyByPhase por fase', () => {
@@ -233,8 +239,8 @@ describe('buildReview', () => {
     }
     const raw = [
       { fen: START_FEN, cp: 0, depth: 20, pv: ['e2e4', 'e7e5'] },
-      { fen: AFTER_E4, cp: 0, depth: 20, pv: ['e7e5'] },
-      { fen: AFTER_E5, cp: 0, depth: 20, pv: [] },
+      { fen: AFTER_E4, cp: -15, depth: 20, pv: ['e7e5'] },
+      { fen: AFTER_E5, cp: 15, depth: 20, pv: [] },
     ]
 
     const review = buildReview(game, raw)
@@ -486,7 +492,8 @@ describe('analyzeGame', () => {
       true,
     )
     expect(review.moves.every((m) => m.winPctLoss === 0)).toBe(true)
-    expect(review.accuracy).toEqual({ white: 100, black: 100 })
+    expect(review.accuracy.white).toBeCloseTo(95, 0)
+    expect(review.accuracy.black).toBe(100)
   })
 
   it('propaga a avaliação por FEN até a perda de win% do lance', async () => {
@@ -551,7 +558,7 @@ describe('analyzeGame', () => {
     )
 
     const last = review.positions[review.positions.length - 1]
-    expect(last.winPct).toBeCloseTo(0, 0)
+    expect(last.winPct).toBeCloseTo(2.5, 1)
 
     const mateMove = review.moves[review.moves.length - 1]
     expect(mateMove.winPctLoss).toBe(0)
@@ -696,7 +703,8 @@ describe('analyzeGame', () => {
     expect(sent).toContain('go movetime 1000')
     expect(sent.some((c) => c.startsWith('go depth'))).toBe(false)
     expect(review.moves).toHaveLength(2)
-    expect(review.accuracy).toEqual({ white: 100, black: 100 })
+    expect(review.accuracy.white).toBeCloseTo(95, 0)
+    expect(review.accuracy.black).toBe(100)
   })
 
   it('em modo tempo consulta o cache com mode="time" e a chave movetimeMs', async () => {

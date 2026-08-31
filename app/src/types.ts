@@ -130,6 +130,8 @@ export interface MoveAnalysis {
   winPctBefore: number
   winPctAfter: number
   winPctLoss: number
+  /** Perda em centipawns contra o melhor lance do Stockfish. */
+  cpLoss: number
   bestUci: string | null
   isBook: boolean
   eco: { code: string; name: string } | null
@@ -145,6 +147,8 @@ export interface AccuracyByColor {
 export interface ReviewResult {
   positions: PositionAnalysis[]
   moves: MoveAnalysis[]
+  /** Versão do algoritmo usado para produzir `accuracy`. Ausente em revisões antigas. */
+  accuracyModel?: string
   accuracy: AccuracyByColor
   accuracyByPhase: Record<Phase, AccuracyByColor>
 }

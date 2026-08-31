@@ -22,6 +22,7 @@ function mainlineMove(
     winPctBefore: 50,
     winPctAfter: 50,
     winPctLoss: 0,
+    cpLoss: 0,
     bestUci: uci,
     isBook: false,
     eco: null,

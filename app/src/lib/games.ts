@@ -11,6 +11,7 @@ import { accuracyByPhaseOf } from './analyze'
 import { resolveEngineTier } from './engine-tier'
 import { parsePgn } from './pgn'
 import { computePhases } from './phase'
+import { ACCURACY_MODEL_VERSION, centipawnLoss, gameAccuracy } from './scoring'
 
 /** Lista as partidas analisadas, da mais recente para a mais antiga. */
 export function listGames(): Promise<GameSummary[]> {
@@ -65,23 +66,40 @@ export function saveReview(
 }
 
 /**
- * Garante que uma revisão (possivelmente antiga, do store) tenha `phase` em
- * cada posição e `accuracyByPhase`. Recomputa a partir dos FENs/lances já
- * presentes — puro e barato. Partidas novas (já com fases) passam ilesas.
+ * Garante que uma revisão (possivelmente antiga, do store) tenha `phase`,
+ * `cpLoss` e accuracy no modelo atual. Recomputa a partir das avaliações já
+ * persistidas — puro e barato. Partidas novas passam ilesas.
  */
 function normalizeReview(result: ReviewResult): ReviewResult {
   const hasPhases = result.positions.every((p) => p.phase)
-  if (hasPhases && result.accuracyByPhase) return result
+  const hasCpLoss = result.moves.every((m) => Number.isFinite(m.cpLoss))
+  const hasCurrentAccuracy = result.accuracyModel === ACCURACY_MODEL_VERSION
+  if (hasPhases && result.accuracyByPhase && hasCpLoss && hasCurrentAccuracy) {
+    return result
+  }
   const phases = computePhases(result.positions)
   const positions = result.positions.map((p, i) => ({
     ...p,
     phase: p.phase ?? phases[i],
   }))
+  const moves = result.moves.map((move) => {
+    if (Number.isFinite(move.cpLoss)) return move
+    const before = result.positions[move.ply - 1]
+    const after = result.positions[move.ply]
+    return {
+      ...move,
+      cpLoss: before && after ? centipawnLoss(before.cp, after.cp) : 0,
+    }
+  })
+  const positionWinPcts = positions.map((position) => position.winPct)
+  const accuracy = gameAccuracy(moves, positionWinPcts)
   return {
     ...result,
     positions,
-    accuracyByPhase:
-      result.accuracyByPhase ?? accuracyByPhaseOf(result.moves, phases),
+    moves,
+    accuracyModel: ACCURACY_MODEL_VERSION,
+    accuracy,
+    accuracyByPhase: accuracyByPhaseOf(moves, phases, positionWinPcts),
   }
 }
 
