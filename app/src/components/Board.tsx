@@ -101,7 +101,7 @@ export default function Board({
   const badgePos = badgeSquare ? squareTopLeft(badgeSquare, orientation) : null
 
   return (
-    <div className='relative w-full'>
+    <div className='board-frame relative w-full'>
       <div ref={elRef} className='aspect-square w-full' />
       {badgePos && lastMoveClassification ? (
         <div

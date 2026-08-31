@@ -1,5 +1,18 @@
+import { BarChart3, Gauge, Swords } from 'lucide-react'
+import type { ReactNode } from 'react'
 import { CLASSIFICATION_LABELS } from '../lib/scoring'
 import type { Classification, Phase, ReviewResult } from '../types'
+import { ClassGlyph } from './ClassificationBadge'
+import { Badge } from './ui/badge'
+import { Card } from './ui/card'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from './ui/table'
 
 const ORDER: Classification[] = [
   'livro',
@@ -12,108 +25,229 @@ const ORDER: Classification[] = [
 ]
 
 const PHASES: Phase[] = ['opening', 'middlegame', 'endgame']
-
 const PHASE_LABELS: Record<Phase, string> = {
   opening: 'Abertura',
   middlegame: 'Meio-jogo',
   endgame: 'Final',
 }
-
 const PHASE_DOT: Record<Phase, string> = {
   opening: 'var(--color-phase-opening)',
   middlegame: 'var(--color-phase-middlegame)',
   endgame: 'var(--color-phase-endgame)',
 }
 
-const BADGE_COLOR: Record<Classification, string> = {
-  livro: 'bg-book',
-  melhor: 'bg-best',
-  excelente: 'bg-excellent',
-  bom: 'bg-good',
-  imprecisao: 'bg-mistake',
-  erro: 'bg-erro',
-  blunder: 'bg-blunder',
-}
-
 function countBy(moves: { classification: Classification }[]): number[] {
-  return ORDER.map((c) => moves.filter((m) => m.classification === c).length)
+  return ORDER.map(
+    (classification) =>
+      moves.filter((move) => move.classification === classification).length,
+  )
 }
 
-interface ReviewSummaryProps {
-  result: ReviewResult
-}
-
-export default function ReviewSummary({ result }: ReviewSummaryProps) {
-  const whiteMoves = result.moves.filter((m) => m.color === 'w')
-  const blackMoves = result.moves.filter((m) => m.color === 'b')
+export default function ReviewSummary({ result }: { result: ReviewResult }) {
+  const whiteMoves = result.moves.filter((move) => move.color === 'w')
+  const blackMoves = result.moves.filter((move) => move.color === 'b')
   const whiteCounts = countBy(whiteMoves)
   const blackCounts = countBy(blackMoves)
 
   return (
-    <div className='rounded-xl border border-edge bg-panel-2/60 p-4'>
-      <div className='grid grid-cols-2 gap-3'>
-        <SideAccuracy label='Brancas' value={result.accuracy.white} />
-        <SideAccuracy label='Pretas' value={result.accuracy.black} />
-      </div>
-      <div className='mt-4 border-t border-edge pt-3'>
-        <div className='mb-2 text-xs uppercase tracking-wide text-ink-faint'>
-          Acurácia por fase
+    <Card className='overflow-hidden bg-card/75 shadow-sm'>
+      <div className='flex items-start justify-between gap-4 border-b border-border px-4 py-4'>
+        <div>
+          <h2 className='text-sm font-semibold text-foreground'>
+            Resumo da revisão
+          </h2>
+          <p className='mt-1.5 text-xs text-muted-foreground'>
+            Qualidade dos lances por jogador e fase
+          </p>
         </div>
-        <div className='space-y-1.5'>
+        <Badge variant='outline' className='mt-0.5 font-mono tabular-nums'>
+          {Math.ceil(result.moves.length / 2)} lances
+        </Badge>
+      </div>
+
+      <AccuracyScoreboard accuracy={result.accuracy} />
+
+      <section className='border-t border-border px-4 py-3'>
+        <SectionTitle icon={Swords} title='Acurácia por fase' />
+        <SummaryTable>
           {PHASES.map((phase) => (
-            <div
+            <PhaseAccuracy
               key={phase}
-              className='grid grid-cols-[1fr_auto_auto] items-center gap-3 text-sm'
-            >
-              <span className='flex items-center gap-2 text-ink-dim'>
-                <span
-                  className='h-2.5 w-2.5 rounded-full ring-1 ring-edge'
-                  style={{ background: PHASE_DOT[phase] }}
-                />
-                {PHASE_LABELS[phase]}
-              </span>
-              <span className='w-10 text-right font-mono tabular-nums text-ink'>
-                {result.accuracyByPhase[phase].white.toFixed(0)}%
-              </span>
-              <span className='w-10 text-right font-mono tabular-nums text-ink'>
-                {result.accuracyByPhase[phase].black.toFixed(0)}%
-              </span>
-            </div>
+              label={PHASE_LABELS[phase]}
+              color={PHASE_DOT[phase]}
+              white={result.accuracyByPhase[phase].white}
+              black={result.accuracyByPhase[phase].black}
+            />
           ))}
-        </div>
+        </SummaryTable>
+      </section>
+
+      <section className='border-t border-border px-4 py-3'>
+        <SectionTitle icon={BarChart3} title='Qualidade dos lances' />
+        <SummaryTable>
+          {ORDER.map((classification, index) => (
+            <ClassificationCount
+              key={classification}
+              classification={classification}
+              white={whiteCounts[index]}
+              black={blackCounts[index]}
+            />
+          ))}
+        </SummaryTable>
+      </section>
+    </Card>
+  )
+}
+
+function AccuracyScoreboard({
+  accuracy,
+}: {
+  accuracy: { white: number; black: number }
+}) {
+  return (
+    <section className='px-4 py-4' aria-label='Acurácia geral'>
+      <SectionTitle icon={Gauge} title='Acurácia geral' />
+      <div className='mt-3 grid grid-cols-2 overflow-hidden rounded-lg shadow-sm'>
+        <AccuracyPanel side='white' value={accuracy.white} />
+        <AccuracyPanel side='black' value={accuracy.black} />
       </div>
-      <div className='mt-4 space-y-1.5'>
-        {ORDER.map((c, i) => (
-          <div
-            key={c}
-            className='grid grid-cols-[1fr_auto_auto] items-center gap-3 text-sm'
-          >
-            <span className='flex items-center gap-2 text-ink-dim'>
-              <span className={`h-2.5 w-2.5 rounded-full ${BADGE_COLOR[c]}`} />
-              {CLASSIFICATION_LABELS[c]}
-            </span>
-            <span className='w-8 text-right font-mono tabular-nums text-ink'>
-              {whiteCounts[i]}
-            </span>
-            <span className='w-8 text-right font-mono tabular-nums text-ink'>
-              {blackCounts[i]}
-            </span>
-          </div>
-        ))}
-      </div>
+    </section>
+  )
+}
+
+function AccuracyPanel({
+  side,
+  value,
+}: {
+  side: 'white' | 'black'
+  value: number
+}) {
+  const isWhite = side === 'white'
+  return (
+    <div
+      className={
+        isWhite
+          ? 'flex h-20 min-w-0 items-center justify-center bg-white px-3 text-center text-black'
+          : 'flex h-20 min-w-0 items-center justify-center bg-black px-3 text-center text-white'
+      }
+    >
+      <span className='font-mono text-2xl font-bold leading-none tabular-nums'>
+        {value.toFixed(1)}%
+      </span>
     </div>
   )
 }
 
-function SideAccuracy({ label, value }: { label: string; value: number }) {
+function SectionTitle({
+  icon: Icon,
+  title,
+}: {
+  icon: typeof BarChart3
+  title: string
+}) {
   return (
-    <div className='rounded-lg bg-panel-3/50 p-3 text-center'>
-      <div className='text-xs uppercase tracking-wide text-ink-faint'>
-        {label}
-      </div>
-      <div className='mt-1 font-mono text-2xl font-bold tabular-nums text-brand'>
-        {value.toFixed(1)}%
-      </div>
-    </div>
+    <h3 className='flex items-center gap-1.5 text-[10px] font-semibold tracking-[0.11em] text-muted-foreground uppercase'>
+      <Icon size={13} strokeWidth={2.2} aria-hidden='true' />
+      {title}
+    </h3>
+  )
+}
+
+function SummaryTable({ children }: { children: ReactNode }) {
+  return (
+    <Table className='mt-2.5 table-fixed text-xs'>
+      <colgroup>
+        <col />
+        <col className='w-[3.25rem]' />
+        <col className='w-[3.25rem]' />
+      </colgroup>
+      <TableHeader className='[&_tr]:border-0'>
+        <TableRow className='border-0 hover:bg-transparent'>
+          <TableHead className='h-auto p-0' scope='col' />
+          <TableHead
+            className='h-auto p-0 text-center text-[10px] font-medium tracking-wide uppercase'
+            scope='col'
+          >
+            Br.
+          </TableHead>
+          <TableHead
+            className='h-auto p-0 text-center text-[10px] font-medium tracking-wide uppercase'
+            scope='col'
+          >
+            Pr.
+          </TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>{children}</TableBody>
+    </Table>
+  )
+}
+
+function PhaseAccuracy({
+  label,
+  color,
+  white,
+  black,
+}: {
+  label: string
+  color: string
+  white: number
+  black: number
+}) {
+  return (
+    <TableRow className='border-0 hover:bg-transparent'>
+      <TableCell className='p-0 pr-2'>
+        <span className='flex min-w-0 items-center gap-2 font-medium text-foreground'>
+          <span
+            className='h-2 w-2 shrink-0 rounded-full ring-1 ring-border'
+            style={{ background: color }}
+          />
+          <span className='truncate'>{label}</span>
+        </span>
+      </TableCell>
+      <Score value={white} />
+      <Score value={black} />
+    </TableRow>
+  )
+}
+
+function ClassificationCount({
+  classification,
+  white,
+  black,
+}: {
+  classification: Classification
+  white: number
+  black: number
+}) {
+  return (
+    <TableRow className='border-0 hover:bg-transparent'>
+      <TableCell className='p-0 pr-2'>
+        <span className='flex min-w-0 items-center gap-2 text-muted-foreground'>
+          <ClassGlyph classification={classification} />
+          <span className='truncate'>
+            {CLASSIFICATION_LABELS[classification]}
+          </span>
+        </span>
+      </TableCell>
+      <Count value={white} />
+      <Count value={black} />
+    </TableRow>
+  )
+}
+
+function Score({ value }: { value: number }) {
+  return (
+    <TableCell className='p-0 py-0.5 text-center font-mono tabular-nums text-foreground'>
+      {value.toFixed(0)}%
+    </TableCell>
+  )
+}
+
+function Count({ value }: { value: number }) {
+  return (
+    <TableCell className='p-0 py-0.5 text-center font-mono tabular-nums text-foreground'>
+      {value}
+    </TableCell>
   )
 }

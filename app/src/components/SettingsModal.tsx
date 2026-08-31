@@ -1,5 +1,16 @@
 import { open } from '@tauri-apps/plugin-dialog'
-import { useEffect, useState } from 'react'
+import {
+  Check,
+  CircleAlert,
+  Cpu,
+  Database,
+  Moon,
+  Palette,
+  Sun,
+  Volume2,
+  X,
+} from 'lucide-react'
+import { type CSSProperties, useEffect, useState } from 'react'
 import { type ProbeResult, probeEngine } from '../lib/engine'
 import { clearGames } from '../lib/games'
 import type { Theme } from '../lib/settings'
@@ -115,13 +126,13 @@ export default function SettingsModal({
         type='button'
         aria-label='Fechar'
         onClick={onClose}
-        className='absolute inset-0 cursor-default bg-black/60'
+        className='dialog-backdrop absolute inset-0 cursor-default'
       />
       <div
         role='dialog'
         aria-modal='true'
         aria-labelledby='settings-title'
-        className='relative z-10 w-full max-w-lg overflow-hidden rounded-2xl border border-edge bg-panel shadow-2xl'
+        className='surface-glass elev-dialog relative z-10 w-full max-w-lg overflow-hidden rounded-2xl border border-edge'
       >
         {/* Header */}
         <div className='flex items-center justify-between border-b border-edge-soft px-5 py-4'>
@@ -134,27 +145,15 @@ export default function SettingsModal({
             className='rounded-md p-1.5 text-ink-dim transition hover:bg-panel-3 hover:text-ink'
             aria-label='Fechar'
           >
-            <svg
-              width='18'
-              height='18'
-              viewBox='0 0 24 24'
-              fill='none'
-              stroke='currentColor'
-              strokeWidth='2'
-              strokeLinecap='round'
-              strokeLinejoin='round'
-              aria-hidden='true'
-            >
-              <line x1='18' y1='6' x2='6' y2='18' />
-              <line x1='6' y1='6' x2='18' y2='18' />
-            </svg>
+            <X size={18} strokeWidth={2} aria-hidden='true' />
           </button>
         </div>
 
         <div className='max-h-[70vh] space-y-6 overflow-y-auto px-5 py-5'>
           {/* Appearance */}
           <section>
-            <h3 className='mb-2 text-xs font-semibold uppercase tracking-wide text-ink-dim'>
+            <h3 className='mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-ink-dim'>
+              <Palette size={13} strokeWidth={2.2} aria-hidden='true' />
               Aparência
             </h3>
             <div className='inline-flex rounded-lg border border-edge bg-panel-2 p-1'>
@@ -172,41 +171,9 @@ export default function SettingsModal({
                     }`}
                   >
                     {t === 'dark' ? (
-                      <svg
-                        width='15'
-                        height='15'
-                        viewBox='0 0 24 24'
-                        fill='none'
-                        stroke='currentColor'
-                        strokeWidth='2'
-                        strokeLinecap='round'
-                        strokeLinejoin='round'
-                        aria-hidden='true'
-                      >
-                        <path d='M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z' />
-                      </svg>
+                      <Moon size={15} strokeWidth={2} aria-hidden='true' />
                     ) : (
-                      <svg
-                        width='15'
-                        height='15'
-                        viewBox='0 0 24 24'
-                        fill='none'
-                        stroke='currentColor'
-                        strokeWidth='2'
-                        strokeLinecap='round'
-                        strokeLinejoin='round'
-                        aria-hidden='true'
-                      >
-                        <circle cx='12' cy='12' r='5' />
-                        <line x1='12' y1='1' x2='12' y2='3' />
-                        <line x1='12' y1='21' x2='12' y2='23' />
-                        <line x1='4.22' y1='4.22' x2='5.64' y2='5.64' />
-                        <line x1='18.36' y1='18.36' x2='19.78' y2='19.78' />
-                        <line x1='1' y1='12' x2='3' y2='12' />
-                        <line x1='21' y1='12' x2='23' y2='12' />
-                        <line x1='4.22' y1='19.78' x2='5.64' y2='18.36' />
-                        <line x1='18.36' y1='5.64' x2='19.78' y2='4.22' />
-                      </svg>
+                      <Sun size={15} strokeWidth={2} aria-hidden='true' />
                     )}
                     {t === 'dark' ? 'Escuro' : 'Claro'}
                   </button>
@@ -217,7 +184,8 @@ export default function SettingsModal({
 
           {/* Som */}
           <section>
-            <h3 className='mb-2 text-xs font-semibold uppercase tracking-wide text-ink-dim'>
+            <h3 className='mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-ink-dim'>
+              <Volume2 size={13} strokeWidth={2.2} aria-hidden='true' />
               Som
             </h3>
             <div className='rounded-lg border border-edge-soft p-3'>
@@ -253,7 +221,12 @@ export default function SettingsModal({
                   value={Math.round(settings.soundVolume * 100)}
                   onChange={(e) => setSoundVolume(Number(e.target.value) / 100)}
                   disabled={!settings.soundEnabled}
-                  className='min-w-0 flex-1 accent-[var(--brand)]'
+                  className='engine-range min-w-0 flex-1'
+                  style={
+                    {
+                      '--fill': `${Math.round(settings.soundVolume * 100)}%`,
+                    } as CSSProperties
+                  }
                   aria-label='Volume do som'
                 />
                 <span className='w-10 shrink-0 text-right font-mono text-xs text-ink-dim'>
@@ -265,7 +238,8 @@ export default function SettingsModal({
 
           {/* Engine */}
           <section>
-            <h3 className='mb-2 text-xs font-semibold uppercase tracking-wide text-ink-dim'>
+            <h3 className='mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-ink-dim'>
+              <Cpu size={13} strokeWidth={2.2} aria-hidden='true' />
               Engine Stockfish
             </h3>
 
@@ -341,35 +315,13 @@ export default function SettingsModal({
                   }`}
                 >
                   {result.ok ? (
-                    <svg
-                      width='15'
-                      height='15'
-                      viewBox='0 0 24 24'
-                      fill='none'
-                      stroke='currentColor'
-                      strokeWidth='2.5'
-                      strokeLinecap='round'
-                      strokeLinejoin='round'
-                      aria-hidden='true'
-                    >
-                      <polyline points='20 6 9 17 4 12' />
-                    </svg>
+                    <Check size={15} strokeWidth={2.5} aria-hidden='true' />
                   ) : (
-                    <svg
-                      width='15'
-                      height='15'
-                      viewBox='0 0 24 24'
-                      fill='none'
-                      stroke='currentColor'
-                      strokeWidth='2'
-                      strokeLinecap='round'
-                      strokeLinejoin='round'
+                    <CircleAlert
+                      size={15}
+                      strokeWidth={2.5}
                       aria-hidden='true'
-                    >
-                      <circle cx='12' cy='12' r='10' />
-                      <line x1='12' y1='8' x2='12' y2='12' />
-                      <line x1='12' y1='16' x2='12.01' y2='16' />
-                    </svg>
+                    />
                   )}
                   {result.ok
                     ? (result.name ?? 'Engine respondeu (uciok)')
@@ -381,7 +333,8 @@ export default function SettingsModal({
 
           {/* Armazenamento */}
           <section>
-            <h3 className='mb-2 text-xs font-semibold uppercase tracking-wide text-ink-dim'>
+            <h3 className='mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-ink-dim'>
+              <Database size={13} strokeWidth={2.2} aria-hidden='true' />
               Armazenamento
             </h3>
             <div className='rounded-lg border border-edge-soft p-3'>

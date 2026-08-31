@@ -1,3 +1,13 @@
+import {
+  ArrowRight,
+  Bot,
+  CircleAlert,
+  FileUp,
+  Settings,
+  ShieldCheck,
+  SlidersHorizontal,
+  Sparkles,
+} from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { resolveEngineTier } from '../lib/engine-tier'
 import { deleteGame, getGame, listGames, storedToConfig } from '../lib/games'
@@ -7,6 +17,7 @@ import EngineTierSelector, { DEFAULT_TIME_MS } from './EngineTierSelector'
 import PgnImporter from './PgnImporter'
 import ReviewedGamesList from './ReviewedGamesList'
 import SettingsModal from './SettingsModal'
+import { Button } from './ui/button'
 
 interface Props {
   onStart: (config: ReviewConfig) => void
@@ -69,58 +80,42 @@ export default function HomePage({ onStart }: Props) {
       {/* Brand */}
       <header className='mb-8 flex w-full max-w-xl items-center justify-between md:max-w-6xl'>
         <div className='flex items-center gap-2.5'>
-          <div className='flex h-9 w-9 items-center justify-center rounded-lg bg-brand text-bg'>
-            <svg
-              width='20'
-              height='20'
-              viewBox='0 0 24 24'
-              fill='currentColor'
-              aria-hidden='true'
-            >
-              <path d='M12 2l2.4 4.9 5.4.8-3.9 3.8.9 5.4L12 18.9 7.2 19.7l.9-5.4L4.2 10.5l5.4-.8L12 2z' />
-            </svg>
+          <div className='brand-mark flex h-9 w-9 items-center justify-center rounded-lg bg-brand text-bg'>
+            <Bot size={20} strokeWidth={2} aria-hidden='true' />
           </div>
           <div className='leading-tight'>
             <h1 className='text-lg font-bold tracking-tight text-ink'>
               EngineRoom
             </h1>
-            <p className='text-[11px] text-ink-faint'>
-              Revisão de partidas com Stockfish
+            <p className='text-[11px] font-medium tracking-wide text-ink-faint'>
+              LOCAL CHESS INTELLIGENCE
             </p>
           </div>
         </div>
-        <button
-          type='button'
+        <Button
           onClick={() => setSettingsOpen(true)}
-          className='rounded-lg border border-edge bg-panel-2/60 p-2 text-ink-dim transition hover:bg-panel-3 hover:text-ink'
+          variant='ghost'
+          size='icon'
+          className='border-edge bg-panel-2/60'
           aria-label='Configurações'
           title='Configurações'
         >
-          <svg
-            width='18'
-            height='18'
-            viewBox='0 0 24 24'
-            fill='none'
-            stroke='currentColor'
-            strokeWidth='1.8'
-            strokeLinecap='round'
-            strokeLinejoin='round'
-            aria-hidden='true'
-          >
-            <circle cx='12' cy='12' r='3' />
-            <path d='M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z' />
-          </svg>
-        </button>
+          <Settings size={18} strokeWidth={1.8} aria-hidden='true' />
+        </Button>
       </header>
 
       <div className='flex w-full max-w-xl flex-col gap-8 md:max-w-6xl md:flex-row md:gap-10'>
         <div className='w-full max-w-xl shrink-0 md:max-w-md lg:max-w-xl'>
-          <h2 className='mb-1 text-2xl font-bold text-ink'>Revisar partida</h2>
+          <p className='section-kicker mb-2'>01 · nova análise</p>
+          <h2 className='mb-1 text-2xl font-bold tracking-tight text-ink'>
+            Revise o que decidiu no tabuleiro.
+          </h2>
           <p className='mb-6 text-sm text-ink-dim'>
-            Importe um PGN e ajuste a qualidade da análise da engine.
+            Importe um PGN e coloque o Stockfish para encontrar os pontos de
+            virada.
           </p>
 
-          <div className='rounded-2xl border border-edge bg-panel/80 p-5 shadow-xl shadow-black/30'>
+          <div className='analysis-surface surface-glass elev-card rounded-2xl border border-edge p-5'>
             <PgnImporter value={pgn} onChange={setPgn} />
 
             {/* Validation feedback */}
@@ -155,21 +150,12 @@ export default function HomePage({ onStart }: Props) {
                 </div>
               ) : (
                 <div className='flex items-center gap-2 rounded-lg border border-blunder/30 bg-blunder/10 px-3 py-2 text-sm text-blunder'>
-                  <svg
-                    width='16'
-                    height='16'
-                    viewBox='0 0 24 24'
-                    fill='none'
-                    stroke='currentColor'
-                    strokeWidth='2'
-                    strokeLinecap='round'
-                    strokeLinejoin='round'
+                  <CircleAlert
+                    size={16}
+                    strokeWidth={2}
+                    shrink-0
                     aria-hidden='true'
-                  >
-                    <circle cx='12' cy='12' r='10' />
-                    <line x1='12' y1='8' x2='12' y2='12' />
-                    <line x1='12' y1='16' x2='12.01' y2='16' />
-                  </svg>
+                  />
                   {parse.error}
                 </div>
               )}
@@ -189,8 +175,7 @@ export default function HomePage({ onStart }: Props) {
               onLinesChange={setLines}
             />
 
-            <button
-              type='button'
+            <Button
               disabled={!canStart}
               onClick={() =>
                 parse.ok &&
@@ -203,28 +188,16 @@ export default function HomePage({ onStart }: Props) {
                   lines,
                 })
               }
-              className={`mt-5 flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold transition ${
+              variant={canStart ? 'default' : 'ghost'}
+              className={`mt-5 h-10 w-full ${
                 canStart
-                  ? 'bg-brand text-bg hover:bg-brand-strong active:scale-[0.99]'
-                  : 'cursor-not-allowed bg-panel-3 text-ink-faint'
+                  ? ''
+                  : 'cursor-not-allowed border-edge bg-panel-3 text-ink-faint'
               }`}
             >
               Analisar partida
-              <svg
-                width='16'
-                height='16'
-                viewBox='0 0 24 24'
-                fill='none'
-                stroke='currentColor'
-                strokeWidth='2.5'
-                strokeLinecap='round'
-                strokeLinejoin='round'
-                aria-hidden='true'
-              >
-                <line x1='5' y1='12' x2='19' y2='12' />
-                <polyline points='12 5 19 12 12 19' />
-              </svg>
-            </button>
+              <ArrowRight size={16} strokeWidth={2.5} aria-hidden='true' />
+            </Button>
           </div>
         </div>
 
@@ -237,14 +210,15 @@ export default function HomePage({ onStart }: Props) {
           />
         ) : (
           <aside className='w-full min-w-0 flex-1'>
-            <h2 className='mb-3 text-sm font-semibold tracking-wide text-ink-dim uppercase'>
-              Como funciona
+            <p className='section-kicker mb-2'>Como funciona</p>
+            <h2 className='mb-3 text-lg font-semibold tracking-tight text-ink'>
+              Da partida ao padrão.
             </h2>
-            <div className='rounded-2xl border border-edge bg-panel/80 p-5 shadow-xl shadow-black/30'>
+            <div className='analysis-surface surface-glass elev-card rounded-2xl border border-edge p-5'>
               <ol className='flex flex-col gap-4'>
                 <li className='flex gap-3'>
-                  <span className='flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brand/15 font-mono text-sm font-bold text-brand'>
-                    1
+                  <span className='flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brand/15 text-brand'>
+                    <FileUp size={14} strokeWidth={2.2} aria-hidden='true' />
                   </span>
                   <div>
                     <p className='text-sm font-semibold text-ink'>
@@ -256,8 +230,12 @@ export default function HomePage({ onStart }: Props) {
                   </div>
                 </li>
                 <li className='flex gap-3'>
-                  <span className='flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brand/15 font-mono text-sm font-bold text-brand'>
-                    2
+                  <span className='flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brand/15 text-brand'>
+                    <SlidersHorizontal
+                      size={14}
+                      strokeWidth={2.2}
+                      aria-hidden='true'
+                    />
                   </span>
                   <div>
                     <p className='text-sm font-semibold text-ink'>
@@ -269,8 +247,8 @@ export default function HomePage({ onStart }: Props) {
                   </div>
                 </li>
                 <li className='flex gap-3'>
-                  <span className='flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brand/15 font-mono text-sm font-bold text-brand'>
-                    3
+                  <span className='flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brand/15 text-brand'>
+                    <Sparkles size={14} strokeWidth={2.2} aria-hidden='true' />
                   </span>
                   <div>
                     <p className='text-sm font-semibold text-ink'>
@@ -283,20 +261,12 @@ export default function HomePage({ onStart }: Props) {
                 </li>
               </ol>
               <div className='mt-5 flex items-start gap-2 border-t border-edge-soft pt-4 text-xs text-ink-faint'>
-                <svg
-                  width='14'
-                  height='14'
-                  viewBox='0 0 24 24'
-                  fill='none'
-                  stroke='currentColor'
-                  strokeWidth='2'
-                  strokeLinecap='round'
-                  strokeLinejoin='round'
+                <ShieldCheck
+                  size={14}
+                  strokeWidth={2}
                   className='mt-0.5 shrink-0'
                   aria-hidden='true'
-                >
-                  <path d='M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z' />
-                </svg>
+                />
                 <span>
                   Toda a análise acontece localmente — seu PGN não sai do seu
                   computador.

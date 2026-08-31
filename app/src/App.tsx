@@ -11,20 +11,24 @@ export default function App() {
 
   if (view === 'home' || !config) {
     return (
-      <HomePage
-        onStart={(cfg) => {
-          setConfig(cfg)
-          setView('review')
-        }}
-      />
+      <main className='app-canvas min-h-full'>
+        <HomePage
+          onStart={(cfg) => {
+            setConfig(cfg)
+            setView('review')
+          }}
+        />
+      </main>
     )
   }
 
   return (
-    <ReviewScreen
-      key={config.pgn + config.engine.id}
-      config={config}
-      onExit={() => setView('home')}
-    />
+    <main className='app-canvas min-h-full'>
+      <ReviewScreen
+        key={config.pgn + config.engine.id}
+        config={config}
+        onExit={() => setView('home')}
+      />
+    </main>
   )
 }

@@ -1,4 +1,7 @@
+import { Check, ClipboardPaste, FileUp, Upload } from 'lucide-react'
 import { useCallback, useRef, useState } from 'react'
+import { Badge } from './ui/badge'
+import { Button } from './ui/button'
 
 interface Props {
   value: string
@@ -34,20 +37,27 @@ export default function PgnImporter({ value, onChange }: Props) {
 
   return (
     <div>
-      <div className='mb-3 mx-auto flex w-fit rounded-lg border border-edge bg-panel-2/60 p-1'>
+      <div className='mb-3 flex w-fit rounded-[calc(var(--control-radius)+2px)] border border-edge bg-panel-2/60 p-1'>
         {(['file', 'paste'] as Mode[]).map((m) => (
-          <button
+          <Button
             key={m}
-            type='button'
             onClick={() => setMode(m)}
-            className={`rounded-md px-4 py-1.5 text-sm font-medium transition ${
-              mode === m
-                ? 'bg-brand text-bg shadow'
-                : 'text-ink-dim hover:text-ink'
-            }`}
+            size='sm'
+            variant={mode === m ? 'default' : 'ghost'}
+            className={`h-8 px-3 ${mode === m ? '' : 'text-ink-faint hover:text-ink'}`}
           >
-            {m === 'file' ? 'Arquivo PGN' : 'Colar PGN'}
-          </button>
+            {m === 'file' ? (
+              <>
+                <FileUp size={14} strokeWidth={2} aria-hidden='true' />
+                Arquivo PGN
+              </>
+            ) : (
+              <>
+                <ClipboardPaste size={14} strokeWidth={2} aria-hidden='true' />
+                Colar PGN
+              </>
+            )}
+          </Button>
         ))}
       </div>
 
@@ -67,28 +77,18 @@ export default function PgnImporter({ value, onChange }: Props) {
               if (file) void handleFile(file)
             }}
             onClick={() => inputRef.current?.click()}
-            className={`flex w-full cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed px-6 py-10 text-center transition ${
+            className={`flex w-full cursor-pointer flex-col items-center justify-center rounded-[var(--control-radius)] border border-dashed px-6 py-8 text-center outline-none transition focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg ${
               dragActive
                 ? 'border-brand bg-brand/10'
                 : 'border-edge bg-panel-2/40 hover:border-ink-faint hover:bg-panel-2/70'
             }`}
           >
-            <svg
-              width='36'
-              height='36'
-              viewBox='0 0 24 24'
-              fill='none'
-              stroke='currentColor'
-              strokeWidth='1.6'
-              strokeLinecap='round'
-              strokeLinejoin='round'
+            <Upload
+              size={36}
+              strokeWidth={1.6}
               className='mb-3 text-ink-faint'
               aria-hidden='true'
-            >
-              <path d='M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4' />
-              <polyline points='17 8 12 3 7 8' />
-              <line x1='12' y1='3' x2='12' y2='15' />
-            </svg>
+            />
 
             <p className='text-sm text-ink'>
               Arraste um arquivo{' '}
@@ -99,22 +99,10 @@ export default function PgnImporter({ value, onChange }: Props) {
             </p>
 
             {fileName && (
-              <span className='mt-3 inline-flex items-center gap-1.5 rounded-md bg-panel-3 px-2.5 py-1 text-xs text-ink-dim'>
-                <svg
-                  width='12'
-                  height='12'
-                  viewBox='0 0 24 24'
-                  fill='none'
-                  stroke='currentColor'
-                  strokeWidth='2.5'
-                  strokeLinecap='round'
-                  strokeLinejoin='round'
-                  aria-hidden='true'
-                >
-                  <polyline points='20 6 9 17 4 12' />
-                </svg>
+              <Badge variant='outline' className='mt-3'>
+                <Check size={12} strokeWidth={2.5} aria-hidden='true' />
                 {fileName}
-              </span>
+              </Badge>
             )}
           </button>
 
@@ -139,7 +127,7 @@ export default function PgnImporter({ value, onChange }: Props) {
             placeholder={
               '[Event "Partida amistosa"]\n[White "Magnus Carlsen"]\n[Black "Hikaru Nakamura"]\n\n1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6 5. O-O Be7 *'
             }
-            className='h-44 w-full resize-none rounded-xl border border-edge bg-panel-2/40 p-4 font-mono text-[13px] leading-relaxed text-ink outline-none transition placeholder:text-ink-faint focus:border-brand focus:bg-panel-2/70'
+            className='h-44 w-full resize-none rounded-[var(--control-radius)] border border-edge bg-panel-2/40 p-3 font-mono text-[13px] leading-relaxed text-ink outline-none transition-[border-color,box-shadow] placeholder:text-ink-faint focus:border-brand focus:ring-2 focus:ring-brand/25'
           />
           {value && (
             <span className='absolute bottom-2.5 right-3 rounded bg-panel-3/80 px-1.5 py-0.5 font-mono text-[10px] text-ink-faint'>

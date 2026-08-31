@@ -28,10 +28,10 @@ function MoveButton({
       type='button'
       data-active={active ? 'true' : undefined}
       onClick={() => onSelect(move.ply)}
-      className={`flex flex-1 items-center gap-1.5 rounded px-2 py-1 text-left font-mono text-sm transition ${
+      className={`flex min-h-8 flex-1 items-center gap-1.5 rounded-[calc(var(--radius)-3px)] px-2 text-left font-mono text-[13px] transition-colors ${
         active
-          ? 'bg-brand/20 ring-1 ring-brand/50 text-ink'
-          : 'text-ink-dim hover:bg-panel-3/50'
+          ? 'bg-accent text-accent-foreground shadow-sm ring-1 ring-border'
+          : 'text-ink-dim hover:bg-accent/70 hover:text-ink'
       }`}
     >
       <ClassificationBadge classification={move.classification} />
@@ -47,10 +47,23 @@ export default function MoveList({
 }: MoveListProps) {
   const rootRef = useRef<HTMLDivElement>(null)
 
+  // Mantém o lance ativo visível apenas dentro do painel de lances. Usar
+  // scrollIntoView aqui também rola a página e dá a impressão de que o foco
+  // saiu do tabuleiro ao navegar pelas setas.
   // biome-ignore lint/correctness/useExhaustiveDependencies: o efeito precisa re-rodar quando currentPly muda para rolar até o lance ativo
   useEffect(() => {
-    const el = rootRef.current?.querySelector('[data-active="true"]')
-    el?.scrollIntoView({ block: 'nearest' })
+    const root = rootRef.current
+    const panel = root?.parentElement
+    const active = root?.querySelector<HTMLElement>('[data-active="true"]')
+    if (!panel || !active) return
+
+    const panelRect = panel.getBoundingClientRect()
+    const activeRect = active.getBoundingClientRect()
+    if (activeRect.top < panelRect.top) {
+      panel.scrollTop += activeRect.top - panelRect.top
+    } else if (activeRect.bottom > panelRect.bottom) {
+      panel.scrollTop += activeRect.bottom - panelRect.bottom
+    }
   }, [currentPly])
 
   const rows: Row[] = []
@@ -64,8 +77,8 @@ export default function MoveList({
   return (
     <div ref={rootRef} className='flex flex-col gap-0.5'>
       {rows.map((row) => (
-        <div key={row.num} className='flex items-center gap-1'>
-          <span className='w-8 shrink-0 text-right font-mono text-xs text-ink-faint'>
+        <div key={row.num} className='flex items-center gap-1.5'>
+          <span className='flex size-7 shrink-0 items-center justify-center rounded-[calc(var(--radius)-3px)] bg-muted/60 font-mono text-[10px] text-muted-foreground'>
             {row.num}.
           </span>
           {row.white ? (

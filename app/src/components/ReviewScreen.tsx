@@ -1,3 +1,16 @@
+import {
+  ArrowLeft,
+  ArrowUpDown,
+  Bot,
+  ChartLine,
+  ChevronLeft,
+  ChevronRight,
+  Crown,
+  ListOrdered,
+  SkipBack,
+  SkipForward,
+  TriangleAlert,
+} from 'lucide-react'
 import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
 import { formatEngineTag } from '../lib/engine-tag'
 import { evalLabel, sideToMoveAtPly } from '../lib/eval-label'
@@ -13,6 +26,7 @@ import EvalBar from './EvalBar'
 import EvalGraph from './EvalGraph'
 import MoveList from './MoveList'
 import ReviewSummary from './ReviewSummary'
+import { Button } from './ui/button'
 
 interface ReviewScreenProps {
   config: ReviewConfig
@@ -101,8 +115,12 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
     return (
       <div className='flex min-h-full items-center justify-center px-4 py-10'>
         <div className='w-full max-w-3xl'>
+          <div className='mb-4 flex items-center justify-center gap-2 text-xs font-semibold tracking-[0.14em] text-brand uppercase'>
+            <span className='engine-loading-orb h-2 w-2 animate-pulse rounded-full bg-brand' />
+            Engine em análise
+          </div>
           {partialWinPcts.length >= 2 ? (
-            <div className='eval-graph-loading rounded-2xl border border-edge bg-panel-2/60 p-5 shadow-lg shadow-black/20'>
+            <div className='eval-graph-loading elev-card rounded-2xl border border-edge bg-panel-2/60 p-5'>
               <EvalGraph
                 winPcts={partialWinPcts}
                 currentPly={partialWinPcts.length - 1}
@@ -111,7 +129,13 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
               />
             </div>
           ) : (
-            <p className='text-center text-sm text-ink-dim'>
+            <p className='flex items-center justify-center gap-2 text-sm text-ink-dim'>
+              <Bot
+                size={16}
+                strokeWidth={2}
+                className='animate-pulse'
+                aria-hidden='true'
+              />
               Analisando primeiros lances…
             </p>
           )}
@@ -124,6 +148,7 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
     <div className='mx-auto flex min-h-full max-w-6xl flex-col gap-4 px-4 py-6'>
       <header className='flex items-center justify-between gap-4'>
         <div className='min-w-0'>
+          <p className='section-kicker mb-1'>análise de partida</p>
           <h1 className='truncate text-lg font-bold text-ink'>
             {config.meta.white} <span className='text-ink-faint'>vs</span>{' '}
             {config.meta.black}
@@ -142,18 +167,21 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
             {opening ? ` · ${opening.code} ${opening.name}` : ''}
           </p>
         </div>
-        <button
-          type='button'
-          onClick={onExit}
-          className='rounded-xl bg-panel-3 px-4 py-2 text-sm font-medium text-ink transition hover:bg-edge'
-        >
-          ← Nova partida
-        </button>
+        <Button onClick={onExit} variant='outline' className='bg-panel-2'>
+          <ArrowLeft size={16} strokeWidth={2} aria-hidden='true' />
+          Nova partida
+        </Button>
       </header>
 
       {status === 'error' && (
-        <div className='rounded-xl border border-blunder/50 bg-blunder/10 p-4 text-sm text-blunder'>
-          Falha na análise: {error}
+        <div className='flex items-center gap-2.5 rounded-xl border border-blunder/50 bg-blunder/10 p-4 text-sm text-blunder'>
+          <TriangleAlert
+            size={16}
+            strokeWidth={2}
+            shrink-0
+            aria-hidden='true'
+          />
+          <span>Falha na análise: {error}</span>
         </div>
       )}
 
@@ -214,53 +242,75 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
             />
           ) : null}
 
-          <div className='flex items-center justify-center gap-2 rounded-xl border border-edge bg-panel-2/60 p-2'>
-            <NavBtn onClick={review.first} disabled={!result}>
-              ⏮
+          <div className='surface-glass elev-card flex items-center justify-center gap-2 rounded-xl border border-edge p-2'>
+            <NavBtn
+              onClick={review.first}
+              disabled={!result}
+              label='Primeiro lance'
+            >
+              <SkipBack size={18} strokeWidth={2} aria-hidden='true' />
             </NavBtn>
             <NavBtn
               onClick={review.prev}
               disabled={!result || currentPly === 0}
+              label='Lance anterior'
             >
-              ‹
+              <ChevronLeft size={20} strokeWidth={2} aria-hidden='true' />
             </NavBtn>
             <NavBtn
               onClick={review.next}
               disabled={!result || currentPly >= (result?.moves.length ?? 0)}
+              label='Próximo lance'
             >
-              ›
+              <ChevronRight size={20} strokeWidth={2} aria-hidden='true' />
             </NavBtn>
             <NavBtn
               onClick={review.last}
               disabled={!result || currentPly >= (result?.moves.length ?? 0)}
+              label='Último lance'
             >
-              ⏭
+              <SkipForward size={18} strokeWidth={2} aria-hidden='true' />
             </NavBtn>
-            <NavBtn onClick={review.flip}>⇅</NavBtn>
+            <div className='mx-1 h-5 w-px bg-edge' />
+            <NavBtn onClick={review.flip} label='Virar o tabuleiro'>
+              <ArrowUpDown size={17} strokeWidth={2} aria-hidden='true' />
+            </NavBtn>
           </div>
         </div>
 
         <aside className='flex flex-col gap-4'>
           {result && <ReviewSummary result={result} />}
           {result && (
-            <div className='max-h-[50vh] overflow-y-auto rounded-xl border border-edge bg-panel-2/60 p-3'>
-              <MoveList
-                moves={result.moves}
-                currentPly={currentPly}
-                onSelect={review.goTo}
-              />
+            <div className='rounded-xl border border-border bg-card/60 p-2 shadow-sm'>
+              <div className='flex items-center justify-between px-1 py-1.5 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase'>
+                <span className='flex items-center gap-1.5'>
+                  <ListOrdered size={13} strokeWidth={2.2} aria-hidden='true' />
+                  Lances
+                </span>
+                <span className='font-mono text-[10px] normal-case'>
+                  {Math.ceil(result.moves.length / 2)}
+                </span>
+              </div>
+              <div className='max-h-[42vh] overflow-y-auto pr-1 lg:max-h-[50vh]'>
+                <MoveList
+                  moves={result.moves}
+                  currentPly={currentPly}
+                  onSelect={review.goTo}
+                />
+              </div>
             </div>
           )}
         </aside>
       </div>
 
       {result && (
-        <div className='rounded-xl border border-edge bg-panel-2/60 p-3'>
-          <div className='mb-1.5 flex items-center justify-between px-1'>
-            <span className='text-[11px] font-semibold uppercase tracking-wide text-ink-faint'>
+        <div className='rounded-xl border border-edge bg-panel-2/60 p-3 sm:p-4'>
+          <div className='mb-2 flex flex-col gap-1 px-1 sm:flex-row sm:items-center sm:justify-between'>
+            <span className='flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-ink-faint'>
+              <ChartLine size={12} strokeWidth={2.2} aria-hidden='true' />
               Avaliação
             </span>
-            <span className='text-[11px] text-ink-faint'>
+            <span className='hidden text-[11px] text-ink-faint sm:block'>
               clique para pular até o lance
             </span>
           </div>
@@ -279,21 +329,26 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
 function NavBtn({
   onClick,
   disabled,
+  label,
   children,
 }: {
   onClick: () => void
   disabled?: boolean
+  label: string
   children: ReactNode
 }) {
   return (
-    <button
-      type='button'
+    <Button
       onClick={onClick}
       disabled={disabled}
-      className='rounded-lg px-3 py-1.5 text-lg text-ink-dim transition hover:bg-panel-3/60 disabled:opacity-30 disabled:hover:bg-transparent'
+      aria-label={label}
+      title={label}
+      variant='ghost'
+      size='icon'
+      className='text-ink-dim disabled:opacity-30'
     >
       {children}
-    </button>
+    </Button>
   )
 }
 
@@ -309,10 +364,16 @@ function PlayerTag({
   return (
     <div className='flex items-center gap-2 px-1 text-sm'>
       <span
-        className={`inline-block h-3 w-3 shrink-0 rounded-full border border-edge ${
-          color === 'w' ? 'bg-white' : 'bg-[#2d2a2e]'
-        }`}
-      />
+        className='flex h-5 w-5 shrink-0 items-center justify-center rounded-full ring-1 ring-edge'
+        style={{
+          backgroundColor:
+            color === 'w' ? 'var(--piece-white-bg)' : 'var(--piece-black-bg)',
+          color:
+            color === 'w' ? 'var(--piece-white-fg)' : 'var(--piece-black-fg)',
+        }}
+      >
+        <Crown size={11} strokeWidth={2.5} aria-hidden='true' />
+      </span>
       <span className='font-medium text-ink'>{name}</span>
       {elo ? (
         <span className='font-mono text-xs text-ink-dim'>({elo})</span>

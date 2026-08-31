@@ -1,5 +1,14 @@
+import { Gauge, Split, Timer } from 'lucide-react'
+import type { CSSProperties } from 'react'
 import { MAX_DEPTH, MIN_DEPTH } from '../lib/engine-tier'
 import { ENGINE_TIERS, type EngineMode } from '../types'
+import { Button } from './ui/button'
+import { Card } from './ui/card'
+
+/** O slider .engine-range lê o preenchimento da variável --fill (%). */
+function fill(pct: number): CSSProperties {
+  return { '--fill': `${pct}%` } as CSSProperties
+}
 
 interface Props {
   mode: EngineMode
@@ -61,7 +70,7 @@ export default function EngineTierSelector({
   const eta = estimateTimeSeconds(plies, seconds * 1000)
 
   return (
-    <div className='rounded-xl border border-edge bg-panel-2/60 p-5'>
+    <Card className='bg-panel-2/60 p-4'>
       {/* Mode toggle */}
       <div className='mb-4 flex items-baseline justify-between'>
         <div>
@@ -73,20 +82,26 @@ export default function EngineTierSelector({
           </p>
         </div>
       </div>
-      <div className='mb-5 grid grid-cols-2 gap-1 rounded-lg bg-panel-3/60 p-1'>
+      <div className='mb-5 grid grid-cols-2 gap-1 rounded-[calc(var(--control-radius)+2px)] border border-edge-soft bg-panel-3/60 p-1'>
         {(['depth', 'time'] as const).map((m) => (
-          <button
+          <Button
             key={m}
-            type='button'
             onClick={() => onModeChange(m)}
-            className={`rounded-md px-3 py-1.5 text-sm font-semibold transition ${
-              mode === m
-                ? 'bg-brand text-bg shadow'
-                : 'text-ink-dim hover:text-ink'
-            }`}
+            variant={mode === m ? 'default' : 'ghost'}
+            className='w-full'
           >
-            {m === 'depth' ? 'Profundidade' : 'Tempo'}
-          </button>
+            {m === 'depth' ? (
+              <>
+                <Gauge size={14} strokeWidth={2} aria-hidden='true' />
+                Profundidade
+              </>
+            ) : (
+              <>
+                <Timer size={14} strokeWidth={2} aria-hidden='true' />
+                Tempo
+              </>
+            )}
+          </Button>
         ))}
       </div>
 
@@ -110,9 +125,7 @@ export default function EngineTierSelector({
             onChange={(e) => onDepthChange(Number(e.currentTarget.value))}
             aria-label='Profundidade'
             className='engine-range w-full'
-            style={{
-              background: `linear-gradient(to right, var(--color-brand) 0%, var(--color-brand) ${depthPct}%, var(--color-panel-3) ${depthPct}%, var(--color-panel-3) 100%)`,
-            }}
+            style={fill(depthPct)}
           />
           <div className='mt-2 flex justify-between font-mono text-[11px] text-ink-faint'>
             <span>d{MIN_DEPTH}</span>
@@ -122,14 +135,14 @@ export default function EngineTierSelector({
             {ENGINE_TIERS.map((tier) => {
               const activeTier = tier.depth === clampedDepth
               return (
-                <button
+                <Button
                   key={tier.id}
-                  type='button'
                   onClick={() => onDepthChange(tier.depth)}
-                  className={`rounded-lg px-2 py-2 text-center transition ${
+                  variant='ghost'
+                  className={`h-auto w-full flex-col px-2 py-1.5 text-center ${
                     activeTier
-                      ? 'bg-brand/15 ring-1 ring-brand/50'
-                      : 'hover:bg-panel-3/50'
+                      ? 'border-brand/50 bg-brand/10 text-brand'
+                      : 'border-transparent'
                   }`}
                 >
                   <div
@@ -142,7 +155,7 @@ export default function EngineTierSelector({
                   <div className='font-mono text-[11px] text-ink-faint'>
                     d{tier.depth}
                   </div>
-                </button>
+                </Button>
               )
             })}
           </div>
@@ -171,9 +184,7 @@ export default function EngineTierSelector({
             }
             aria-label='Segundos por lance'
             className='engine-range w-full'
-            style={{
-              background: `linear-gradient(to right, var(--color-brand) 0%, var(--color-brand) ${timePct}%, var(--color-panel-3) ${timePct}%, var(--color-panel-3) 100%)`,
-            }}
+            style={fill(timePct)}
           />
           <div className='mt-2 flex justify-between font-mono text-[11px] text-ink-faint'>
             <span>{MIN_SECONDS}s</span>
@@ -192,7 +203,8 @@ export default function EngineTierSelector({
       {/* Lines slider (comum aos dois modos) */}
       <div className='mb-4 flex items-baseline justify-between'>
         <div>
-          <h3 className='text-sm font-semibold uppercase tracking-wide text-ink-dim'>
+          <h3 className='flex items-center gap-1.5 text-sm font-semibold uppercase tracking-wide text-ink-dim'>
+            <Split size={13} strokeWidth={2.2} aria-hidden='true' />
             Linhas de análise
           </h3>
           <p className='mt-0.5 text-xs text-ink-faint'>
@@ -213,9 +225,7 @@ export default function EngineTierSelector({
         onChange={(e) => onLinesChange(Number(e.currentTarget.value))}
         aria-label='Linhas de análise'
         className='engine-range w-full'
-        style={{
-          background: `linear-gradient(to right, var(--color-brand) 0%, var(--color-brand) ${linesPct}%, var(--color-panel-3) ${linesPct}%, var(--color-panel-3) 100%)`,
-        }}
+        style={fill(linesPct)}
       />
       <div className='mt-2 flex justify-between font-mono text-[11px] text-ink-faint'>
         {Array.from({ length: MAX_LINES }, (_, i) => i + 1).map((n) => (
@@ -229,7 +239,7 @@ export default function EngineTierSelector({
           ? 'Apenas a melhor linha (mais rápido)'
           : `${lines} linhas candidatas por lance`}
       </p>
-    </div>
+    </Card>
   )
 }
 
