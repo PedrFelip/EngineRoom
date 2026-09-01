@@ -78,6 +78,18 @@ export interface GameSummary {
   createdAt: string
 }
 
+/** Cursor estável para paginar o histórico na ordem mais recente primeiro. */
+export interface GameCursor {
+  createdAt: string
+  id: number
+}
+
+export interface GamePage {
+  games: GameSummary[]
+  total: number
+  nextCursor: GameCursor | null
+}
+
 /** Partida completa no store, para reabertura instantânea. */
 export interface StoredGame extends GameSummary {
   pgn: string

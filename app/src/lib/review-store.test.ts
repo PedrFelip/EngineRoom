@@ -123,4 +123,21 @@ describe('createReviewStore — navegação na linha principal', () => {
     store.goTo(99)
     expect(store.getSnapshot().currentPly).toBe(2)
   })
+
+  it('não notifica assinantes quando a navegação já está no destino', () => {
+    const store = createReviewStore()
+    const listener = vi.fn()
+    store.setResult(e4e5Result())
+    store.subscribe(listener)
+
+    store.next()
+    store.last()
+    store.goTo(2)
+    store.first()
+    store.prev()
+    store.goTo(0)
+
+    expect(listener).toHaveBeenCalledTimes(1)
+    expect(store.getSnapshot().currentPly).toBe(0)
+  })
 })

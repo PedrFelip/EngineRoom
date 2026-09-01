@@ -12,6 +12,7 @@ import {
   type AnalyzeControl,
   analyzeGame,
   analyzeGameAdaptive,
+  type WinPctUpdate,
 } from './analyze'
 import type { Backend } from './backend'
 import type { ReviewStore } from './review-store'
@@ -28,7 +29,8 @@ export interface ReviewProgress {
   total: number
   currentPly: number
   phase: Phase | null
-  winPcts: number[]
+  /** Buffer privado da sessão; a view deve criar seu snapshot antes de renderizar. */
+  winPcts: readonly number[]
   cachedPositions: number
   enginePositions: number
   remainingBudgetMs?: number
@@ -60,6 +62,7 @@ export function createReviewSession(opts: ReviewSessionOpts): ReviewSession {
   const { config, backend, store } = opts
   let cancelled = false
   let port: Awaited<ReturnType<Backend['createEnginePort']>> = null
+  const partialWinPcts: number[] = []
 
   const notify = (state: ReviewSessionState) => {
     if (!cancelled) opts.onStateChange(state)
@@ -76,13 +79,14 @@ export function createReviewSession(opts: ReviewSessionOpts): ReviewSession {
         return
       }
 
+      partialWinPcts.length = 0
       opts.onProgress({
         stage: 'preparing',
         completed: 0,
         total: config.meta.plies + 1,
         currentPly: 0,
         phase: null,
-        winPcts: [],
+        winPcts: partialWinPcts,
         cachedPositions: 0,
         enginePositions: 0,
       })
@@ -108,8 +112,14 @@ export function createReviewSession(opts: ReviewSessionOpts): ReviewSession {
         ...sizing,
         cache: backend.createPositionCache(),
         keepAlive: false,
-        onDetailedProgress: (progress: AnalysisProgress) => {
-          if (!cancelled) opts.onProgress(progress)
+        onDetailedProgress: (
+          progress: AnalysisProgress,
+          update: WinPctUpdate | undefined,
+        ) => {
+          if (update) partialWinPcts[update.index] = update.winPct
+          if (!cancelled) {
+            opts.onProgress({ ...progress, winPcts: partialWinPcts })
+          }
         },
       }
       const profile = adaptiveProfileForKind(config.analysisKind)

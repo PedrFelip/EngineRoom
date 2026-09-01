@@ -32,7 +32,14 @@ export function createReviewStore(): ReviewStore {
   const listeners = new Set<() => void>()
 
   function commit(next: Partial<ReviewStoreSnapshot>): void {
-    snapshot = { ...snapshot, ...next }
+    const nextSnapshot = { ...snapshot, ...next }
+    if (
+      nextSnapshot.result === snapshot.result &&
+      nextSnapshot.currentPly === snapshot.currentPly
+    ) {
+      return
+    }
+    snapshot = nextSnapshot
     for (const l of listeners) l()
   }
 

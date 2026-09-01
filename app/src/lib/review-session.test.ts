@@ -2,7 +2,11 @@ import { describe, expect, it, vi } from 'vitest'
 import type { ReviewConfig } from '../types'
 import type { PositionCache } from './analyze'
 import type { Backend, EnginePortHandle } from './backend'
-import { createReviewSession, type ReviewSessionState } from './review-session'
+import {
+  createReviewSession,
+  type ReviewProgress,
+  type ReviewSessionState,
+} from './review-session'
 import { createReviewStore } from './review-store'
 
 /** Port que responde o handshake UCI e cada `go` com info + bestmove.
@@ -149,7 +153,10 @@ function startSession(opts: {
 }) {
   const states: ReviewSessionState[] = []
   const store = opts.store ?? createReviewStore()
-  const onProgress = vi.fn()
+  const progressSnapshots: number[][] = []
+  const onProgress = vi.fn((progress: ReviewProgress) => {
+    progressSnapshots.push(progress.winPcts.slice())
+  })
   const session = createReviewSession({
     config: opts.config,
     backend: opts.backend,
@@ -157,7 +164,7 @@ function startSession(opts: {
     onStateChange: (s) => states.push(s),
     onProgress,
   })
-  return { session, store, states, onProgress }
+  return { session, store, states, onProgress, progressSnapshots }
 }
 
 describe('createReviewSession — análise nova', () => {
@@ -175,9 +182,9 @@ describe('createReviewSession — análise nova', () => {
     expect(states.at(-1)?.status).toBe('done')
   })
 
-  it('repassa progresso rico a cada posição analisada (sem coalescing)', async () => {
+  it('monta o buffer parcial a partir das atualizações indexadas', async () => {
     const port = fakeEnginePort()
-    const { session, onProgress } = startSession({
+    const { session, onProgress, progressSnapshots } = startSession({
       config: depthConfig(),
       backend: fakeBackend(port),
     })
@@ -186,14 +193,10 @@ describe('createReviewSession — análise nova', () => {
 
     expect(onProgress).toHaveBeenCalledTimes(5)
     expect(
-      onProgress.mock.calls
-        .slice(1, 4)
-        .map(([progress]) => progress.winPcts.length),
+      progressSnapshots.slice(1, 4).map((winPcts) => winPcts.length),
     ).toEqual([1, 2, 3])
     expect(
-      onProgress.mock.calls[4][0].winPcts.every(
-        (w: number) => Math.abs(w - 50) < 0.1,
-      ),
+      progressSnapshots[4].every((w: number) => Math.abs(w - 50) < 0.1),
     ).toBe(true)
     expect(onProgress.mock.calls[0][0].stage).toBe('preparing')
     expect(onProgress.mock.calls[1][0]).toMatchObject({
@@ -202,6 +205,14 @@ describe('createReviewSession — análise nova', () => {
       total: 3,
       phase: 'opening',
     })
+    expect(
+      onProgress.mock.calls
+        .slice(1)
+        .every(
+          ([progress]) =>
+            progress.winPcts === onProgress.mock.calls[0][0].winPcts,
+        ),
+    ).toBe(true)
   })
 
   it('persiste a revisão exatamente uma vez e encerra a engine (quit)', async () => {
