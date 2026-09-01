@@ -4,8 +4,6 @@ import {
   centipawnLoss,
   classifyMove,
   cpToWinPct,
-  detectBrilliant,
-  detectGreatMove,
   formatEval,
   gameAccuracy,
   lichessVolatilityWeights,
@@ -132,83 +130,6 @@ describe('classifyMove', () => {
   })
 })
 
-describe('detectBrilliant', () => {
-  const ok = {
-    winPctLoss: 0,
-    winPctBefore: 52,
-    winPctAfter: 50,
-    materialDelta: -2,
-    hasSecondLine: false,
-  }
-
-  it('aceita o melhor lance com sacrifício de 2 peões', () => {
-    expect(detectBrilliant(ok)).toBe(true)
-  })
-
-  it('exige sacrifício de pelo menos 2 peões', () => {
-    expect(detectBrilliant({ ...ok, materialDelta: -1.99 })).toBe(false)
-    expect(detectBrilliant({ ...ok, materialDelta: 0 })).toBe(false)
-  })
-
-  it('rejeita quem fica em posição ruim depois do lance', () => {
-    expect(detectBrilliant({ ...ok, winPctAfter: 34.9 })).toBe(false)
-    expect(detectBrilliant({ ...ok, winPctAfter: 35 })).toBe(true)
-  })
-
-  it('rejeita quem já partiu de vitória esmagadora', () => {
-    expect(detectBrilliant({ ...ok, winPctBefore: 85 })).toBe(true)
-    expect(detectBrilliant({ ...ok, winPctBefore: 85.1 })).toBe(false)
-  })
-
-  it('exige o lance exato sem 2ª linha; com ela tolera quase-melhor', () => {
-    expect(detectBrilliant({ ...ok, winPctLoss: 0.1 })).toBe(false)
-    expect(
-      detectBrilliant({ ...ok, winPctLoss: 0.5, hasSecondLine: true }),
-    ).toBe(true)
-    expect(
-      detectBrilliant({ ...ok, winPctLoss: 0.6, hasSecondLine: true }),
-    ).toBe(false)
-  })
-})
-
-describe('detectGreatMove', () => {
-  const base = {
-    winPctLoss: 0,
-    playedUci: 'e2e4',
-    bestUci: 'e2e4',
-    bestWinPct: 50,
-    secondWinPct: 30,
-  }
-
-  it('aceita o único lance que salva uma posição igual', () => {
-    expect(detectGreatMove(base)).toBe(true)
-  })
-
-  it('aceita o único lance que preserva uma posição vencedora', () => {
-    expect(detectGreatMove({ ...base, bestWinPct: 70, secondWinPct: 50 })).toBe(
-      true,
-    )
-  })
-
-  it('exige uma segunda linha e uma mudança de faixa relevante', () => {
-    expect(detectGreatMove({ ...base, secondWinPct: null })).toBe(false)
-    expect(detectGreatMove({ ...base, secondWinPct: 40 })).toBe(false)
-    expect(detectGreatMove({ ...base, bestWinPct: 60, secondWinPct: 40 })).toBe(
-      false,
-    )
-  })
-
-  it('rejeita lance que não é melhor nem praticamente equivalente', () => {
-    expect(
-      detectGreatMove({
-        ...base,
-        playedUci: 'd2d4',
-        winPctLoss: 0.6,
-      }),
-    ).toBe(false)
-  })
-})
-
 describe('gameAccuracy', () => {
   const move = (color: 'w' | 'b') => ({ color })
   const initialWinPct = cpToWinPct(15)
@@ -300,8 +221,6 @@ describe('centipawnLoss', () => {
 
 describe('CLASSIFICATION_LABELS', () => {
   it('mapeia cada classificação ao seu rótulo em pt-BR', () => {
-    expect(CLASSIFICATION_LABELS.brilhante).toBe('Brilhante')
-    expect(CLASSIFICATION_LABELS.otimo).toBe('Ótimo')
     expect(CLASSIFICATION_LABELS.melhor).toBe('Melhor')
     expect(CLASSIFICATION_LABELS.excelente).toBe('Excelente')
     expect(CLASSIFICATION_LABELS.bom).toBe('Bom')

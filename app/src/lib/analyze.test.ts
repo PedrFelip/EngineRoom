@@ -261,7 +261,7 @@ describe('buildReview', () => {
   })
 })
 
-describe('buildReview — lance brilhante', () => {
+describe('buildReview — classificação objetiva', () => {
   // Bispo em c4 captura o peão de f7; rei recaptura: -2 peões (sacrifício).
   const SAC_BEFORE =
     'rnbqkbnr/pppppppp/8/8/2B1P3/8/PPPP1PPP/RNBQK1NR w KQkq - 0 1'
@@ -284,7 +284,7 @@ describe('buildReview — lance brilhante', () => {
     ],
   }
 
-  it('classifica sacrifício de peça com avaliação estável como Brilhante', () => {
+  it('classifica sacrifício sem perda de win% como Melhor', () => {
     const raw = [
       { fen: SAC_BEFORE, cp: 30, depth: 20, pv: ['c4f7'] },
       { fen: SAC_AFTER, cp: -30, depth: 20, pv: ['e8f7'] },
@@ -292,11 +292,11 @@ describe('buildReview — lance brilhante', () => {
 
     const review = buildReview(sacGame, raw)
 
-    expect(review.moves[0].classification).toBe('brilhante')
+    expect(review.moves[0].classification).toBe('melhor')
     expect(review.moves[0].winPctLoss).toBe(0)
   })
 
-  it('troca simétrica de peões não é Brilhante', () => {
+  it('classifica troca simétrica sem perda como Melhor', () => {
     const game = {
       startFen: TRADE_BEFORE,
       moves: [
@@ -317,7 +317,7 @@ describe('buildReview — lance brilhante', () => {
     expect(buildReview(game, raw).moves[0].classification).toBe('melhor')
   })
 
-  it('não é Brilhante partindo de posição já ganha', () => {
+  it('classifica lance sem perda como Melhor mesmo em posição ganha', () => {
     const raw = [
       { fen: SAC_BEFORE, cp: 600, depth: 20, pv: ['c4f7'] },
       { fen: SAC_AFTER, cp: -600, depth: 20, pv: ['e8f7'] },
@@ -326,7 +326,7 @@ describe('buildReview — lance brilhante', () => {
     expect(buildReview(sacGame, raw).moves[0].classification).toBe('melhor')
   })
 
-  it('não é Brilhante quando o lance deixa a posição ruim', () => {
+  it('classifica pela perda quando o lance deixa a posição ruim', () => {
     const raw = [
       { fen: SAC_BEFORE, cp: 30, depth: 20, pv: ['c4f7'] },
       { fen: SAC_AFTER, cp: 300, depth: 20, pv: ['e8f7'] },
@@ -336,12 +336,12 @@ describe('buildReview — lance brilhante', () => {
     expect(buildReview(sacGame, raw).moves[0].classification).toBe('blunder')
   })
 
-  it('quase-melhor só vale Brilhante com 2ª linha candidata', () => {
+  it('MultiPV não promove a classificação baseada em win%', () => {
     const rawSingle = [
       { fen: SAC_BEFORE, cp: 30, depth: 20, pv: ['c4f7'] },
       { fen: SAC_AFTER, cp: -28, depth: 20, pv: ['e8f7'] },
     ]
-    // Perda ~0,2 win% sem 2ª linha → Excelente, não Brilhante.
+    // Perda ~0,2 win% → Excelente, independentemente da 2ª linha.
     expect(buildReview(sacGame, rawSingle).moves[0].classification).toBe(
       'excelente',
     )
@@ -360,11 +360,11 @@ describe('buildReview — lance brilhante', () => {
       { fen: SAC_AFTER, cp: -28, depth: 20, pv: ['e8f7'] },
     ]
     expect(buildReview(sacGame, rawMulti).moves[0].classification).toBe(
-      'brilhante',
+      'excelente',
     )
   })
 
-  it('lance de livro nunca é Brilhante', () => {
+  it('mantém Livro acima da classificação por perda', () => {
     const raw = [
       { fen: SAC_BEFORE, cp: 30, depth: 20, pv: ['c4f7'] },
       { fen: SAC_AFTER, cp: -30, depth: 20, pv: ['e8f7'] },
@@ -380,7 +380,7 @@ describe('buildReview — lance brilhante', () => {
   })
 })
 
-describe('buildReview — lance ótimo', () => {
+describe('buildReview — alternativas MultiPV', () => {
   const game = {
     startFen: START_FEN,
     moves: [
@@ -394,7 +394,7 @@ describe('buildReview — lance ótimo', () => {
     ],
   }
 
-  it('promove o único lance que mantém a igualdade', () => {
+  it('não promove o único lance que mantém a igualdade', () => {
     const raw = [
       {
         fen: START_FEN,
@@ -409,7 +409,7 @@ describe('buildReview — lance ótimo', () => {
       { fen: AFTER_E4, cp: 0, depth: 20, pv: ['e7e5'] },
     ]
 
-    expect(buildReview(game, raw).moves[0].classification).toBe('otimo')
+    expect(buildReview(game, raw).moves[0].classification).toBe('melhor')
   })
 
   it('não promove sem uma segunda linha que atravesse a faixa de resultado', () => {
@@ -430,7 +430,7 @@ describe('buildReview — lance ótimo', () => {
     expect(buildReview(game, raw).moves[0].classification).toBe('melhor')
   })
 
-  it('mantém Livro acima de Ótimo na precedência', () => {
+  it('mantém Livro acima da classificação por perda', () => {
     const raw = [
       {
         fen: START_FEN,

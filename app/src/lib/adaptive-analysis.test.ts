@@ -42,15 +42,15 @@ const raw: RawPosition[] = [
 ]
 
 describe('política de análise adaptativa', () => {
-  it('marca sacrifício correto como candidato duro a refinamento', () => {
+  it('não trata sacrifício como candidato heurístico especial', () => {
     const [critical] = rankCriticalMoves([move], raw)
 
-    expect(critical.hard).toBe(true)
-    expect(critical.brilliantCandidate).toBe(true)
-    expect(critical.reasons).toContain('candidato a brilhante')
+    expect(critical.hard).toBe(false)
+    expect(critical).not.toHaveProperty('brilliantCandidate')
+    expect(critical.reasons).not.toContain('candidato a brilhante')
   })
 
-  it('refina somente as posições antes e depois do lance selecionado', () => {
+  it('não força refinamento apenas por um sacrifício sem perda', () => {
     const critical = rankCriticalMoves([move], raw)
     const targets = selectRefinementTargets(
       critical,
@@ -58,11 +58,10 @@ describe('política de análise adaptativa', () => {
       ADAPTIVE_PROFILES.fast,
     )
 
-    expect(targets.map((target) => target.positionIndex).sort()).toEqual([0, 1])
-    expect(targets.every((target) => target.budget === 'high')).toBe(true)
+    expect(targets).toEqual([])
   })
 
-  it('marca como duro um candidato a único lance bom', () => {
+  it('não marca como duro um suposto único lance bom', () => {
     const candidateRaw: RawPosition[] = [
       {
         ...raw[0],
@@ -76,9 +75,9 @@ describe('política de análise adaptativa', () => {
     ]
     const [critical] = rankCriticalMoves([move], candidateRaw)
 
-    expect(critical.greatCandidate).toBe(true)
-    expect(critical.hard).toBe(true)
-    expect(critical.reasons).toContain('candidato a ótimo')
+    expect(critical.hard).toBe(false)
+    expect(critical).not.toHaveProperty('greatCandidate')
+    expect(critical.reasons).not.toContain('candidato a ótimo')
   })
 
   it('não aprofunda lance que ainda pertence ao livro', () => {

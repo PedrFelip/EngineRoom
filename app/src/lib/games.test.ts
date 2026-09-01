@@ -169,4 +169,55 @@ describe('storedToConfig', () => {
     expect(result.accuracy.white).toBeCloseTo(17.8, 1)
     expect(result.accuracyByPhase.opening.white).toBeCloseTo(17.8, 1)
   })
+
+  it('reclassifica Brilhante e Ótimo de revisões salvas', () => {
+    const START = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1'
+    const position = (ply: number) => ({
+      ply,
+      fen: START,
+      phase: 'opening',
+      depth: 20,
+      cp: 0,
+      winPct: 50,
+      pv: [],
+      lines: [],
+    })
+    const move = (
+      ply: number,
+      color: 'w' | 'b',
+      classification: string,
+      winPctLoss: number,
+    ) => ({
+      ply,
+      color,
+      san: 'Nf3',
+      uci: 'g1f3',
+      fenBefore: START,
+      classification,
+      winPctBefore: 50,
+      winPctAfter: 50 - winPctLoss,
+      winPctLoss,
+      cpLoss: 0,
+      bestUci: 'g1f3',
+      isBook: false,
+      eco: null,
+    })
+    const legacyReview = {
+      ...REVIEW,
+      positions: [position(0), position(1), position(2)],
+      moves: [
+        move(1, 'w', 'brilhante', 0),
+        move(2, 'b', 'otimo', 1),
+      ],
+    }
+
+    const result = storedToConfig(
+      stored({ reviewJson: JSON.stringify(legacyReview) }),
+    ).initialResult
+
+    expect(result.moves.map((item) => item.classification)).toEqual([
+      'melhor',
+      'excelente',
+    ])
+  })
 })
