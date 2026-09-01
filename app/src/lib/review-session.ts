@@ -5,9 +5,10 @@
  * sobre o seam `Backend`, testável com fakes (mesma disciplina do `EnginePort`).
  */
 
-import type { ReviewConfig, ReviewResult } from '../types'
+import type { Phase, ReviewConfig, ReviewResult } from '../types'
 import { adaptiveProfileForKind } from './adaptive-analysis'
 import {
+  type AnalysisProgress,
   type AnalyzeControl,
   analyzeGame,
   analyzeGameAdaptive,
@@ -21,6 +22,18 @@ export interface ReviewSessionState {
   error: string | null
 }
 
+export interface ReviewProgress {
+  stage: 'preparing' | AnalysisProgress['stage']
+  completed: number
+  total: number
+  currentPly: number
+  phase: Phase | null
+  winPcts: number[]
+  cachedPositions: number
+  enginePositions: number
+  remainingBudgetMs?: number
+}
+
 export interface ReviewSessionOpts {
   config: ReviewConfig
   /** Caminho custom da engine (settings); undefined usa o sidecar. */
@@ -28,8 +41,8 @@ export interface ReviewSessionOpts {
   backend: Backend
   store: ReviewStore
   onStateChange(state: ReviewSessionState): void
-  /** winPcts parciais (POV brancas) por posição analisada — crus, sem rAF. */
-  onProgress(winPcts: number[]): void
+  /** Progresso rico da engine — cru, antes do coalescing por rAF da view. */
+  onProgress(progress: ReviewProgress): void
 }
 
 export interface ReviewSession {
@@ -65,6 +78,17 @@ export function createReviewSession(opts: ReviewSessionOpts): ReviewSession {
         return
       }
 
+      opts.onProgress({
+        stage: 'preparing',
+        completed: 0,
+        total: config.meta.plies + 1,
+        currentPly: 0,
+        phase: null,
+        winPcts: [],
+        cachedPositions: 0,
+        enginePositions: 0,
+      })
+
       port = await backend.createEnginePort(
         opts.enginePath || undefined,
         () => cancelled,
@@ -89,8 +113,8 @@ export function createReviewSession(opts: ReviewSessionOpts): ReviewSession {
         ...sizing,
         cache: backend.createPositionCache(),
         keepAlive: false,
-        onProgress: (wp: number[]) => {
-          if (!cancelled) opts.onProgress(wp)
+        onDetailedProgress: (progress: AnalysisProgress) => {
+          if (!cancelled) opts.onProgress(progress)
         },
       }
       const profile = adaptiveProfileForKind(config.analysisKind)

@@ -16,15 +16,12 @@ import {
   selectRefinementTargets,
 } from './adaptive-analysis'
 import { type EcoEntry, lookupOpening } from './eco'
-import { materialDeltaAfterReplies } from './material'
 import { computePhases } from './phase'
 import {
   ACCURACY_MODEL_VERSION,
   centipawnLoss,
   classifyMove,
   cpToWinPct,
-  detectBrilliant,
-  detectGreatMove,
   gameAccuracy,
   sideToMoveAtPly,
   whiteCp,
@@ -111,34 +108,7 @@ export function buildReview(
     const winPctLoss = Math.max(0, winPctBefore - winPctAfter)
     const cpLoss = centipawnLoss(before.cp, after.cp)
     const isBook = !!book && m.ply <= book.maxPly
-    const base = classifyMove(winPctLoss, isBook)
-    // Inclui a melhor resposta adversária para medir o sacrifício líquido.
-    const materialDelta = materialDeltaAfterReplies(
-      m.fenBefore,
-      m.uci,
-      after.pv[0] ?? null,
-    )
-    const brilliant =
-      !isBook &&
-      detectBrilliant({
-        winPctLoss,
-        winPctBefore,
-        winPctAfter,
-        materialDelta,
-        hasSecondLine: (before.lines?.length ?? 1) >= 2,
-      })
-    const firstLine = before.lines?.find((line) => line.multipv === 1)
-    const secondLine = before.lines?.find((line) => line.multipv === 2)
-    const great =
-      !isBook &&
-      detectGreatMove({
-        winPctLoss,
-        playedUci: m.uci,
-        bestUci: before.pv[0] ?? null,
-        bestWinPct: cpToWinPct(firstLine?.cp ?? before.cp),
-        secondWinPct: secondLine ? cpToWinPct(secondLine.cp) : null,
-      })
-    const classification = brilliant ? 'brilhante' : great ? 'otimo' : base
+    const classification = classifyMove(winPctLoss, isBook)
     return {
       ply: m.ply,
       color: m.color,
@@ -254,6 +224,26 @@ export function defaultGoTimeout(control: AnalyzeControl): number {
 
 /** Modo de análise: por profundidade fixa ou por tempo fixo por lance. */
 export type EngineMode = AnalyzeControl['mode']
+
+export type AnalysisProgressStage =
+  | 'analyzing'
+  | 'triage'
+  | 'refinement'
+  | 'finalizing'
+
+/** Progresso rico para a UI; `onProgress` permanece como seam do grafico. */
+export interface AnalysisProgress {
+  stage: AnalysisProgressStage
+  completed: number
+  total: number
+  currentPly: number
+  phase: Phase
+  winPcts: number[]
+  cachedPositions: number
+  enginePositions: number
+  /** Teto de tempo ainda orcado pelo modo `movetime`; ausente em depth. */
+  remainingBudgetMs?: number
+}
 
 /**
  * Cache de avaliações por posição, chaveado por (fen, mode, value, multipv),
@@ -515,6 +505,7 @@ export async function analyzeGame(
      * alimentar o gráfico de avaliação durante o loading.
      */
     onProgress?: (winPcts: number[]) => void
+    onDetailedProgress?: (progress: AnalysisProgress) => void
   } = {},
 ): Promise<ReviewResult> {
   const { positionFens, moves } = extractGame(pgn)
@@ -534,6 +525,9 @@ export async function analyzeGame(
   const pendingPuts: RawPosition[] = []
   const raw: RawPosition[] = []
   const winPcts: number[] = []
+  const phases = computePhases(positionFens.map((fen) => ({ fen })))
+  let cachedPositions = 0
+  let enginePositions = 0
   try {
     for (let i = 0; i < positionFens.length; i++) {
       const fen = positionFens[i]
@@ -551,8 +545,10 @@ export async function analyzeGame(
         const cached = hits[i]
         if (cached) {
           pos = cached
+          cachedPositions++
         } else {
           pos = await evalPosition(port, fen, control, goTimeoutMs)
+          enginePositions++
           for (const l of pos.lines ?? []) {
             l.san = l.pv[0] ? uciToSan(pos.fen, l.pv[0]) : null
           }
@@ -574,6 +570,26 @@ export async function analyzeGame(
       raw.push(pos)
       winPcts.push(whiteWinPct(pos.cp, sideToMoveAtPly(game.moves, i)))
       opts.onProgress?.(winPcts.slice())
+      const remainingTimedPositions =
+        control.mode === 'time'
+          ? positionFens.slice(i + 1).filter((remainingFen, offset) => {
+              const remainingIndex = i + 1 + offset
+              return terminalCp(remainingFen) === null && !hits[remainingIndex]
+            }).length
+          : 0
+      opts.onDetailedProgress?.({
+        stage: 'analyzing',
+        completed: i + 1,
+        total: positionFens.length,
+        currentPly: i,
+        phase: phases[i],
+        winPcts: winPcts.slice(),
+        cachedPositions,
+        enginePositions,
+        ...(control.mode === 'time'
+          ? { remainingBudgetMs: remainingTimedPositions * control.movetimeMs }
+          : {}),
+      })
     }
   } catch (err) {
     // Descarrega o buffer mesmo se a análise abortar no meio: posições já
@@ -595,6 +611,16 @@ export async function analyzeGame(
     // Caminho de sucesso: o cache é caminho crítico, não best-effort.
     await opts.cache.putMany(pendingPuts, control.mode, keyValue, multipv)
   }
+  opts.onDetailedProgress?.({
+    stage: 'finalizing',
+    completed: positionFens.length,
+    total: positionFens.length,
+    currentPly: positionFens.length - 1,
+    phase: phases[phases.length - 1] ?? 'opening',
+    winPcts: winPcts.slice(),
+    cachedPositions,
+    enginePositions,
+  })
   if (!opts.keepAlive) await port.send('quit')
 
   const opening = await lookupOpening(moves.map((m) => m.san))
@@ -621,6 +647,7 @@ export async function analyzeGameAdaptive(
     keepAlive?: boolean
     goTimeoutMs?: number
     onProgress?: (winPcts: number[]) => void
+    onDetailedProgress?: (progress: AnalysisProgress) => void
   } = {},
 ): Promise<ReviewResult> {
   const profile = ADAPTIVE_PROFILES[profileId]
@@ -647,6 +674,9 @@ export async function analyzeGameAdaptive(
     : positionFens.map(() => null)
   const raw: RawPosition[] = []
   const triagePuts: RawPosition[] = []
+  const phases = computePhases(positionFens.map((fen) => ({ fen })))
+  let cachedPositions = 0
+  let enginePositions = 0
 
   async function flushTriagePuts(): Promise<void> {
     if (!opts.cache || !triagePuts.length) return
@@ -669,6 +699,7 @@ export async function analyzeGameAdaptive(
         pos = terminalPosition(fen, term)
       } else if (cached) {
         pos = cached
+        cachedPositions++
       } else {
         pos = await evalPosition(
           port,
@@ -677,11 +708,32 @@ export async function analyzeGameAdaptive(
           opts.goTimeoutMs ?? defaultGoTimeout(triageControl),
         )
         addSanToLines(pos)
+        enginePositions++
         triagePuts.push(pos)
         if (triagePuts.length >= 8) await flushTriagePuts()
       }
       raw.push(pos)
-      opts.onProgress?.(progressWinPcts(raw, moves))
+      const winPcts = progressWinPcts(raw, moves)
+      opts.onProgress?.(winPcts)
+      const remainingTimedPositions = positionFens
+        .slice(index + 1)
+        .filter((remainingFen, offset) => {
+          const remainingIndex = index + 1 + offset
+          return (
+            terminalCp(remainingFen) === null && !triageHits[remainingIndex]
+          )
+        }).length
+      opts.onDetailedProgress?.({
+        stage: 'triage',
+        completed: index + 1,
+        total: positionFens.length,
+        currentPly: index,
+        phase: phases[index],
+        winPcts,
+        cachedPositions,
+        enginePositions,
+        remainingBudgetMs: remainingTimedPositions * profile.triageMs,
+      })
     }
 
     await flushTriagePuts()
@@ -696,8 +748,11 @@ export async function analyzeGameAdaptive(
       positionFens.length,
       profile,
     )
+    const refinementTargets = targets.filter(
+      (target) => terminalCp(positionFens[target.positionIndex]) === null,
+    )
 
-    if (targets.length > 0) {
+    if (refinementTargets.length > 0) {
       if (profile.refinementMultipv !== profile.triageMultipv) {
         await port.send(
           `setoption name Multipv value ${profile.refinementMultipv}`,
@@ -705,10 +760,31 @@ export async function analyzeGameAdaptive(
         await ask(port, 'isready', isReadyOk)
       }
 
+      let refined = 0
+      const refinementBudget = (target: (typeof refinementTargets)[number]) =>
+        target.budget === 'high' ? profile.highMs : profile.mediumMs
+      let remainingRefinementBudgetMs = refinementTargets.reduce(
+        (sum, target) => sum + refinementBudget(target),
+        0,
+      )
+      opts.onDetailedProgress?.({
+        stage: 'refinement',
+        completed: 0,
+        total: refinementTargets.length,
+        currentPly: refinementTargets[0].positionIndex,
+        phase: phases[refinementTargets[0].positionIndex],
+        winPcts: progressWinPcts(raw, moves),
+        cachedPositions,
+        enginePositions,
+        remainingBudgetMs: remainingRefinementBudgetMs,
+      })
+
       for (const budget of ['high', 'medium'] as const) {
         const movetimeMs = budget === 'high' ? profile.highMs : profile.mediumMs
         const control: AnalyzeControl = { mode: 'time', movetimeMs }
-        const group = targets.filter((target) => target.budget === budget)
+        const group = refinementTargets.filter(
+          (target) => target.budget === budget,
+        )
         const refinementPuts: RawPosition[] = []
 
         for (const target of group) {
@@ -723,7 +799,9 @@ export async function analyzeGameAdaptive(
                 profile.refinementMultipv,
               )
             : null
-          if (!pos) {
+          if (pos) {
+            cachedPositions++
+          } else {
             pos = await evalPosition(
               port,
               fen,
@@ -731,10 +809,25 @@ export async function analyzeGameAdaptive(
               opts.goTimeoutMs ?? defaultGoTimeout(control),
             )
             addSanToLines(pos)
+            enginePositions++
             refinementPuts.push(pos)
           }
           raw[index] = pos
-          opts.onProgress?.(progressWinPcts(raw, moves))
+          refined++
+          remainingRefinementBudgetMs -= movetimeMs
+          const winPcts = progressWinPcts(raw, moves)
+          opts.onProgress?.(winPcts)
+          opts.onDetailedProgress?.({
+            stage: 'refinement',
+            completed: refined,
+            total: refinementTargets.length,
+            currentPly: index,
+            phase: phases[index],
+            winPcts,
+            cachedPositions,
+            enginePositions,
+            remainingBudgetMs: remainingRefinementBudgetMs,
+          })
         }
 
         if (opts.cache && refinementPuts.length) {
@@ -748,6 +841,16 @@ export async function analyzeGameAdaptive(
       }
     }
 
+    opts.onDetailedProgress?.({
+      stage: 'finalizing',
+      completed: positionFens.length,
+      total: positionFens.length,
+      currentPly: positionFens.length - 1,
+      phase: phases[phases.length - 1] ?? 'opening',
+      winPcts: progressWinPcts(raw, moves),
+      cachedPositions,
+      enginePositions,
+    })
     if (!opts.keepAlive) await port.send('quit')
     return buildReview(game, raw, book)
   } catch (err) {

@@ -176,7 +176,7 @@ describe('createReviewSession — análise nova', () => {
     expect(states.at(-1)?.status).toBe('done')
   })
 
-  it('repassa winPcts crus a cada posição analisada (sem coalescing)', async () => {
+  it('repassa progresso rico a cada posição analisada (sem coalescing)', async () => {
     const port = fakeEnginePort()
     const { session, onProgress } = startSession({
       config: depthConfig(),
@@ -185,11 +185,24 @@ describe('createReviewSession — análise nova', () => {
 
     await session.start()
 
-    expect(onProgress).toHaveBeenCalledTimes(3)
-    expect(onProgress.mock.calls.map(([wp]) => wp.length)).toEqual([1, 2, 3])
+    expect(onProgress).toHaveBeenCalledTimes(5)
     expect(
-      onProgress.mock.calls[2][0].every((w: number) => Math.abs(w - 50) < 0.1),
+      onProgress.mock.calls
+        .slice(1, 4)
+        .map(([progress]) => progress.winPcts.length),
+    ).toEqual([1, 2, 3])
+    expect(
+      onProgress.mock.calls[4][0].winPcts.every(
+        (w: number) => Math.abs(w - 50) < 0.1,
+      ),
     ).toBe(true)
+    expect(onProgress.mock.calls[0][0].stage).toBe('preparing')
+    expect(onProgress.mock.calls[1][0]).toMatchObject({
+      stage: 'analyzing',
+      completed: 1,
+      total: 3,
+      phase: 'opening',
+    })
   })
 
   it('persiste a revisão exatamente uma vez e encerra a engine (quit)', async () => {

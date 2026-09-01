@@ -11,7 +11,12 @@ import { accuracyByPhaseOf } from './analyze'
 import { resolveEngineTier } from './engine-tier'
 import { parsePgn } from './pgn'
 import { computePhases } from './phase'
-import { ACCURACY_MODEL_VERSION, centipawnLoss, gameAccuracy } from './scoring'
+import {
+  ACCURACY_MODEL_VERSION,
+  centipawnLoss,
+  classifyMove,
+  gameAccuracy,
+} from './scoring'
 
 /** Lista as partidas analisadas, da mais recente para a mais antiga. */
 export function listGames(): Promise<GameSummary[]> {
@@ -66,15 +71,25 @@ export function saveReview(
 }
 
 /**
- * Garante que uma revisão (possivelmente antiga, do store) tenha `phase`,
- * `cpLoss` e accuracy no modelo atual. Recomputa a partir das avaliações já
- * persistidas — puro e barato. Partidas novas passam ilesas.
+ * Garante que uma revisão (possivelmente antiga, do store) tenha apenas
+ * classificações atuais, `phase`, `cpLoss` e accuracy no modelo atual.
+ * Recomputa a partir das avaliações já persistidas — puro e barato.
  */
 function normalizeReview(result: ReviewResult): ReviewResult {
   const hasPhases = result.positions.every((p) => p.phase)
   const hasCpLoss = result.moves.every((m) => Number.isFinite(m.cpLoss))
+  const hasCurrentClassifications = result.moves.every((move) => {
+    const classification = move.classification as string
+    return classification !== 'brilhante' && classification !== 'otimo'
+  })
   const hasCurrentAccuracy = result.accuracyModel === ACCURACY_MODEL_VERSION
-  if (hasPhases && result.accuracyByPhase && hasCpLoss && hasCurrentAccuracy) {
+  if (
+    hasPhases &&
+    result.accuracyByPhase &&
+    hasCpLoss &&
+    hasCurrentClassifications &&
+    hasCurrentAccuracy
+  ) {
     return result
   }
   const phases = computePhases(result.positions)
@@ -83,11 +98,17 @@ function normalizeReview(result: ReviewResult): ReviewResult {
     phase: p.phase ?? phases[i],
   }))
   const moves = result.moves.map((move) => {
-    if (Number.isFinite(move.cpLoss)) return move
+    const legacyClassification = move.classification as string
+    const classification =
+      legacyClassification === 'brilhante' || legacyClassification === 'otimo'
+        ? classifyMove(move.winPctLoss, move.isBook)
+        : move.classification
+    if (Number.isFinite(move.cpLoss)) return { ...move, classification }
     const before = result.positions[move.ply - 1]
     const after = result.positions[move.ply]
     return {
       ...move,
+      classification,
       cpLoss: before && after ? centipawnLoss(before.cp, after.cp) : 0,
     }
   })

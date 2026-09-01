@@ -16,6 +16,7 @@ import type { ReviewConfig, ReviewResult } from '../types'
 import { createTauriBackend } from './backend'
 import {
   createReviewSession,
+  type ReviewProgress,
   type ReviewSession,
   type ReviewSessionState,
 } from './review-session'
@@ -28,6 +29,7 @@ export interface UseReview {
   error: string | null
   /** winPcts parciais (POV brancas) que alimentam o gráfico durante o loading. */
   partialWinPcts: number[]
+  progress: ReviewProgress
   currentPly: number
   orientation: 'white' | 'black'
   goTo: (ply: number) => void
@@ -53,13 +55,22 @@ export function useReview(config: ReviewConfig): UseReview {
     status: 'running',
     error: null,
   })
-  const [partialWinPcts, setPartialWinPcts] = useState<number[]>([])
+  const [progress, setProgress] = useState<ReviewProgress>({
+    stage: 'preparing',
+    completed: 0,
+    total: config.meta.plies + 1,
+    currentPly: 0,
+    phase: null,
+    winPcts: [],
+    cachedPositions: 0,
+    enginePositions: 0,
+  })
   const [orientation, setOrientation] = useState<'white' | 'black'>('white')
 
   const sessionRef = useRef<ReviewSession | null>(null)
   // Buffer de winPcts parciais + id do rAF pendente: coalesce várias posições
   // (ex.: cache hits rápidos) num único setState por frame — loading suave.
-  const pendingWinPctsRef = useRef<number[]>([])
+  const pendingProgressRef = useRef<ReviewProgress>(progress)
   const rafRef = useRef<number | null>(null)
 
   useEffect(() => {
@@ -69,15 +80,14 @@ export function useReview(config: ReviewConfig): UseReview {
       backend: createTauriBackend(),
       store,
       onStateChange: (s) => {
-        if (s.status === 'done') setPartialWinPcts([])
         setSessionState(s)
       },
-      onProgress: (wp) => {
-        pendingWinPctsRef.current = wp
+      onProgress: (nextProgress) => {
+        pendingProgressRef.current = nextProgress
         if (rafRef.current == null) {
           rafRef.current = requestAnimationFrame(() => {
             rafRef.current = null
-            setPartialWinPcts(pendingWinPctsRef.current)
+            setProgress(pendingProgressRef.current)
           })
         }
       },
@@ -108,7 +118,8 @@ export function useReview(config: ReviewConfig): UseReview {
     result,
     status: sessionState.status,
     error: sessionState.error,
-    partialWinPcts,
+    partialWinPcts: progress.winPcts,
+    progress,
     currentPly,
     orientation,
     goTo,
