@@ -3,8 +3,6 @@ import {
   CircleAlert,
   CircleX,
   type LucideIcon,
-  Sparkles,
-  Star,
   Target,
   ThumbsUp,
   TriangleAlert,
@@ -12,21 +10,17 @@ import {
 import { CLASSIFICATION_LABELS } from '../lib/scoring'
 import type { Classification } from '../types'
 
-const BADGE_COLOR: Record<Classification, string> = {
-  brilhante: 'bg-great',
-  otimo: 'bg-otimo',
-  livro: 'bg-book',
-  melhor: 'bg-best',
-  excelente: 'bg-excellent',
-  bom: 'bg-good',
-  imprecisao: 'bg-mistake',
-  erro: 'bg-erro',
-  blunder: 'bg-blunder',
+const BADGE_TONE: Record<Classification, string> = {
+  livro: 'bg-book text-white',
+  melhor: 'bg-best text-white',
+  excelente: 'bg-excellent text-white',
+  bom: 'bg-good text-white',
+  imprecisao: 'bg-mistake text-zinc-950',
+  erro: 'bg-erro text-white',
+  blunder: 'bg-blunder text-white',
 }
 
 const BADGE_GLYPH: Record<Classification, LucideIcon> = {
-  brilhante: Sparkles,
-  otimo: Star,
   livro: BookOpen,
   melhor: Target,
   excelente: ThumbsUp,
@@ -40,22 +34,32 @@ interface ClassificationBadgeProps {
   classification: Classification
 }
 
-/** Quadrado colorido com glifo próprio por classificação (estilo notação Lichess). */
+/** Selo de tom semântico e glifo próprio; a leitura não depende apenas da cor. */
 export function ClassGlyph({
   classification,
+  size = 'compact',
 }: {
   classification: Classification
+  size?: 'compact' | 'board'
 }) {
   const Icon = BADGE_GLYPH[classification]
   const label = CLASSIFICATION_LABELS[classification]
+  const sizeClass =
+    size === 'board'
+      ? 'h-5 w-5 rounded-md border-2 border-background shadow-md'
+      : 'h-4 w-4 rounded-[5px]'
   return (
     <span
       role='img'
-      className={`inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-[5px] text-bg ${BADGE_COLOR[classification]}`}
+      className={`inline-flex shrink-0 items-center justify-center ${sizeClass} ${BADGE_TONE[classification]}`}
       title={label}
       aria-label={label}
     >
-      <Icon size={10} strokeWidth={3} aria-hidden='true' />
+      <Icon
+        size={size === 'board' ? 12 : 10}
+        strokeWidth={3}
+        aria-hidden='true'
+      />
     </span>
   )
 }

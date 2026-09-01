@@ -5,20 +5,8 @@ import { useEffect, useRef } from 'react'
 import 'chessground/assets/chessground.base.css'
 import 'chessground/assets/chessground.brown.css'
 import 'chessground/assets/chessground.cburnett.css'
-import { CLASSIFICATION_LABELS } from '../lib/scoring'
 import type { Classification } from '../types'
-
-const BADGE_COLOR: Record<Classification, string> = {
-  brilhante: 'bg-great',
-  otimo: 'bg-otimo',
-  livro: 'bg-book',
-  melhor: 'bg-best',
-  excelente: 'bg-excellent',
-  bom: 'bg-good',
-  imprecisao: 'bg-mistake',
-  erro: 'bg-erro',
-  blunder: 'bg-blunder',
-}
+import { ClassGlyph } from './ClassificationBadge'
 
 export interface BoardArrow {
   from: string
@@ -115,12 +103,9 @@ export default function Board({
             height: '12.5%',
           }}
         >
-          <span
-            role='img'
-            aria-label={CLASSIFICATION_LABELS[lastMoveClassification]}
-            title={CLASSIFICATION_LABELS[lastMoveClassification]}
-            className={`absolute -right-1 -top-1 block h-3.5 w-3.5 rounded-full border-2 border-bg shadow-md ${BADGE_COLOR[lastMoveClassification]}`}
-          />
+          <span className='absolute -right-1.5 -top-1.5'>
+            <ClassGlyph classification={lastMoveClassification} size='board' />
+          </span>
         </div>
       ) : null}
     </div>

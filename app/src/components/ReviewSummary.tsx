@@ -15,8 +15,6 @@ import {
 } from './ui/table'
 
 const ORDER: Classification[] = [
-  'brilhante',
-  'otimo',
   'livro',
   'melhor',
   'excelente',
