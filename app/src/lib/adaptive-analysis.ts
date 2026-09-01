@@ -1,8 +1,7 @@
 import { Chess } from 'chess.js'
 import type { AnalysisKind } from '../types'
 import type { PlayedMove, RawPosition } from './analyze'
-import { materialDeltaAfterReplies } from './material'
-import { cpToWinPct, preservesOutcomeWithOnlyMove } from './scoring'
+import { cpToWinPct } from './scoring'
 
 export type AdaptiveProfileId = 'fast' | 'deep'
 
@@ -57,8 +56,6 @@ export interface CriticalMove {
   ply: number
   score: number
   hard: boolean
-  brilliantCandidate: boolean
-  greatCandidate: boolean
   reasons: string[]
 }
 
@@ -119,8 +116,6 @@ export function rankCriticalMoves(
         ply: move.ply,
         score: 0,
         hard: false,
-        brilliantCandidate: false,
-        greatCandidate: false,
         reasons: [],
       }
     }
@@ -130,28 +125,12 @@ export function rankCriticalMoves(
     const loss = Math.max(0, winBefore - winAfter)
     const swing = Math.abs(winBefore - winAfter)
     const gap = multipvGap(before)
-    const materialDelta = materialDeltaAfterReplies(
-      move.fenBefore,
-      move.uci,
-      after.pv[0] ?? null,
-    )
-    const sacrificed = Math.max(0, -materialDelta)
     const complexity = materialComplexity(move.fenBefore)
     const isCapture = move.san.includes('x')
     const givesCheck = move.san.includes('+') || move.san.includes('#')
     const promotes = move.san.includes('=')
     const mateSignal =
       Math.abs(before.cp) >= 90_000 || Math.abs(after.cp) >= 90_000
-    const bestUci = before.pv[0] ?? null
-    const nearBest = bestUci === move.uci || loss <= 2
-    const brilliantCandidate = sacrificed >= 2 && nearBest && winAfter >= 35
-    const first = before.lines?.find((line) => line.multipv === 1)
-    const second = before.lines?.find((line) => line.multipv === 2)
-    const bestLineWinPct = cpToWinPct(first?.cp ?? before.cp)
-    const secondLineWinPct = second ? cpToWinPct(second.cp) : null
-    const greatCandidate =
-      nearBest && preservesOutcomeWithOnlyMove(bestLineWinPct, secondLineWinPct)
-
     let score = 0
     const reasons: string[] = []
 
@@ -164,15 +143,7 @@ export function rankCriticalMoves(
     if (givesCheck) score += 7
     if (promotes) score += 12
     if (complexity.inCheck) score += 7
-    if (sacrificed >= 1) score += clampScore(sacrificed * 5, 15)
-    if (brilliantCandidate) {
-      score += 15
-      reasons.push('candidato a brilhante')
-    }
-    if (greatCandidate) {
-      if (!brilliantCandidate) score += 15
-      reasons.push('candidato a ótimo')
-    } else if (!brilliantCandidate && (isCapture || givesCheck || promotes)) {
+    if (isCapture || givesCheck || promotes) {
       reasons.push('sequência tática')
     }
 
@@ -204,15 +175,11 @@ export function rankCriticalMoves(
       loss >= 10 ||
       swing >= 15 ||
       mateSignal ||
-      promotes ||
-      brilliantCandidate ||
-      greatCandidate
+      promotes
     return {
       ply: move.ply,
       score: Math.min(100, Math.round(score)),
       hard,
-      brilliantCandidate,
-      greatCandidate,
       reasons,
     }
   })

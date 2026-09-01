@@ -50,8 +50,6 @@
   --color-good: var(--good);
   --color-excellent: var(--excellent);
   --color-best: var(--best);
-  --color-great: var(--great);
-  --color-otimo: var(--otimo);
   --color-book: var(--book);
   --color-mistake: var(--mistake);
   --color-erro: var(--erro);
@@ -118,22 +116,27 @@
   --ink-dim: var(--muted-foreground);
   --ink-faint: color-mix(in srgb, var(--muted-foreground) 72%, transparent);
 
-  --good: #4ade80;
-  --excellent: #34d399;
-  --best: #38bdf8;
-  --great: #2dd4bf;
-  --otimo: #22c55e;
-  --book: #a78bfa;
-  --mistake: #fbbf24;
-  --erro: #fb923c;
-  --blunder: #fb414a;
-  --blunder-strong: #dc2626;
+  /* Classificações: matizes distintos em uma mesma faixa de luminosidade e
+     cromaticidade moderada, integrados à base quente e neutra da interface. */
+  --good: oklch(0.56 0.075 145);
+  --excellent: oklch(0.55 0.085 160);
+  --best: oklch(0.55 0.08 225);
+  --book: oklch(0.55 0.075 295);
+  --mistake: oklch(0.76 0.105 85);
+  --erro: oklch(0.58 0.115 55);
+  --blunder: oklch(0.54 0.13 28);
+  --blunder-strong: oklch(0.48 0.14 28);
 
   /* Peças do jogador (discos da PlayerTag): par fundo/glifo com contraste garantido. */
   --piece-white-bg: oklch(0.92 0.005 34.3);
   --piece-white-fg: var(--foreground);
   --piece-black-bg: var(--foreground);
   --piece-black-fg: var(--background);
+
+  /* Tabuleiro: oliva quente e pouco saturado, próximo dos neutros do app. */
+  --board-light: oklch(0.86 0.025 88);
+  --board-dark: oklch(0.59 0.055 125);
+  --board-last-move: oklch(0.72 0.12 92 / 58%);
 
   /* Barra de avaliação: as metades são branco/quase-preto independente do tema,
      então os rótulos viram constantes documentadas aqui. */
@@ -292,6 +295,22 @@
   border: 1px solid var(--edge);
   border-radius: 0.8rem;
   box-shadow: 0 18px 42px -25px rgb(0 0 0 / 85%);
+}
+
+/* Sobrescreve a textura marrom padrão do Chessground com um padrão nítido,
+   mantendo a mesma orientação das casas em qualquer tamanho de tabuleiro. */
+.board-frame cg-board {
+  background-color: var(--board-light);
+  background-image: repeating-conic-gradient(
+    from 0deg,
+    var(--board-light) 0 25%,
+    var(--board-dark) 0 50%
+  );
+  background-size: 25% 25%;
+}
+
+.board-frame cg-board square.last-move {
+  background-color: var(--board-last-move);
 }
 
 .engine-loading-orb {

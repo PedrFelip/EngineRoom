@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
+  type AnalysisProgress,
   analyzeGame,
   analyzeGameAdaptive,
   buildReview,
@@ -1210,6 +1211,7 @@ describe('analyzeGameAdaptive', () => {
     let currentFen = ''
     let triageCount = 0
     let criticalFen = ''
+    const progress: AnalysisProgress[] = []
     const port: EnginePort = {
       send(cmd) {
         const command = cmd.trim()
@@ -1241,6 +1243,7 @@ describe('analyzeGameAdaptive', () => {
       '1. a3 a6 2. h3 h6 3. f3 f6 4. g3 g6 5. Kf2 Kf7',
       'fast',
       port,
+      { onDetailedProgress: (snapshot) => progress.push(snapshot) },
     )
 
     expect(review.positions).toHaveLength(11)
@@ -1251,6 +1254,15 @@ describe('analyzeGameAdaptive', () => {
       sent.filter((command) => command === 'go movetime 1500'),
     ).toHaveLength(2)
     expect(sent).not.toContain('go movetime 600')
+    const refinement = progress.filter(
+      (snapshot) => snapshot.stage === 'refinement',
+    )
+    expect(refinement.map((snapshot) => snapshot.completed)).toEqual([0, 1, 2])
+    expect(refinement.map((snapshot) => snapshot.total)).toEqual([2, 2, 2])
+    expect(refinement.map((snapshot) => snapshot.remainingBudgetMs)).toEqual([
+      3000, 1500, 0,
+    ])
+    expect(progress.at(-1)?.stage).toBe('finalizing')
   })
 })
 

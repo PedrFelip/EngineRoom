@@ -12,8 +12,6 @@ export const LICHESS_CP_CEILING = 1000
 export const LICHESS_INITIAL_CP = 15
 
 export const CLASSIFICATION_LABELS: Record<Classification, string> = {
-  brilhante: 'Brilhante',
-  otimo: 'Ótimo',
   livro: 'Livro',
   melhor: 'Melhor',
   excelente: 'Excelente',
@@ -78,95 +76,6 @@ export function classifyMove(
   if (winPctLoss <= INACCURACY_MAX_LOSS) return 'imprecisao'
   if (winPctLoss <= MISTAKE_MAX_LOSS) return 'erro'
   return 'blunder'
-}
-
-/**
- * Regras do lance Brilhante (estilo chess.com): o melhor lance da posição —
- * ou quase isso, quando a 2ª linha candidata confirma — que además sacrifica
- * material, sem deixar quem jogou em posição ruim nem partir de vitória
- * esmagadora. Quando aplicável, substitui a classificação corrente.
- */
-
-/** Sacrifício mínimo (em peões, POV de quem jogou) para o lance ser Brilhante. */
-export const BRILLIANT_MIN_SACRIFICE = 2
-/** win% mínimo (POV de quem jogou) após o lance — não pode ficar em posição ruim. */
-export const BRILLIANT_MIN_WINPCT_AFTER = 35
-/** win% máximo (POV de quem jogou) antes do lance — não pode já estar ganhando. */
-export const BRILLIANT_MAX_WINPCT_BEFORE = 85
-/** Perda de win% tolerada com 2ª linha candidata; sem ela, exige o lance exato. */
-const BRILLIANT_MAX_LOSS_WITH_2ND_LINE = 0.5
-
-export interface BrilliantInput {
-  /** Perda de win% do lance jogado vs o melhor (POV de quem jogou). */
-  winPctLoss: number
-  /** win% antes do lance, POV de quem jogou. */
-  winPctBefore: number
-  /** win% depois do lance, POV de quem jogou. */
-  winPctAfter: number
-  /**
-   * Δ material de quem jogou (em peões) após o lance + a melhor resposta do
-   * oponente. Negativo = entregou material (sacrifício).
-   */
-  materialDelta: number
-  /** true quando há 2ª linha candidata (multipv ≥ 2) confirmando o "quase melhor". */
-  hasSecondLine: boolean
-}
-
-/**
- * Verifica se um lance é Brilhante. Melhor/quase melhor + sacrifício bom,
- * sem ficar mal depois nem partir de posição já ganha. Puro.
- */
-export function detectBrilliant(input: BrilliantInput): boolean {
-  if (input.materialDelta > -BRILLIANT_MIN_SACRIFICE) return false
-  if (input.winPctAfter < BRILLIANT_MIN_WINPCT_AFTER) return false
-  if (input.winPctBefore > BRILLIANT_MAX_WINPCT_BEFORE) return false
-  const maxLoss = input.hasSecondLine ? BRILLIANT_MAX_LOSS_WITH_2ND_LINE : 0
-  return input.winPctLoss <= maxLoss
-}
-
-/** Limites de resultado provável, no POV de quem joga. */
-export const GREAT_EQUAL_MIN_WINPCT = 35
-export const GREAT_WINNING_MIN_WINPCT = 65
-/** Evita promover diferenças pequenas e instáveis entre buscas MultiPV. */
-export const GREAT_MIN_GAP = 15
-/** Um quase-melhor confirmado ainda pode ser essencial. */
-const GREAT_MAX_LOSS = 0.5
-
-export interface GreatMoveInput {
-  winPctLoss: number
-  playedUci: string
-  bestUci: string | null
-  /** Win% das duas melhores linhas, ambas no POV de quem joga. */
-  bestWinPct: number
-  secondWinPct: number | null
-}
-
-/** A primeira linha é a única que preserva uma faixa de resultado melhor. */
-export function preservesOutcomeWithOnlyMove(
-  bestWinPct: number,
-  secondWinPct: number | null,
-): boolean {
-  if (secondWinPct === null) return false
-  if (bestWinPct - secondWinPct < GREAT_MIN_GAP) return false
-
-  return (
-    (bestWinPct >= GREAT_EQUAL_MIN_WINPCT &&
-      secondWinPct < GREAT_EQUAL_MIN_WINPCT) ||
-    (bestWinPct >= GREAT_WINNING_MIN_WINPCT &&
-      secondWinPct < GREAT_WINNING_MIN_WINPCT)
-  )
-}
-
-/**
- * Detecta um Ótimo lance: melhor (ou praticamente igual) e a única linha que
- * preserva uma faixa de resultado melhor. Exige MultiPV 2 para não inferir
- * "único lance" sem evidência.
- */
-export function detectGreatMove(input: GreatMoveInput): boolean {
-  const nearBest =
-    input.playedUci === input.bestUci || input.winPctLoss <= GREAT_MAX_LOSS
-  if (!nearBest) return false
-  return preservesOutcomeWithOnlyMove(input.bestWinPct, input.secondWinPct)
 }
 
 /**
