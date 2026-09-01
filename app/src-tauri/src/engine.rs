@@ -1,5 +1,6 @@
+use std::collections::BTreeMap;
 use std::process::Stdio;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter};
 use tauri_plugin_shell::process::CommandEvent;
 use tauri_plugin_shell::ShellExt;
@@ -13,7 +14,8 @@ use tokio::sync::{mpsc, oneshot};
 /// `<target_dir>/stockfish`, and the resolver looks it up next to the main exe.
 const SIDECAR: &str = "stockfish";
 
-/// Event name emitted to the frontend for every UCI line printed by the engine.
+/// Event name emitted to the frontend for UCI lines relevantes à revisão.
+/// Linhas `info` intermediárias são compactadas antes de cruzar o IPC.
 pub const LINE_EVENT: &str = "engine://line";
 
 /// Event name emitted to the frontend when the engine process exits — cleanly
@@ -50,6 +52,97 @@ enum SpawnKind {
     Path(String),
 }
 
+/// Reduz o volume de eventos durante uma busca sem mudar o contrato UCI visto
+/// pelo frontend. Stockfish produz muitas linhas `info`; para o resultado da
+/// posição, só importam as linhas da maior profundidade, uma por MultiPV,
+/// imediatamente antes de `bestmove`.
+#[derive(Default)]
+struct UciOutputFilter {
+    searching: bool,
+    depth: Option<u32>,
+    latest_lines: BTreeMap<u32, String>,
+}
+
+impl UciOutputFilter {
+    fn on_command(&mut self, command: &str) {
+        if command.trim().starts_with("go ") {
+            self.searching = true;
+            self.depth = None;
+            self.latest_lines.clear();
+        }
+    }
+
+    fn on_line(&mut self, line: String) -> Vec<String> {
+        if !self.searching {
+            return vec![line];
+        }
+
+        if line.starts_with("info ") {
+            self.record_info(line);
+            return Vec::new();
+        }
+
+        if line.starts_with("bestmove") {
+            self.searching = false;
+            self.depth = None;
+            let mut output = std::mem::take(&mut self.latest_lines)
+                .into_values()
+                .collect::<Vec<_>>();
+            output.push(line);
+            return output;
+        }
+
+        vec![line]
+    }
+
+    fn record_info(&mut self, line: String) {
+        let mut tokens = line.split_whitespace();
+        let mut depth = None;
+        let mut multipv = 1;
+        let mut has_score = false;
+
+        while let Some(token) = tokens.next() {
+            match token {
+                "depth" => depth = tokens.next().and_then(|value| value.parse().ok()),
+                "multipv" => {
+                    multipv = tokens
+                        .next()
+                        .and_then(|value| value.parse().ok())
+                        .unwrap_or(1)
+                }
+                "score" => has_score = true,
+                _ => {}
+            }
+        }
+
+        let Some(depth) = depth else {
+            return;
+        };
+        if !has_score {
+            return;
+        }
+
+        match self.depth {
+            Some(current) if depth < current => {}
+            Some(current) if depth == current => {
+                self.latest_lines.insert(multipv, line);
+            }
+            _ => {
+                self.depth = Some(depth);
+                self.latest_lines.clear();
+                self.latest_lines.insert(multipv, line);
+            }
+        }
+    }
+}
+
+fn forward_line(app: &AppHandle, filter: &Arc<Mutex<UciOutputFilter>>, line: String) {
+    let output = filter.lock().expect("filtro UCI envenenado").on_line(line);
+    for line in output {
+        let _ = app.emit(LINE_EVENT, line);
+    }
+}
+
 fn spawn_engine(
     app: &AppHandle,
     kind: SpawnKind,
@@ -65,16 +158,24 @@ fn spawn_engine(
                 .spawn()
                 .map_err(|e| format!("Falha ao iniciar o Stockfish embarcado: {e}"))?;
 
-            // Forward stdout lines to the frontend; signal exit on death.
+            let filter = Arc::new(Mutex::new(UciOutputFilter::default()));
+            // Divide chunks em linhas antes de filtrá-las. O shell plugin pode
+            // agrupar mais de uma linha UCI no mesmo evento stdout.
             let app_reader = app.clone();
+            let reader_filter = Arc::clone(&filter);
             tauri::async_runtime::spawn(async move {
                 let mut reported_exit = false;
+                let mut stdout = Vec::new();
                 while let Some(event) = rx.recv().await {
                     match event {
                         CommandEvent::Stdout(bytes) => {
-                            let line = String::from_utf8_lossy(&bytes).trim().to_string();
-                            if !line.is_empty() {
-                                let _ = app_reader.emit(LINE_EVENT, line);
+                            stdout.extend_from_slice(&bytes);
+                            while let Some(end) = stdout.iter().position(|byte| *byte == b'\n') {
+                                let raw = stdout.drain(..=end).collect::<Vec<_>>();
+                                let line = String::from_utf8_lossy(&raw).trim().to_string();
+                                if !line.is_empty() {
+                                    forward_line(&app_reader, &reader_filter, line);
+                                }
                             }
                         }
                         CommandEvent::Terminated(p) => {
@@ -106,6 +207,10 @@ fn spawn_engine(
                         _ => {}
                     }
                 }
+                let line = String::from_utf8_lossy(&stdout).trim().to_string();
+                if !line.is_empty() {
+                    forward_line(&app_reader, &reader_filter, line);
+                }
                 // Channel closed = the process is gone but no Terminated/Error
                 // event was surfaced. Emit a generic exit so the frontend still
                 // fails fast instead of hanging to its ask() timeout.
@@ -124,11 +229,16 @@ fn spawn_engine(
             // Writer task: pumps frontend commands into stdin; kills on shutdown.
             let (tx, mut incoming) = mpsc::unbounded_channel::<String>();
             let (shutdown, mut shutdown_rx) = oneshot::channel::<()>();
+            let writer_filter = Arc::clone(&filter);
             tauri::async_runtime::spawn(async move {
                 let mut child = child;
                 loop {
                     tokio::select! {
                         Some(message) = incoming.recv() => {
+                            writer_filter
+                                .lock()
+                                .expect("filtro UCI envenenado")
+                                .on_command(&message);
                             let payload = format!("{}\n", message);
                             let _ = child.write(payload.as_bytes());
                         }
@@ -153,13 +263,15 @@ fn spawn_engine(
             let stdout = child.stdout.take().ok_or("stdout indisponível")?;
             let stdin = child.stdin.take().ok_or("stdin indisponível")?;
 
+            let filter = Arc::new(Mutex::new(UciOutputFilter::default()));
             let app_reader = app.clone();
+            let reader_filter = Arc::clone(&filter);
             tauri::async_runtime::spawn(async move {
                 let mut lines = BufReader::new(stdout).lines();
                 while let Ok(Some(raw)) = lines.next_line().await {
                     let line = raw.trim().to_string();
                     if !line.is_empty() {
-                        let _ = app_reader.emit(LINE_EVENT, line);
+                        forward_line(&app_reader, &reader_filter, line);
                     }
                 }
                 // EOF = the process is gone. Signal exit so the frontend fails
@@ -176,12 +288,17 @@ fn spawn_engine(
 
             let (tx, mut incoming) = mpsc::unbounded_channel::<String>();
             let (shutdown, mut shutdown_rx) = oneshot::channel::<()>();
+            let writer_filter = Arc::clone(&filter);
             tauri::async_runtime::spawn(async move {
                 let mut stdin = stdin;
                 let mut child = child;
                 loop {
                     tokio::select! {
                         Some(message) = incoming.recv() => {
+                            writer_filter
+                                .lock()
+                                .expect("filtro UCI envenenado")
+                                .on_command(&message);
                             let payload = format!("{}\n", message);
                             if stdin.write_all(payload.as_bytes()).await.is_ok() {
                                 let _ = stdin.flush().await;
@@ -240,4 +357,67 @@ pub fn engine_stop(state: tauri::State<'_, EngineState>) -> Result<(), String> {
         let _ = handle.shutdown.send(());
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::UciOutputFilter;
+
+    #[test]
+    fn forwards_protocol_responses_outside_searches() {
+        let mut filter = UciOutputFilter::default();
+
+        assert_eq!(filter.on_line("uciok".into()), ["uciok"]);
+        assert_eq!(filter.on_line("readyok".into()), ["readyok"]);
+    }
+
+    #[test]
+    fn compacts_verbose_search_to_the_deepest_line_per_multipv() {
+        let mut filter = UciOutputFilter::default();
+        filter.on_command("go depth 20");
+
+        assert!(filter
+            .on_line("info depth 10 multipv 1 score cp 12 pv e2e4".into())
+            .is_empty());
+        assert!(filter
+            .on_line("info depth 10 multipv 2 score cp 4 pv d2d4".into())
+            .is_empty());
+        assert!(filter
+            .on_line("info depth 11 multipv 2 score cp 8 pv c2c4".into())
+            .is_empty());
+        assert!(filter
+            .on_line("info depth 11 multipv 1 score cp 20 pv e2e4".into())
+            .is_empty());
+        assert!(filter
+            .on_line("info depth 11 nodes 42 nps 1000".into())
+            .is_empty());
+
+        assert_eq!(
+            filter.on_line("bestmove e2e4".into()),
+            [
+                "info depth 11 multipv 1 score cp 20 pv e2e4",
+                "info depth 11 multipv 2 score cp 8 pv c2c4",
+                "bestmove e2e4",
+            ]
+        );
+    }
+
+    #[test]
+    fn bounds_events_for_a_reproducible_verbose_trace() {
+        let mut filter = UciOutputFilter::default();
+        filter.on_command("go depth 100");
+
+        for depth in 1..=100 {
+            for multipv in 1..=3 {
+                assert!(filter
+                    .on_line(format!(
+                        "info depth {depth} multipv {multipv} score cp 0 pv e2e4"
+                    ))
+                    .is_empty());
+            }
+        }
+
+        let output = filter.on_line("bestmove e2e4".into());
+        assert_eq!(output.len(), 4, "300 infos + bestmove viram 4 eventos");
+    }
 }

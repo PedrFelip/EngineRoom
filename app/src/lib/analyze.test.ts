@@ -1212,6 +1212,16 @@ describe('analyzeGameAdaptive', () => {
     let triageCount = 0
     let criticalFen = ''
     const progress: AnalysisProgress[] = []
+    const cacheReads: Array<{ fens: string[]; value: number }> = []
+    const cache = fakeCache({
+      async get() {
+        throw new Error('o refinamento deve prefetchar o cache em lote')
+      },
+      async getBulk(fens, _mode, value) {
+        cacheReads.push({ fens, value })
+        return fens.map(() => null)
+      },
+    })
     const port: EnginePort = {
       send(cmd) {
         const command = cmd.trim()
@@ -1243,7 +1253,10 @@ describe('analyzeGameAdaptive', () => {
       '1. a3 a6 2. h3 h6 3. f3 f6 4. g3 g6 5. Kf2 Kf7',
       'fast',
       port,
-      { onDetailedProgress: (snapshot) => progress.push(snapshot) },
+      {
+        cache,
+        onDetailedProgress: (snapshot) => progress.push(snapshot),
+      },
     )
 
     expect(review.positions).toHaveLength(11)
@@ -1254,6 +1267,10 @@ describe('analyzeGameAdaptive', () => {
       sent.filter((command) => command === 'go movetime 1500'),
     ).toHaveLength(2)
     expect(sent).not.toContain('go movetime 600')
+    expect(cacheReads.map((read) => [read.fens.length, read.value])).toEqual([
+      [11, 120],
+      [2, 1500],
+    ])
     const refinement = progress.filter(
       (snapshot) => snapshot.stage === 'refinement',
     )
@@ -1262,6 +1279,10 @@ describe('analyzeGameAdaptive', () => {
     expect(refinement.map((snapshot) => snapshot.remainingBudgetMs)).toEqual([
       3000, 1500, 0,
     ])
+    expect(
+      progress.filter((snapshot) => snapshot.stage === 'triage')[0]?.winPcts,
+    ).toHaveLength(1)
+    expect(refinement[0]?.winPcts).toHaveLength(11)
     expect(progress.at(-1)?.stage).toBe('finalizing')
   })
 })
