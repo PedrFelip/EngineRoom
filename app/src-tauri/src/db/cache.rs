@@ -127,8 +127,7 @@ impl<'a> Cache<'a> {
             .conn
             .prepare(Self::lookup_sql(mode))
             .map_err(|e| e.to_string())?;
-        fens
-            .iter()
+        fens.iter()
             .map(|fen| Self::query_with_stmt(&mut stmt, fen, value, multipv))
             .collect()
     }
@@ -496,12 +495,7 @@ mod tests {
         cache.store(FEN, Mode::Depth, 20, 1, 20, 35, LINES).unwrap();
 
         let out = cache
-            .lookup_bulk(
-                &[FEN.to_string(), FEN_B.to_string()],
-                Mode::Depth,
-                15,
-                1,
-            )
+            .lookup_bulk(&[FEN.to_string(), FEN_B.to_string()], Mode::Depth, 15, 1)
             .unwrap();
 
         assert_eq!(out.len(), 2, "um resultado por fen, na ordem de entrada");

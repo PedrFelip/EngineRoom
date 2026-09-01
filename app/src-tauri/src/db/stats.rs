@@ -107,17 +107,21 @@ mod tests {
 
     #[test]
     fn storage_stats_reporta_bytes_das_tabelas() {
-        let conn = open_memory().unwrap();
-        let vazio = Stats::new(&conn).compute().unwrap();
+        let conn = open_memory().expect("cria banco em memória");
+        let vazio = Stats::new(&conn).compute().expect("calcula stats vazias");
         assert_eq!(vazio.cache_bytes, 0, "banco vazio: cache em zero bytes");
         assert_eq!(vazio.games_bytes, 0, "banco vazio: games em zero bytes");
 
         Cache::new(&conn)
             .store(FEN, Mode::Depth, 20, 1, 20, 35, LINES)
-            .unwrap();
-        Store::new(&conn).save(&partida_exemplo()).unwrap();
+            .expect("grava posição no cache");
+        Store::new(&conn)
+            .save(&partida_exemplo())
+            .expect("grava partida");
 
-        let populado = Stats::new(&conn).compute().unwrap();
+        let populado = Stats::new(&conn)
+            .compute()
+            .expect("calcula stats populadas");
         assert!(
             populado.cache_bytes >= (FEN.len() + LINES.len()) as u64,
             "cache_bytes deve refletir ao menos fen + lines_json: got {}",
@@ -133,21 +137,27 @@ mod tests {
 
     #[test]
     fn storage_stats_zera_apos_clear_de_ambas_as_tabelas() {
-        let conn = open_memory().unwrap();
+        let conn = open_memory().expect("cria banco em memória");
         Cache::new(&conn)
             .store(FEN, Mode::Depth, 20, 1, 20, 35, LINES)
-            .unwrap();
-        Store::new(&conn).save(&partida_exemplo()).unwrap();
+            .expect("grava posição no cache");
+        Store::new(&conn)
+            .save(&partida_exemplo())
+            .expect("grava partida");
 
         // Pré-condição: ambas as tabelas com bytes > 0.
-        let antes = Stats::new(&conn).compute().unwrap();
+        let antes = Stats::new(&conn)
+            .compute()
+            .expect("calcula stats antes do clear");
         assert!(antes.cache_bytes > 0, "pré-condição: cache populado");
         assert!(antes.games_bytes > 0, "pré-condição: games populado");
 
-        Cache::new(&conn).clear().unwrap();
-        Store::new(&conn).clear().unwrap();
+        Cache::new(&conn).clear().expect("limpa cache");
+        Store::new(&conn).clear().expect("limpa histórico");
 
-        let depois = Stats::new(&conn).compute().unwrap();
+        let depois = Stats::new(&conn)
+            .compute()
+            .expect("calcula stats após clear");
         assert_eq!(depois.cache_bytes, 0, "cache_bytes volta a zero após clear");
         assert_eq!(depois.games_bytes, 0, "games_bytes volta a zero após clear");
     }

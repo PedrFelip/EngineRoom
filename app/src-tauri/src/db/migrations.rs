@@ -42,7 +42,8 @@ pub(super) fn migrate(conn: &Connection) -> Result<(), String> {
     migrate_position_cache_mode(conn)?;
     migrate_position_cache_reached_depth(conn)?;
     migrate_games_mode(conn)?;
-    migrate_games_analysis_kind(conn)
+    migrate_games_analysis_kind(conn)?;
+    migrate_games_list_index(conn)
 }
 
 /// `true` se a coluna existe na tabela (via `PRAGMA table_info`).
@@ -192,6 +193,14 @@ fn migrate_games_analysis_kind(conn: &Connection) -> Result<(), String> {
                 review_json, created_at
             FROM games_old;
          DROP TABLE games_old;",
+    )
+    .map_err(|e| e.to_string())
+}
+
+/// Índice para a listagem paginada do histórico, ordenada por data e id.
+fn migrate_games_list_index(conn: &Connection) -> Result<(), String> {
+    conn.execute_batch(
+        "CREATE INDEX IF NOT EXISTS games_created_at_id ON games (created_at DESC, id DESC);",
     )
     .map_err(|e| e.to_string())
 }
@@ -360,7 +369,7 @@ mod tests {
 
         // Pós-migração: `mode` presente, linha legacy sobrevive com mode='depth'.
         assert!(has_column(&conn, "games", "mode").unwrap());
-        let lista = Store::new(&conn).list().unwrap();
+        let lista = Store::new(&conn).list_page(50, None).unwrap().games;
         assert_eq!(lista.len(), 1, "linha legacy deve sobreviver à migração");
         assert_eq!(
             lista[0].mode,
@@ -380,7 +389,7 @@ mod tests {
         // Segunda chamada: `mode` já existe → no-op, sem duplicar.
         migrate(&conn).unwrap();
 
-        let lista = Store::new(&conn).list().unwrap();
+        let lista = Store::new(&conn).list_page(50, None).unwrap().games;
         assert_eq!(lista.len(), 1, "idempotente: sem duplicação");
         assert_eq!(lista[0].white, "Brancas");
     }
@@ -397,6 +406,10 @@ mod tests {
         let stats = Stats::new(&conn).compute().unwrap();
         assert_eq!(stats.cache_bytes, 0);
         assert_eq!(stats.games_bytes, 0);
-        assert!(Store::new(&conn).list().unwrap().is_empty());
+        assert!(Store::new(&conn)
+            .list_page(50, None)
+            .unwrap()
+            .games
+            .is_empty());
     }
 }
