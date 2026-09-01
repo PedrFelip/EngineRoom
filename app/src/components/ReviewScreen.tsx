@@ -64,7 +64,12 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
   const lastMoveClassification: Classification | null =
     currentMove?.classification ?? null
 
-  const opening = result?.moves.find((m) => m.eco)?.eco ?? null
+  const opening = useMemo(
+    function findOpening() {
+      return result?.moves.find((move) => move.eco)?.eco ?? null
+    },
+    [result],
+  )
   const evalBarLabel =
     position && result ? evalLabel(position.cp, position.fen, stm) : undefined
 
@@ -95,6 +100,30 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
     const sq = uciToSquares(uci)
     return sq ? { from: sq[0], to: sq[1], brush: 'blue' as const } : null
   }, [selectedLine])
+  const lastMove = useMemo(
+    function lastMoveSquares() {
+      if (!lastMoveUci) return null
+      return uciToSquares(lastMoveUci)
+    },
+    [lastMoveUci],
+  )
+  const arrows = useMemo(
+    function boardArrows() {
+      return bestArrow ? [bestArrow] : []
+    },
+    [bestArrow],
+  )
+  const graph = useMemo(
+    function graphData() {
+      if (!result) return null
+      const positions = result.positions
+      return {
+        winPcts: positions.map((position) => position.winPct),
+        phases: phaseBoundaries(positions.map((position) => position.phase)),
+      }
+    },
+    [result],
+  )
 
   useEffect(() => {
     if (!result) return
@@ -292,8 +321,8 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
                   <Board
                     fen={position.fen}
                     orientation={orientation}
-                    lastMove={lastMoveUci ? uciToSquares(lastMoveUci) : null}
-                    arrows={bestArrow ? [bestArrow] : []}
+                    lastMove={lastMove}
+                    arrows={arrows}
                     lastMoveClassification={lastMoveClassification}
                   />
                 ) : (
@@ -385,7 +414,7 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
         </aside>
       </div>
 
-      {result && (
+      {result && graph && (
         <div className='rounded-xl border border-edge bg-panel-2/60 p-3 sm:p-4'>
           <div className='mb-2 flex flex-col gap-1 px-1 sm:flex-row sm:items-center sm:justify-between'>
             <span className='flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-ink-faint'>
@@ -397,10 +426,10 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
             </span>
           </div>
           <EvalGraph
-            winPcts={result.positions.map((p) => p.winPct)}
+            winPcts={graph.winPcts}
             currentPly={currentPly}
             onSelect={review.goTo}
-            phases={phaseBoundaries(result.positions.map((p) => p.phase))}
+            phases={graph.phases}
           />
         </div>
       )}

@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 interface EvalGraphProps {
-  winPcts: number[]
+  winPcts: readonly number[]
   currentPly: number
   onSelect: (ply: number) => void
   /** Pulsa o ponto da posição atual — usado no loading pra sinalizar análise ao vivo. */
@@ -46,6 +46,10 @@ function smoothedPath(
   return `${path} L ${lastX.toFixed(1)},${lastY.toFixed(1)}`
 }
 
+function graphY(winPct: number): number {
+  return PLOT_TOP + (1 - winPct / 100) * PLOT_HEIGHT
+}
+
 export default function EvalGraph({
   winPcts,
   currentPly,
@@ -67,45 +71,49 @@ export default function EvalGraph({
     return () => ro.disconnect()
   }, [])
 
-  const n = winPcts.length
-  const x = (i: number) => (n <= 1 ? 0 : (i / (n - 1)) * w)
-  const y = (wp: number) => PLOT_TOP + (1 - wp / 100) * PLOT_HEIGHT
+  const geometry = useMemo(() => {
+    const n = winPcts.length
+    const x = (i: number) => (n <= 1 ? 0 : (i / (n - 1)) * w)
+    const ready = w > 0 && n >= 2
+    const points = ready
+      ? winPcts.map((winPct, i) => [x(i), graphY(winPct)] as const)
+      : []
+    const linePath = ready ? smoothedPath(points) : ''
+    const areaPath = ready
+      ? `${linePath} L ${x(n - 1).toFixed(1)},${MIDLINE_Y.toFixed(1)} L ${x(0).toFixed(1)},${MIDLINE_Y.toFixed(1)} Z`
+      : ''
+    const bands: PhaseBand[] = phases
+      ? [
+          {
+            key: 'opening',
+            label: 'Abertura',
+            compactLabel: 'Abr.',
+            x1: x(0),
+            x2: x(phases.openingEnd),
+            opacity: 0.035,
+          },
+          {
+            key: 'middlegame',
+            label: 'Meio-jogo',
+            compactLabel: 'Meio',
+            x1: x(phases.openingEnd),
+            x2: x(phases.middlegameEnd),
+            opacity: 0.06,
+          },
+          {
+            key: 'endgame',
+            label: 'Final',
+            compactLabel: 'Final',
+            x1: x(phases.middlegameEnd),
+            x2: x(n - 1),
+            opacity: 0.035,
+          },
+        ]
+      : []
+    return { n, x, ready, linePath, areaPath, bands }
+  }, [phases, w, winPcts])
 
-  const ready = w > 0 && n >= 2
-  const points = ready ? winPcts.map((wp, i) => [x(i), y(wp)] as const) : []
-  const linePath = ready ? smoothedPath(points) : ''
-  const areaPath = ready
-    ? `${linePath} L ${x(n - 1).toFixed(1)},${MIDLINE_Y.toFixed(1)} L ${x(0).toFixed(1)},${MIDLINE_Y.toFixed(1)} Z`
-    : ''
-
-  const bands: PhaseBand[] = phases
-    ? [
-        {
-          key: 'opening',
-          label: 'Abertura',
-          compactLabel: 'Abr.',
-          x1: x(0),
-          x2: x(phases.openingEnd),
-          opacity: 0.035,
-        },
-        {
-          key: 'middlegame',
-          label: 'Meio-jogo',
-          compactLabel: 'Meio',
-          x1: x(phases.openingEnd),
-          x2: x(phases.middlegameEnd),
-          opacity: 0.06,
-        },
-        {
-          key: 'endgame',
-          label: 'Final',
-          compactLabel: 'Final',
-          x1: x(phases.middlegameEnd),
-          x2: x(n - 1),
-          opacity: 0.035,
-        },
-      ]
-    : []
+  const { n, x, ready, linePath, areaPath, bands } = geometry
 
   const handleClick = (e: React.MouseEvent<HTMLButtonElement>) => {
     if (n <= 1) return
@@ -116,7 +124,7 @@ export default function EvalGraph({
   }
 
   const cx = x(currentPly)
-  const cy = y(winPcts[Math.max(0, Math.min(n - 1, currentPly))] ?? 50)
+  const cy = graphY(winPcts[Math.max(0, Math.min(n - 1, currentPly))] ?? 50)
 
   return (
     <div ref={ref} className='w-full min-w-0'>
@@ -177,9 +185,9 @@ export default function EvalGraph({
                   <line
                     key={pct}
                     x1={0}
-                    y1={y(pct)}
+                    y1={graphY(pct)}
                     x2={w}
-                    y2={y(pct)}
+                    y2={graphY(pct)}
                     stroke='var(--color-border)'
                     strokeWidth={pct === 50 ? 1 : 0.75}
                     strokeDasharray={pct === 50 ? undefined : '2 4'}

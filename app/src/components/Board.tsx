@@ -1,7 +1,7 @@
 import { Chessground } from 'chessground'
 import type { Api } from 'chessground/api'
 import type { Key } from 'chessground/types'
-import { useEffect, useRef, useState } from 'react'
+import { memo, useEffect, useRef, useState } from 'react'
 import 'chessground/assets/chessground.base.css'
 import 'chessground/assets/chessground.brown.css'
 import 'chessground/assets/chessground.cburnett.css'
@@ -45,7 +45,7 @@ function squarePosition(square: string, orientation: 'white' | 'black') {
   return { column, row }
 }
 
-export default function Board({
+const Board = memo(function Board({
   fen,
   orientation = 'white',
   lastMove = null,
@@ -155,4 +155,6 @@ export default function Board({
       </div>
     </div>
   )
-}
+})
+
+export default Board
