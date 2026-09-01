@@ -6,9 +6,9 @@ import { isUciOk, parseIdName } from './uci'
 export const ENGINE_LINE_EVENT = 'engine://line'
 export const ENGINE_EXIT_EVENT = 'engine://exit'
 
-/** Spawns the engine. Pass a path to use a custom Stockfish; omit to use the embedded sidecar. */
-export function engineStart(path?: string): Promise<void> {
-  return invoke('engine_spawn', { path: path?.trim() ? path.trim() : null })
+/** Spawns the embedded Stockfish sidecar. */
+export function engineStart(): Promise<void> {
+  return invoke('engine_spawn')
 }
 
 /** Sends a single UCI command (no trailing newline needed). */
@@ -45,18 +45,17 @@ export interface ProbeOptions {
 
 /**
  * Spawns the engine, sends `uci`, waits for `uciok`, then stops it.
- * Used by the Settings screen to verify the embedded sidecar or a custom path.
+ * Used by the Settings screen to verify the embedded sidecar.
  */
-export async function probeEngine(
-  path?: string,
-  { timeoutMs = 8000 }: ProbeOptions = {},
-): Promise<ProbeResult> {
+export async function probeEngine({
+  timeoutMs = 8000,
+}: ProbeOptions = {}): Promise<ProbeResult> {
   let unlisten: UnlistenFn | undefined
   let timer: ReturnType<typeof setTimeout> | undefined
 
   try {
     await engineStop().catch(() => {})
-    await engineStart(path)
+    await engineStart()
 
     let name: string | null = null
     let resolveResult!: (r: ProbeResult) => void

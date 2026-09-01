@@ -19,18 +19,10 @@ beforeEach(() => {
 })
 
 describe('engine thin wrappers', () => {
-  it('engineStart forwards null path when omitted', async () => {
+  it('engineStart invokes the embedded sidecar command without arguments', async () => {
     mocks.invoke.mockResolvedValue(undefined)
     await engineStart()
-    expect(mocks.invoke).toHaveBeenCalledWith('engine_spawn', { path: null })
-  })
-
-  it('engineStart trims a custom path', async () => {
-    mocks.invoke.mockResolvedValue(undefined)
-    await engineStart('  /usr/bin/stockfish  ')
-    expect(mocks.invoke).toHaveBeenCalledWith('engine_spawn', {
-      path: '/usr/bin/stockfish',
-    })
+    expect(mocks.invoke).toHaveBeenCalledWith('engine_spawn')
   })
 
   it('engineSend / engineStop forward their commands', async () => {
@@ -67,7 +59,7 @@ describe('probeEngine', () => {
 
   it('sends `uci`, resolves ok with the engine name on uciok', async () => {
     wireHappyReply()
-    const res = await probeEngine(undefined, { timeoutMs: 2000 })
+    const res = await probeEngine({ timeoutMs: 2000 })
 
     expect(res.ok).toBe(true)
     expect(res.name).toBe('Stockfish 18')
@@ -75,7 +67,7 @@ describe('probeEngine', () => {
     // Regression guard: the probe MUST actually issue the `uci` command,
     // otherwise the engine never answers and the probe times out.
     expect(mocks.invoke).toHaveBeenCalledWith('engine_send', { line: 'uci' })
-    expect(mocks.invoke).toHaveBeenCalledWith('engine_spawn', { path: null })
+    expect(mocks.invoke).toHaveBeenCalledWith('engine_spawn')
     // cleanup: engine is stopped at the end.
     expect(mocks.invoke).toHaveBeenCalledWith('engine_stop')
   })
@@ -84,7 +76,7 @@ describe('probeEngine', () => {
     mocks.invoke.mockResolvedValue(undefined)
     mocks.listen.mockResolvedValue(() => {})
 
-    const res = await probeEngine(undefined, { timeoutMs: 25 })
+    const res = await probeEngine({ timeoutMs: 25 })
 
     expect(res.ok).toBe(false)
     expect(res.error).toMatch(/Tempo esgotado/i)
@@ -99,18 +91,9 @@ describe('probeEngine', () => {
       return undefined
     })
 
-    const res = await probeEngine(undefined, { timeoutMs: 500 })
+    const res = await probeEngine({ timeoutMs: 500 })
 
     expect(res.ok).toBe(false)
     expect(res.error).toBe('spawn boom')
-  })
-
-  it('forwards a custom path to engine_spawn', async () => {
-    wireHappyReply()
-    const res = await probeEngine('/opt/stockfish', { timeoutMs: 2000 })
-    expect(res.ok).toBe(true)
-    expect(mocks.invoke).toHaveBeenCalledWith('engine_spawn', {
-      path: '/opt/stockfish',
-    })
   })
 })

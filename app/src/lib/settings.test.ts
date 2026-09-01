@@ -48,4 +48,11 @@ describe('loadSettings (som)', () => {
     stubStorage(JSON.stringify({ theme: 'dark' }))
     expect(loadSettings().soundEnabled).toBe(true)
   })
+
+  it('ignora enginePath de configurações antigas', () => {
+    stubStorage(JSON.stringify({ enginePath: '/usr/bin/stockfish' }))
+    const settings = loadSettings()
+    expect(settings).toEqual(DEFAULT_SETTINGS)
+    expect(settings).not.toHaveProperty('enginePath')
+  })
 })

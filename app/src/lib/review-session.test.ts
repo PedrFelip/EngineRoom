@@ -152,7 +152,6 @@ function startSession(opts: {
   const onProgress = vi.fn()
   const session = createReviewSession({
     config: opts.config,
-    enginePath: undefined,
     backend: opts.backend,
     store,
     onStateChange: (s) => states.push(s),
@@ -257,7 +256,6 @@ describe('createReviewSession — reabertura do store', () => {
     const states: ReviewSessionState[] = []
     const session = createReviewSession({
       config: depthConfig({ initialResult }),
-      enginePath: undefined,
       backend,
       store,
       onStateChange: (s) => states.push(s),

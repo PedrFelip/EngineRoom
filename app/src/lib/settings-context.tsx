@@ -18,7 +18,6 @@ import {
 interface SettingsContextValue {
   settings: Settings
   setTheme: (theme: Theme) => void
-  setEnginePath: (path: string) => void
   setSoundEnabled: (enabled: boolean) => void
   setSoundVolume: (volume: number) => void
   reset: () => void
@@ -45,10 +44,6 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     (theme: Theme) => setSettings((s) => ({ ...s, theme })),
     [],
   )
-  const setEnginePath = useCallback(
-    (path: string) => setSettings((s) => ({ ...s, enginePath: path })),
-    [],
-  )
   const setSoundEnabled = useCallback(
     (enabled: boolean) => setSettings((s) => ({ ...s, soundEnabled: enabled })),
     [],
@@ -67,12 +62,11 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     () => ({
       settings,
       setTheme,
-      setEnginePath,
       setSoundEnabled,
       setSoundVolume,
       reset,
     }),
-    [settings, setTheme, setEnginePath, setSoundEnabled, setSoundVolume, reset],
+    [settings, setTheme, setSoundEnabled, setSoundVolume, reset],
   )
 
   return (

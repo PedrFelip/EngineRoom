@@ -18,15 +18,12 @@ export type EnginePortHandle = EnginePort & { dispose(): Promise<void> }
 
 export interface Backend {
   /**
-   * Sobe a engine (sidecar ou caminho custom). Devolve null se `isCancelled`
+   * Sobe a engine sidecar. Devolve null se `isCancelled`
    * virar true durante o boot — sem processos órfãos. `isCancelled` é
    * consultado entre cada etapa (stop → start → listen) para efeitos
    * abortados (ex.: StrictMode) saírem antes de spawnar.
    */
-  createEnginePort(
-    path: string | undefined,
-    isCancelled: () => boolean,
-  ): Promise<EnginePortHandle | null>
+  createEnginePort(isCancelled: () => boolean): Promise<EnginePortHandle | null>
   /** Recursos da máquina (Threads/Hash); falha tratada como best-effort. */
   getSystemResources(): Promise<SystemResources>
   /** Cache de posições persistido (SQLite no Rust). */
@@ -38,8 +35,7 @@ export interface Backend {
 /** Adapter Tauri: compõe os wrappers IPC já existentes, um por operação. */
 export function createTauriBackend(): Backend {
   return {
-    createEnginePort: (path, isCancelled) =>
-      createTauriEnginePort(path, isCancelled),
+    createEnginePort: (isCancelled) => createTauriEnginePort(isCancelled),
     getSystemResources: () => getSystemResources(),
     createPositionCache: () => createTauriPositionCache(),
     saveReview: (config, result) => saveReview(config, result),

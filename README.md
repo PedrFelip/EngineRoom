@@ -14,7 +14,7 @@ Aplicativo desktop para **revisão de partidas de xadrez** com o motor **Stockfi
 - **Navegação por teclado**: ← → (anterior/próximo), Home/End (primeiro/último).
 - **Persistência local (SQLite)**: cache de posições por `(fen, depth, multipv)` e histórico de partidas revisadas com reabertura instantânea, reanálise e exclusão.
 - **Autoconfiguração do motor**: ajusta `Threads` (núcleos físicos) e `Hash` (~20% da RAM, entre 512 MB e 4 GB) automaticamente.
-- **Engine customizada**: use o Stockfish embarcado ou aponte para um binário próprio nas configurações, com botão de teste.
+- **Engine embarcada**: usa exclusivamente o Stockfish 18 distribuído como sidecar, com botão de teste nas configurações.
 - **Tema claro/escuro** aplicado antes da pintura para evitar *flash*.
 
 ## Stack
@@ -130,7 +130,7 @@ cargo test                # dentro de app/src-tauri/
 - **Tauri 2 (núcleo Rust + webview)**: toda a análise roda no dispositivo, sem nuvem.
 - **`EnginePort` injetável** (`src/lib/analyze.ts`): `analyzeGame` depende de uma interface `send`/`onLine`, não do processo concreto. Isso permite testar todo o pipeline (win%, classificação, acurácia, multipv, cache) com um `fakePort`, sem o Stockfish. `createTauriEnginePort` é o adaptador de produção.
 - **Núcleo puro e sem efeitos colaterais**: `uci.ts`, `scoring.ts`, `eco.ts` e `buildReview` são funções puras; toda I/O (motor, cache, DB) é isolada e injetada.
-- **UCI em Rust**: `engine.rs` faz spawn do sidecar (via `tauri-plugin-shell`) ou de um caminho customizado (`tokio::process`), escreve em stdin via canal `mpsc` e reemite cada linha de stdout como evento Tauri `engine://line`. Um `EngineState` (`Mutex<Option<EngineHandle>>`) garante uma única instância viva.
+- **UCI em Rust**: `engine.rs` faz spawn do sidecar via `tauri-plugin-shell`, escreve em stdin via canal `mpsc` e reemite cada linha de stdout como evento Tauri `engine://line`. Um `EngineState` (`Mutex<Option<EngineHandle>>`) garante uma única instância viva.
 - **SQLite duplo papel** (`db.rs`): tabela `position_cache` (chave exata `fen + depth + multipv`) e tabela `games` (`UNIQUE(pgn, depth, multipv)` — reanalisar com mesmos parâmetros substitui a entrada). Conexão única sob `Mutex`, em `engineroom.db` dentro de `app_data_dir`.
 - **Tema via indireção de CSS vars** (`index.css`): o tema ativo é aplicado antes da pintura por um script inline em `index.html` (lê `localStorage`), evitando *flash*.
 - **PGN como fonte única de verdade**: metadados (Elo, evento) são re-parseados do PGN ao reabrir, sem duplicação.
@@ -140,7 +140,6 @@ cargo test                # dentro de app/src-tauri/
 Persistidas em `localStorage` na chave `engineroom.settings.v1`:
 
 - **`theme`**: `"dark"` (padrão) ou `"light"`.
-- **`enginePath`**: vazio = usar o Stockfish embarcado; ou caminho absoluto para um binário próprio.
 
 ## Licença
 

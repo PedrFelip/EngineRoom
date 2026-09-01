@@ -21,7 +21,6 @@ import {
   type ReviewSessionState,
 } from './review-session'
 import { createReviewStore, type ReviewStore } from './review-store'
-import { useSettings } from './settings-context'
 
 export interface UseReview {
   result: ReviewResult | null
@@ -41,8 +40,6 @@ export interface UseReview {
 }
 
 export function useReview(config: ReviewConfig): UseReview {
-  const { settings } = useSettings()
-
   const storeRef = useRef<ReviewStore | null>(null)
   if (!storeRef.current) storeRef.current = createReviewStore()
   const store = storeRef.current
@@ -76,7 +73,6 @@ export function useReview(config: ReviewConfig): UseReview {
   useEffect(() => {
     const session = createReviewSession({
       config,
-      enginePath: settings.enginePath,
       backend: createTauriBackend(),
       store,
       onStateChange: (s) => {
@@ -102,7 +98,7 @@ export function useReview(config: ReviewConfig): UseReview {
       sessionRef.current = null
       session.dispose()
     }
-  }, [config, settings.enginePath, store])
+  }, [config, store])
 
   const goTo = useCallback((ply: number) => store.goTo(ply), [store])
   const next = useCallback(() => store.next(), [store])

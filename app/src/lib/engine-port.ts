@@ -23,12 +23,11 @@ export interface TauriEnginePort extends EnginePort {
  * Devolve null se abortado.
  */
 export async function createTauriEnginePort(
-  path: string | undefined,
   isCancelled: () => boolean,
 ): Promise<TauriEnginePort | null> {
   await engineStop().catch(() => {})
   if (isCancelled()) return null
-  await engineStart(path)
+  await engineStart()
   if (isCancelled()) {
     await engineStop().catch(() => {})
     return null

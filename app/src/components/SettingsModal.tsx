@@ -1,4 +1,3 @@
-import { open } from '@tauri-apps/plugin-dialog'
 import {
   Check,
   CircleAlert,
@@ -36,8 +35,7 @@ export default function SettingsModal({
   onClose,
   onGamesCleared,
 }: Props) {
-  const { settings, setTheme, setEnginePath, setSoundEnabled, setSoundVolume } =
-    useSettings()
+  const { settings, setTheme, setSoundEnabled, setSoundVolume } = useSettings()
   const [testing, setTesting] = useState(false)
   const [result, setResult] = useState<ProbeResult | null>(null)
   const [stats, setStats] = useState<StorageStats | null>(null)
@@ -62,21 +60,10 @@ export default function SettingsModal({
 
   if (!isOpen) return null
 
-  const useCustom = settings.enginePath.trim().length > 0
-
-  async function browse() {
-    try {
-      const selected = await open({ multiple: false, directory: false })
-      if (typeof selected === 'string' && selected) setEnginePath(selected)
-    } catch {
-      /* not in tauri context */
-    }
-  }
-
   async function test() {
     setTesting(true)
     setResult(null)
-    const res = await probeEngine(useCustom ? settings.enginePath : undefined)
+    const res = await probeEngine()
     setResult(res)
     setTesting(false)
   }
@@ -243,60 +230,16 @@ export default function SettingsModal({
               Engine Stockfish
             </h3>
 
-            <label className='flex cursor-pointer items-start gap-3 rounded-lg border border-edge-soft p-3 transition hover:bg-panel-2/60'>
-              <input
-                type='radio'
-                name='engine-src'
-                checked={!useCustom}
-                onChange={() => setEnginePath('')}
-                className='mt-0.5 accent-[var(--brand)]'
-              />
+            <div className='rounded-lg border border-edge-soft p-3'>
               <span>
                 <span className='block text-sm font-medium text-ink'>
                   Stockfish embarcado
                 </span>
                 <span className='block text-xs text-ink-faint'>
-                  Usa a engine que vem junto com o app (recomendado).
+                  Usa exclusivamente a engine que vem junto com o app.
                 </span>
               </span>
-            </label>
-
-            <label className='mt-2 flex cursor-pointer items-start gap-3 rounded-lg border border-edge-soft p-3 transition hover:bg-panel-2/60'>
-              <input
-                type='radio'
-                name='engine-src'
-                checked={useCustom}
-                onChange={() =>
-                  setEnginePath(settings.enginePath || '/usr/bin/stockfish')
-                }
-                className='mt-0.5 accent-[var(--brand)]'
-              />
-              <span className='min-w-0 flex-1'>
-                <span className='block text-sm font-medium text-ink'>
-                  Caminho customizado
-                </span>
-                <span className='mb-2 block text-xs text-ink-faint'>
-                  Use um Stockfish instalado no seu sistema.
-                </span>
-                <div className='flex gap-2'>
-                  <input
-                    type='text'
-                    value={settings.enginePath}
-                    onChange={(e) => setEnginePath(e.target.value)}
-                    placeholder='/usr/bin/stockfish'
-                    spellCheck={false}
-                    className='min-w-0 flex-1 rounded-md border border-edge bg-panel-2 px-2.5 py-1.5 font-mono text-xs text-ink outline-none focus:border-brand'
-                  />
-                  <button
-                    type='button'
-                    onClick={browse}
-                    className='shrink-0 rounded-md border border-edge bg-panel-2 px-3 py-1.5 text-xs font-medium text-ink-dim transition hover:bg-panel-3 hover:text-ink'
-                  >
-                    Procurar…
-                  </button>
-                </div>
-              </span>
-            </label>
+            </div>
 
             <div className='mt-3 flex items-center gap-3'>
               <button

@@ -36,8 +36,6 @@ export interface ReviewProgress {
 
 export interface ReviewSessionOpts {
   config: ReviewConfig
-  /** Caminho custom da engine (settings); undefined usa o sidecar. */
-  enginePath: string
   backend: Backend
   store: ReviewStore
   onStateChange(state: ReviewSessionState): void
@@ -89,10 +87,7 @@ export function createReviewSession(opts: ReviewSessionOpts): ReviewSession {
         enginePositions: 0,
       })
 
-      port = await backend.createEnginePort(
-        opts.enginePath || undefined,
-        () => cancelled,
-      )
+      port = await backend.createEnginePort(() => cancelled)
       if (!port) return
       if (cancelled) {
         await port.dispose().catch(() => {})

@@ -1,11 +1,8 @@
 use std::collections::BTreeMap;
-use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter};
 use tauri_plugin_shell::process::CommandEvent;
 use tauri_plugin_shell::ShellExt;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::process::Command;
 use tokio::sync::{mpsc, oneshot};
 
 /// The sidecar identifier passed to `Shell::sidecar`. Must be the **basename only**
@@ -45,11 +42,6 @@ struct EngineHandle {
     tx: mpsc::UnboundedSender<String>,
     /// Signalling this stops the writer task and kills the child.
     shutdown: oneshot::Sender<()>,
-}
-
-enum SpawnKind {
-    Sidecar,
-    Path(String),
 }
 
 /// Reduz o volume de eventos durante uma busca sem mudar o contrato UCI visto
@@ -145,195 +137,119 @@ fn forward_line(app: &AppHandle, filter: &Arc<Mutex<UciOutputFilter>>, line: Str
 
 fn spawn_engine(
     app: &AppHandle,
-    kind: SpawnKind,
 ) -> Result<(mpsc::UnboundedSender<String>, oneshot::Sender<()>), String> {
-    match kind {
-        SpawnKind::Sidecar => {
-            let command = app
-                .shell()
-                .sidecar(SIDECAR)
-                .map_err(|e| format!("Não foi possível localizar o Stockfish embarcado: {e}"))?;
+    let command = app
+        .shell()
+        .sidecar(SIDECAR)
+        .map_err(|e| format!("Não foi possível localizar o Stockfish embarcado: {e}"))?;
 
-            let (mut rx, child) = command
-                .spawn()
-                .map_err(|e| format!("Falha ao iniciar o Stockfish embarcado: {e}"))?;
+    let (mut rx, child) = command
+        .spawn()
+        .map_err(|e| format!("Falha ao iniciar o Stockfish embarcado: {e}"))?;
 
-            let filter = Arc::new(Mutex::new(UciOutputFilter::default()));
-            // Divide chunks em linhas antes de filtrá-las. O shell plugin pode
-            // agrupar mais de uma linha UCI no mesmo evento stdout.
-            let app_reader = app.clone();
-            let reader_filter = Arc::clone(&filter);
-            tauri::async_runtime::spawn(async move {
-                let mut reported_exit = false;
-                let mut stdout = Vec::new();
-                while let Some(event) = rx.recv().await {
-                    match event {
-                        CommandEvent::Stdout(bytes) => {
-                            stdout.extend_from_slice(&bytes);
-                            while let Some(end) = stdout.iter().position(|byte| *byte == b'\n') {
-                                let raw = stdout.drain(..=end).collect::<Vec<_>>();
-                                let line = String::from_utf8_lossy(&raw).trim().to_string();
-                                if !line.is_empty() {
-                                    forward_line(&app_reader, &reader_filter, line);
-                                }
-                            }
-                        }
-                        CommandEvent::Terminated(p) => {
-                            if !reported_exit {
-                                reported_exit = true;
-                                let _ = app_reader.emit(
-                                    EXIT_EVENT,
-                                    EngineExit {
-                                        code: p.code,
-                                        signal: p.signal,
-                                        error: None,
-                                    },
-                                );
-                            }
-                        }
-                        CommandEvent::Error(err) => {
-                            if !reported_exit {
-                                reported_exit = true;
-                                let _ = app_reader.emit(
-                                    EXIT_EVENT,
-                                    EngineExit {
-                                        code: None,
-                                        signal: None,
-                                        error: Some(err),
-                                    },
-                                );
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-                let line = String::from_utf8_lossy(&stdout).trim().to_string();
-                if !line.is_empty() {
-                    forward_line(&app_reader, &reader_filter, line);
-                }
-                // Channel closed = the process is gone but no Terminated/Error
-                // event was surfaced. Emit a generic exit so the frontend still
-                // fails fast instead of hanging to its ask() timeout.
-                if !reported_exit {
-                    let _ = app_reader.emit(
-                        EXIT_EVENT,
-                        EngineExit {
-                            code: None,
-                            signal: None,
-                            error: Some("stdout fechado sem evento de término".into()),
-                        },
-                    );
-                }
-            });
-
-            // Writer task: pumps frontend commands into stdin; kills on shutdown.
-            let (tx, mut incoming) = mpsc::unbounded_channel::<String>();
-            let (shutdown, mut shutdown_rx) = oneshot::channel::<()>();
-            let writer_filter = Arc::clone(&filter);
-            tauri::async_runtime::spawn(async move {
-                let mut child = child;
-                loop {
-                    tokio::select! {
-                        Some(message) = incoming.recv() => {
-                            writer_filter
-                                .lock()
-                                .expect("filtro UCI envenenado")
-                                .on_command(&message);
-                            let payload = format!("{}\n", message);
-                            let _ = child.write(payload.as_bytes());
-                        }
-                        _ = &mut shutdown_rx => {
-                            let _ = child.kill();
-                            break;
+    let filter = Arc::new(Mutex::new(UciOutputFilter::default()));
+    // Divide chunks em linhas antes de filtrá-las. O shell plugin pode
+    // agrupar mais de uma linha UCI no mesmo evento stdout.
+    let app_reader = app.clone();
+    let reader_filter = Arc::clone(&filter);
+    tauri::async_runtime::spawn(async move {
+        let mut reported_exit = false;
+        let mut stdout = Vec::new();
+        while let Some(event) = rx.recv().await {
+            match event {
+                CommandEvent::Stdout(bytes) => {
+                    stdout.extend_from_slice(&bytes);
+                    while let Some(end) = stdout.iter().position(|byte| *byte == b'\n') {
+                        let raw = stdout.drain(..=end).collect::<Vec<_>>();
+                        let line = String::from_utf8_lossy(&raw).trim().to_string();
+                        if !line.is_empty() {
+                            forward_line(&app_reader, &reader_filter, line);
                         }
                     }
                 }
-            });
-
-            Ok((tx, shutdown))
+                CommandEvent::Terminated(p) => {
+                    if !reported_exit {
+                        reported_exit = true;
+                        let _ = app_reader.emit(
+                            EXIT_EVENT,
+                            EngineExit {
+                                code: p.code,
+                                signal: p.signal,
+                                error: None,
+                            },
+                        );
+                    }
+                }
+                CommandEvent::Error(err) => {
+                    if !reported_exit {
+                        reported_exit = true;
+                        let _ = app_reader.emit(
+                            EXIT_EVENT,
+                            EngineExit {
+                                code: None,
+                                signal: None,
+                                error: Some(err),
+                            },
+                        );
+                    }
+                }
+                _ => {}
+            }
         }
-        SpawnKind::Path(path) => {
-            let mut child = Command::new(&path)
-                .stdin(Stdio::piped())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::null())
-                .spawn()
-                .map_err(|e| format!("Falha ao iniciar '{}': {e}", path))?;
-
-            let stdout = child.stdout.take().ok_or("stdout indisponível")?;
-            let stdin = child.stdin.take().ok_or("stdin indisponível")?;
-
-            let filter = Arc::new(Mutex::new(UciOutputFilter::default()));
-            let app_reader = app.clone();
-            let reader_filter = Arc::clone(&filter);
-            tauri::async_runtime::spawn(async move {
-                let mut lines = BufReader::new(stdout).lines();
-                while let Ok(Some(raw)) = lines.next_line().await {
-                    let line = raw.trim().to_string();
-                    if !line.is_empty() {
-                        forward_line(&app_reader, &reader_filter, line);
-                    }
-                }
-                // EOF = the process is gone. Signal exit so the frontend fails
-                // fast instead of hanging to its ask() timeout.
-                let _ = app_reader.emit(
-                    EXIT_EVENT,
-                    EngineExit {
-                        code: None,
-                        signal: None,
-                        error: Some("stdout fechado".into()),
-                    },
-                );
-            });
-
-            let (tx, mut incoming) = mpsc::unbounded_channel::<String>();
-            let (shutdown, mut shutdown_rx) = oneshot::channel::<()>();
-            let writer_filter = Arc::clone(&filter);
-            tauri::async_runtime::spawn(async move {
-                let mut stdin = stdin;
-                let mut child = child;
-                loop {
-                    tokio::select! {
-                        Some(message) = incoming.recv() => {
-                            writer_filter
-                                .lock()
-                                .expect("filtro UCI envenenado")
-                                .on_command(&message);
-                            let payload = format!("{}\n", message);
-                            if stdin.write_all(payload.as_bytes()).await.is_ok() {
-                                let _ = stdin.flush().await;
-                            }
-                        }
-                        _ = &mut shutdown_rx => {
-                            let _ = child.kill().await;
-                            break;
-                        }
-                    }
-                }
-            });
-
-            Ok((tx, shutdown))
+        let line = String::from_utf8_lossy(&stdout).trim().to_string();
+        if !line.is_empty() {
+            forward_line(&app_reader, &reader_filter, line);
         }
-    }
+        // Channel closed = the process is gone but no Terminated/Error event
+        // was surfaced. Emit a generic exit so the frontend still fails fast
+        // instead of hanging to its ask() timeout.
+        if !reported_exit {
+            let _ = app_reader.emit(
+                EXIT_EVENT,
+                EngineExit {
+                    code: None,
+                    signal: None,
+                    error: Some("stdout fechado sem evento de término".into()),
+                },
+            );
+        }
+    });
+
+    // Writer task: pumps frontend commands into stdin; kills on shutdown.
+    let (tx, mut incoming) = mpsc::unbounded_channel::<String>();
+    let (shutdown, mut shutdown_rx) = oneshot::channel::<()>();
+    let writer_filter = Arc::clone(&filter);
+    tauri::async_runtime::spawn(async move {
+        let mut child = child;
+        loop {
+            tokio::select! {
+                Some(message) = incoming.recv() => {
+                    writer_filter
+                        .lock()
+                        .expect("filtro UCI envenenado")
+                        .on_command(&message);
+                    let payload = format!("{}\n", message);
+                    let _ = child.write(payload.as_bytes());
+                }
+                _ = &mut shutdown_rx => {
+                    let _ = child.kill();
+                    break;
+                }
+            }
+        }
+    });
+
+    Ok((tx, shutdown))
 }
 
 #[tauri::command]
-pub fn engine_spawn(
-    app: AppHandle,
-    state: tauri::State<'_, EngineState>,
-    path: Option<String>,
-) -> Result<(), String> {
+pub fn engine_spawn(app: AppHandle, state: tauri::State<'_, EngineState>) -> Result<(), String> {
     let mut guard = state.inner.lock().map_err(|e| e.to_string())?;
     if guard.is_some() {
         return Err("A engine já está em execução.".into());
     }
 
-    let kind = match path.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
-        Some(p) => SpawnKind::Path(p.to_string()),
-        None => SpawnKind::Sidecar,
-    };
-
-    let (tx, shutdown) = spawn_engine(&app, kind)?;
+    let (tx, shutdown) = spawn_engine(&app)?;
     *guard = Some(EngineHandle { tx, shutdown });
     Ok(())
 }

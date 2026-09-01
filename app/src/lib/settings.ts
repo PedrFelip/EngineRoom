@@ -2,8 +2,6 @@ export type Theme = 'dark' | 'light'
 
 export interface Settings {
   theme: Theme
-  /** Empty string = use the embedded Stockfish sidecar. Otherwise an absolute path. */
-  enginePath: string
   /** Toca som ao avançar um lance na revisão. */
   soundEnabled: boolean
   /** Volume do som de movimentação, em [0, 1]. */
@@ -14,7 +12,6 @@ export const SETTINGS_KEY = 'engineroom.settings.v1'
 
 export const DEFAULT_SETTINGS: Settings = {
   theme: 'dark',
-  enginePath: '',
   soundEnabled: true,
   soundVolume: 0.7,
 }
@@ -27,8 +24,6 @@ export function loadSettings(): Settings {
     const parsed = JSON.parse(raw) as Partial<Settings>
     return {
       theme: parsed.theme === 'light' ? 'light' : 'dark',
-      enginePath:
-        typeof parsed.enginePath === 'string' ? parsed.enginePath : '',
       soundEnabled: parsed.soundEnabled !== false,
       soundVolume: clampVolume(parsed.soundVolume),
     }
