@@ -293,8 +293,54 @@
 .board-frame {
   overflow: hidden;
   border: 1px solid var(--edge);
-  border-radius: 0.8rem;
   box-shadow: 0 18px 42px -25px rgb(0 0 0 / 85%);
+}
+
+.board-shell {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 1.25rem;
+  grid-template-rows: minmax(0, 1fr) 1.25rem;
+}
+
+.board-ranks,
+.board-files {
+  color: var(--ink-dim);
+  font-size: 0.625rem;
+  font-weight: 700;
+  line-height: 1;
+  user-select: none;
+}
+
+.board-ranks {
+  display: grid;
+  grid-column: 2;
+  grid-row: 1;
+  grid-template-rows: repeat(8, 1fr);
+}
+
+.board-ranks span {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.board-files {
+  display: grid;
+  grid-column: 1;
+  grid-row: 2;
+  grid-template-columns: repeat(8, 1fr);
+  text-transform: uppercase;
+}
+
+.board-files span {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.board-frame cg-container {
+  width: 100% !important;
+  height: 100% !important;
 }
 
 /* Sobrescreve a textura marrom padrão do Chessground com um padrão nítido,
@@ -309,8 +355,10 @@
   background-size: 25% 25%;
 }
 
-.board-frame cg-board square.last-move {
-  background-color: var(--board-last-move);
+.board-frame .cg-wrap cg-board square.last-move {
+  background-color: var(--board-last-move) !important;
+  box-shadow: inset 0 0 0 3px
+    color-mix(in srgb, var(--brand) 72%, transparent);
 }
 
 .engine-loading-orb {
