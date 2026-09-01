@@ -205,10 +205,7 @@ describe('storedToConfig', () => {
     const legacyReview = {
       ...REVIEW,
       positions: [position(0), position(1), position(2)],
-      moves: [
-        move(1, 'w', 'brilhante', 0),
-        move(2, 'b', 'otimo', 1),
-      ],
+      moves: [move(1, 'w', 'brilhante', 0), move(2, 'b', 'otimo', 1)],
     }
 
     const result = storedToConfig(

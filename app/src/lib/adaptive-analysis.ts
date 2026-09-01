@@ -171,11 +171,7 @@ export function rankCriticalMoves(
       reasons.push('sequência de mate')
     }
 
-    const hard =
-      loss >= 10 ||
-      swing >= 15 ||
-      mateSignal ||
-      promotes
+    const hard = loss >= 10 || swing >= 15 || mateSignal || promotes
     return {
       ply: move.ply,
       score: Math.min(100, Math.round(score)),
