@@ -30,12 +30,6 @@ const PHASE_LABELS: Record<Phase, string> = {
   middlegame: 'Meio-jogo',
   endgame: 'Final',
 }
-const PHASE_DOT: Record<Phase, string> = {
-  opening: 'var(--color-phase-opening)',
-  middlegame: 'var(--color-phase-middlegame)',
-  endgame: 'var(--color-phase-endgame)',
-}
-
 function countBy(moves: { classification: Classification }[]): number[] {
   return ORDER.map(
     (classification) =>
@@ -69,17 +63,21 @@ export default function ReviewSummary({ result }: { result: ReviewResult }) {
 
       <section className='border-t border-border px-4 py-3'>
         <SectionTitle icon={Swords} title='Acurácia por fase' />
-        <SummaryTable>
+        <div className='mt-2.5 overflow-hidden rounded-lg border border-border/70 bg-background/35'>
+          <div className='grid grid-cols-[minmax(0,1fr)_3.5rem_3.5rem] items-center border-b border-border/70 px-3 py-1.5 text-[9px] font-semibold tracking-[0.12em] text-muted-foreground uppercase'>
+            <span>Fase</span>
+            <span className='text-center'>Br.</span>
+            <span className='text-center'>Pr.</span>
+          </div>
           {PHASES.map((phase) => (
             <PhaseAccuracy
               key={phase}
               label={PHASE_LABELS[phase]}
-              color={PHASE_DOT[phase]}
               white={result.accuracyByPhase[phase].white}
               black={result.accuracyByPhase[phase].black}
             />
           ))}
-        </SummaryTable>
+        </div>
       </section>
 
       <section className='border-t border-border px-4 py-3'>
@@ -185,29 +183,26 @@ function SummaryTable({ children }: { children: ReactNode }) {
 
 function PhaseAccuracy({
   label,
-  color,
   white,
   black,
 }: {
   label: string
-  color: string
   white: number
   black: number
 }) {
   return (
-    <TableRow className='border-0 hover:bg-transparent'>
-      <TableCell className='p-0 pr-2'>
-        <span className='flex min-w-0 items-center gap-2 font-medium text-foreground'>
-          <span
-            className='h-2 w-2 shrink-0 rounded-full ring-1 ring-border'
-            style={{ background: color }}
-          />
-          <span className='truncate'>{label}</span>
-        </span>
-      </TableCell>
-      <Score value={white} />
-      <Score value={black} />
-    </TableRow>
+    <div className='grid grid-cols-[minmax(0,1fr)_3.5rem_3.5rem] items-center border-b border-border/60 px-3 py-2.5 last:border-b-0'>
+      <span className='flex min-w-0 items-center gap-2.5 text-xs font-medium text-foreground'>
+        <span className='h-4 w-0.5 shrink-0 rounded-full bg-foreground/45' />
+        <span className='truncate'>{label}</span>
+      </span>
+      <span className='text-center font-mono text-xs font-semibold tabular-nums text-foreground'>
+        {white.toFixed(0)}%
+      </span>
+      <span className='text-center font-mono text-xs font-semibold tabular-nums text-foreground'>
+        {black.toFixed(0)}%
+      </span>
+    </div>
   )
 }
 
@@ -233,14 +228,6 @@ function ClassificationCount({
       <Count value={white} />
       <Count value={black} />
     </TableRow>
-  )
-}
-
-function Score({ value }: { value: number }) {
-  return (
-    <TableCell className='p-0 py-0.5 text-center font-mono tabular-nums text-foreground'>
-      {value.toFixed(0)}%
-    </TableCell>
   )
 }
 

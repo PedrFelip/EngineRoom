@@ -119,7 +119,7 @@
   /* Classificações: matizes distintos em uma mesma faixa de luminosidade e
      cromaticidade moderada, integrados à base quente e neutra da interface. */
   --good: oklch(0.56 0.075 145);
-  --excellent: oklch(0.55 0.085 160);
+  --excellent: oklch(0.5 0.14 160);
   --best: oklch(0.55 0.08 225);
   --book: oklch(0.55 0.075 295);
   --mistake: oklch(0.76 0.105 85);

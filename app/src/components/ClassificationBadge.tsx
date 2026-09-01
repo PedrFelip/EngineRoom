@@ -1,6 +1,7 @@
 import {
   BookOpen,
   CircleAlert,
+  CircleCheckBig,
   CircleX,
   type LucideIcon,
   Target,
@@ -23,7 +24,7 @@ const BADGE_TONE: Record<Classification, string> = {
 const BADGE_GLYPH: Record<Classification, LucideIcon> = {
   livro: BookOpen,
   melhor: Target,
-  excelente: ThumbsUp,
+  excelente: CircleCheckBig,
   bom: ThumbsUp,
   imprecisao: CircleAlert,
   erro: TriangleAlert,
