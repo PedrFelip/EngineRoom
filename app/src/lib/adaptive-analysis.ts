@@ -1,6 +1,6 @@
 import { Chess } from 'chess.js'
 import type { AnalysisKind } from '../types'
-import type { PlayedMove, RawPosition } from './analyze'
+import type { PlayedMove, RawPosition } from './analysis/analysis-types'
 import { cpToWinPct } from './scoring'
 
 export type AdaptiveProfileId = 'fast' | 'deep'
