@@ -1,4 +1,5 @@
 import { Archive, RotateCcw, Trash2 } from 'lucide-react'
+import { memo } from 'react'
 import { formatEngineTag } from '../lib/engine-tag'
 import { resultLabel } from '../lib/pgn'
 import type { GameSummary } from '../types'
@@ -6,9 +7,13 @@ import { Badge } from './ui/badge'
 
 interface Props {
   games: GameSummary[]
+  total: number
+  hasMore: boolean
+  loadingMore: boolean
   onOpen: (id: number) => void
   onDelete: (id: number) => void
   onReanalyze: (id: number) => void
+  onLoadMore: () => void
 }
 
 /** "2026-07-17 20:00:00" (UTC do SQLite) → "17/07 17:00" (local). */
@@ -31,11 +36,15 @@ function tierLabel(game: GameSummary): string {
   })
 }
 
-export default function ReviewedGamesList({
+const ReviewedGamesList = memo(function ReviewedGamesList({
   games,
+  total,
+  hasMore,
+  loadingMore,
   onOpen,
   onDelete,
   onReanalyze,
+  onLoadMore,
 }: Props) {
   return (
     <section className='@container w-full min-w-0 flex-1'>
@@ -46,7 +55,7 @@ export default function ReviewedGamesList({
             Partidas analisadas
           </h2>
           <Badge variant='outline' className='font-mono tabular-nums'>
-            {games.length}
+            {total}
           </Badge>
         </header>
         <ul className='max-h-[25rem] divide-y divide-border/70 overflow-y-auto md:max-h-[31rem] xl:max-h-[39rem]'>
@@ -132,10 +141,24 @@ export default function ReviewedGamesList({
             </li>
           ))}
         </ul>
+        {hasMore ? (
+          <div className='border-t border-border/70 p-2.5 text-center'>
+            <button
+              type='button'
+              onClick={onLoadMore}
+              disabled={loadingMore}
+              className='rounded-[var(--radius)] px-3 py-1.5 text-xs font-semibold text-brand transition-colors hover:bg-brand/10 disabled:cursor-wait disabled:opacity-60'
+            >
+              {loadingMore ? 'Carregando…' : 'Carregar mais'}
+            </button>
+          </div>
+        ) : null}
       </div>
     </section>
   )
-}
+})
+
+export default ReviewedGamesList
 
 function PlayerDot({ color }: { color: 'white' | 'black' }) {
   return (

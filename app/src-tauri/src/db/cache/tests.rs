@@ -237,12 +237,7 @@ fn lookup_bulk_devolve_um_resultado_por_fen_na_ordem_preservando_cobertura() {
     cache.store(FEN, Mode::Depth, 20, 1, 20, 35, LINES).unwrap();
 
     let out = cache
-        .lookup_bulk(
-            &[FEN.to_string(), FEN_B.to_string()],
-            Mode::Depth,
-            15,
-            1,
-        )
+        .lookup_bulk(&[FEN.to_string(), FEN_B.to_string()], Mode::Depth, 15, 1)
         .unwrap();
 
     assert_eq!(out.len(), 2, "um resultado por fen, na ordem de entrada");
@@ -281,5 +276,3 @@ fn store_many_grava_todas_as_entries_numa_única_transação() {
     assert!(hit_b.is_some(), "fen_b cobre depth 15 (reached 18)");
     assert_eq!(hit_b.unwrap().cp, 12);
 }
-
-

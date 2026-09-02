@@ -4,6 +4,7 @@ import type { PositionCache } from '../../analyze'
 import type { Backend, EnginePortHandle } from '../../backend'
 import {
   createReviewSession,
+  type ReviewProgress,
   type ReviewSessionState,
 } from '../../review-session'
 import { createReviewStore } from '../../review-store'
@@ -154,7 +155,10 @@ export function startSession(opts: {
 }) {
   const states: ReviewSessionState[] = []
   const store = opts.store ?? createReviewStore()
-  const onProgress = vi.fn()
+  const progressSnapshots: number[][] = []
+  const onProgress = vi.fn((progress: ReviewProgress) => {
+    progressSnapshots.push(progress.winPcts.slice())
+  })
   const session = createReviewSession({
     config: opts.config,
     backend: opts.backend,
@@ -162,5 +166,5 @@ export function startSession(opts: {
     onStateChange: (s) => states.push(s),
     onProgress,
   })
-  return { session, store, states, onProgress }
+  return { session, store, states, onProgress, progressSnapshots }
 }

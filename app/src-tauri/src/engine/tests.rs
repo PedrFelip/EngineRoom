@@ -57,5 +57,3 @@ fn bounds_events_for_a_reproducible_verbose_trace() {
     let output = filter.on_line("bestmove e2e4".into());
     assert_eq!(output.len(), 4, "300 infos + bestmove viram 4 eventos");
 }
-
-

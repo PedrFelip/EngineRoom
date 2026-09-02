@@ -13,41 +13,50 @@ import {
   START_FEN,
 } from './analyze-test-helpers'
 
-describe('analyzeGame — onProgress', () => {
-  it('chama onProgress uma vez por posição, cada chamada com as winPcts acumuladas crescendo de 1 em 1', async () => {
+describe('analyzeGame — onDetailedProgress', () => {
+  it('emite uma atualização indexada por posição', async () => {
     const port = fakePort(() => ({ cp: 0, pv: ['e2e4'] }))
-    const snapshots: number[][] = []
+    const updates: WinPctUpdate[] = []
     await analyzeGame('1. e4 e5', { mode: 'depth', depth: 20 }, port, 1, {
-      onProgress: (wp) => snapshots.push(wp),
+      onDetailedProgress: (_progress, update) => {
+        if (update) updates.push(update)
+      },
     })
 
-    expect(snapshots).toHaveLength(3)
-    expect(snapshots.map((s) => s.length)).toEqual([1, 2, 3])
+    expect(updates).toHaveLength(3)
+    expect(updates.map((update) => update.index)).toEqual([0, 1, 2])
   })
 
-  it('entrega win% no ponto de vista das brancas e a última chamada iguala o resultado final', async () => {
+  it('entrega win% no ponto de vista das brancas', async () => {
     const port = fakePort((fen) =>
       fen === START_FEN ? { cp: 0, pv: ['e2e4'] } : { cp: 500, pv: ['d8h4'] },
     )
-    const snapshots: number[][] = []
+    const updates: WinPctUpdate[] = []
     const review = await analyzeGame(
       '1. e4',
       { mode: 'depth', depth: 20 },
       port,
       1,
       {
-        onProgress: (wp) => snapshots.push(wp),
+        onDetailedProgress: (_progress, update) => {
+          if (update) updates.push(update)
+        },
       },
     )
 
-    expect(snapshots).toHaveLength(2)
-    expect(snapshots[0][0]).toBeCloseTo(50, 0)
+    expect(updates).toHaveLength(2)
+    expect(updates[0].winPct).toBeCloseTo(50, 0)
     // após e4 as pretas estão a jogar com cp 500 → win% das brancas cai < 50
-    expect(snapshots[1][1]).toBeLessThan(50)
-    expect(snapshots[1]).toEqual(review.positions.map((p) => p.winPct))
+    expect(updates[1].winPct).toBeLessThan(50)
+    expect(updates).toEqual(
+      review.positions.map((position, index) => ({
+        index,
+        winPct: position.winPct,
+      })),
+    )
   })
 
-  it('dispara onProgress também para posições vindas do cache (não só do engine)', async () => {
+  it('emite atualizações para posições vindas do cache (não só do engine)', async () => {
     let gos = 0
     let lineCb: ((line: string) => void) | null = null
     const port: EnginePort = {
@@ -65,32 +74,42 @@ describe('analyzeGame — onProgress', () => {
       },
     }
     const cache = allHitsCache()
-    const snapshots: number[][] = []
+    const updates: WinPctUpdate[] = []
     await analyzeGame('1. e4 e5', { mode: 'depth', depth: 20 }, port, 1, {
       cache,
-      onProgress: (wp) => snapshots.push(wp),
+      onDetailedProgress: (_progress, update) => {
+        if (update) updates.push(update)
+      },
     })
 
     expect(gos).toBe(0)
-    expect(snapshots).toHaveLength(3)
-    expect(snapshots.map((s) => s.length)).toEqual([1, 2, 3])
+    expect(updates.map((update) => update.index)).toEqual([0, 1, 2])
   })
 
-  it('dispara onProgress para posições terminais (xeque-mate) resolvidas sem a engine', async () => {
+  it('emite atualizações para posições terminais resolvidas sem a engine', async () => {
     const port = fakePort(() => ({ cp: 0, pv: [] }))
-    const snapshots: number[][] = []
+    const updates: WinPctUpdate[] = []
     const review = await analyzeGame(
       '1. f3 e5 2. g4 Qh4#',
       { mode: 'depth', depth: 20 },
       port,
       1,
-      { onProgress: (wp) => snapshots.push(wp) },
+      {
+        onDetailedProgress: (_progress, update) => {
+          if (update) updates.push(update)
+        },
+      },
     )
 
     // 5 posições; a última é xeque-mate (resolvida por terminalCp, sem engine)
-    expect(snapshots).toHaveLength(review.positions.length)
-    expect(snapshots).toHaveLength(5)
-    expect(snapshots.at(-1)).toEqual(review.positions.map((p) => p.winPct))
+    expect(updates).toHaveLength(review.positions.length)
+    expect(updates).toHaveLength(5)
+    expect(updates).toEqual(
+      review.positions.map((position, index) => ({
+        index,
+        winPct: position.winPct,
+      })),
+    )
   })
 })
 
@@ -113,7 +132,10 @@ describe('analyzeGameAdaptive', () => {
     let currentFen = ''
     let triageCount = 0
     let criticalFen = ''
-    const progress: AnalysisProgress[] = []
+    const progress: Array<{
+      progress: AnalysisProgress
+      update?: WinPctUpdate
+    }> = []
     const cacheReads: Array<{ fens: string[]; value: number }> = []
     const cache = fakeCache({
       async get() {
@@ -157,7 +179,8 @@ describe('analyzeGameAdaptive', () => {
       port,
       {
         cache,
-        onDetailedProgress: (snapshot) => progress.push(snapshot),
+        onDetailedProgress: (snapshot, update) =>
+          progress.push({ progress: snapshot, update }),
       },
     )
 
@@ -174,18 +197,37 @@ describe('analyzeGameAdaptive', () => {
       [2, 1500],
     ])
     const refinement = progress.filter(
-      (snapshot) => snapshot.stage === 'refinement',
+      ({ progress: snapshot }) => snapshot.stage === 'refinement',
     )
-    expect(refinement.map((snapshot) => snapshot.completed)).toEqual([0, 1, 2])
-    expect(refinement.map((snapshot) => snapshot.total)).toEqual([2, 2, 2])
-    expect(refinement.map((snapshot) => snapshot.remainingBudgetMs)).toEqual([
-      3000, 1500, 0,
+    expect(
+      refinement.map(({ progress: snapshot }) => snapshot.completed),
+    ).toEqual([0, 1, 2])
+    expect(refinement.map(({ progress: snapshot }) => snapshot.total)).toEqual([
+      2, 2, 2,
     ])
     expect(
-      progress.filter((snapshot) => snapshot.stage === 'triage')[0]?.winPcts,
-    ).toHaveLength(1)
-    expect(refinement[0]?.winPcts).toHaveLength(11)
-    expect(progress.at(-1)?.stage).toBe('finalizing')
+      refinement.map(({ progress: snapshot }) => snapshot.remainingBudgetMs),
+    ).toEqual([3000, 1500, 0])
+    expect(
+      progress.filter(
+        ({ progress: snapshot }) => snapshot.stage === 'triage',
+      )[0]?.update?.index,
+    ).toBe(0)
+    expect(refinement[0]?.update).toBeUndefined()
+    const triageIndexes = new Set(
+      progress
+        .filter(({ progress: snapshot }) => snapshot.stage === 'triage')
+        .map(({ update }) => update?.index),
+    )
+    expect(refinement.slice(1).map(({ update }) => update?.index)).toHaveLength(
+      2,
+    )
+    expect(
+      refinement
+        .slice(1)
+        .every(({ update }) => triageIndexes.has(update?.index)),
+    ).toBe(true)
+    expect(progress.at(-1)?.progress.stage).toBe('finalizing')
   })
 })
 

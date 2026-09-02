@@ -42,7 +42,8 @@ pub(super) fn migrate(conn: &Connection) -> Result<(), String> {
     migrate_position_cache_mode(conn)?;
     migrate_position_cache_reached_depth(conn)?;
     migrate_games_mode(conn)?;
-    migrate_games_analysis_kind(conn)
+    migrate_games_analysis_kind(conn)?;
+    migrate_games_list_index(conn)
 }
 
 /// `true` se a coluna existe na tabela (via `PRAGMA table_info`).
@@ -196,6 +197,15 @@ fn migrate_games_analysis_kind(conn: &Connection) -> Result<(), String> {
     .map_err(|e| e.to_string())
 }
 
+/// Índice para a listagem paginada do histórico, ordenada por data e id.
+fn migrate_games_list_index(conn: &Connection) -> Result<(), String> {
+    conn.execute_batch(
+        "CREATE INDEX IF NOT EXISTS games_created_at_id ON games (created_at DESC, id DESC);",
+    )
+    .map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
 #[cfg(test)]
 #[path = "migrations/tests.rs"]
 mod tests;

@@ -41,6 +41,23 @@ pub struct GameSummary {
     pub created_at: String,
 }
 
+/// Cursor composto para a ordem `(created_at DESC, id DESC)` do histórico.
+#[derive(Debug, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GameCursor {
+    pub created_at: String,
+    pub id: i64,
+}
+
+/// Página leve do histórico, sem PGN ou revisão completa.
+#[derive(Debug, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GamePage {
+    pub games: Vec<GameSummary>,
+    pub total: i64,
+    pub next_cursor: Option<GameCursor>,
+}
+
 /// Partida completa, para reabertura instantânea da revisão.
 #[derive(Debug, PartialEq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -56,7 +73,8 @@ pub struct Store<'a> {
     conn: &'a Connection,
 }
 
-const SUMMARY_COLS: &str = "id, white, black, result, plies, engine_tier, mode, analysis_kind, depth, multipv,
+const SUMMARY_COLS: &str =
+    "id, white, black, result, plies, engine_tier, mode, analysis_kind, depth, multipv,
         accuracy_white, accuracy_black, created_at";
 
 impl<'a> Store<'a> {
@@ -91,19 +109,48 @@ impl<'a> Store<'a> {
         Ok(self.conn.last_insert_rowid())
     }
 
-    pub fn list(&self) -> Result<Vec<GameSummary>, String> {
+    pub fn list_page(&self, limit: usize, cursor: Option<&GameCursor>) -> Result<GamePage, String> {
+        let limit = limit.clamp(1, 100);
+        let total = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM games", [], |row| row.get(0))
+            .map_err(|e| e.to_string())?;
         let mut stmt = self
             .conn
             .prepare(&format!(
-                "SELECT {SUMMARY_COLS} FROM games ORDER BY created_at DESC, id DESC"
+                "SELECT {SUMMARY_COLS} FROM games
+                 WHERE ?1 IS NULL OR created_at < ?1 OR (created_at = ?1 AND id < ?2)
+                 ORDER BY created_at DESC, id DESC LIMIT ?3"
             ))
             .map_err(|e| e.to_string())?;
-        let mut rows = stmt.query(()).map_err(|e| e.to_string())?;
+        let cursor_created_at = cursor.map(|value| value.created_at.as_str());
+        let cursor_id = cursor.map(|value| value.id);
+        let mut rows = stmt
+            .query(rusqlite::params![
+                cursor_created_at,
+                cursor_id,
+                (limit + 1) as i64,
+            ])
+            .map_err(|e| e.to_string())?;
         let mut out = Vec::new();
         while let Some(row) = rows.next().map_err(|e| e.to_string())? {
             out.push(summary_from_row(row)?);
         }
-        Ok(out)
+        let has_more = out.len() > limit;
+        out.truncate(limit);
+        let next_cursor = if has_more {
+            out.last().map(|game| GameCursor {
+                created_at: game.created_at.clone(),
+                id: game.id,
+            })
+        } else {
+            None
+        };
+        Ok(GamePage {
+            games: out,
+            total,
+            next_cursor,
+        })
     }
 
     pub fn get(&self, id: i64) -> Result<Option<StoredGame>, String> {
@@ -169,9 +216,13 @@ pub fn games_save(state: tauri::State<'_, DbState>, game: NewGame) -> Result<i64
 }
 
 #[tauri::command]
-pub fn games_list(state: tauri::State<'_, DbState>) -> Result<Vec<GameSummary>, String> {
+pub fn games_list(
+    state: tauri::State<'_, DbState>,
+    limit: usize,
+    cursor: Option<GameCursor>,
+) -> Result<GamePage, String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
-    Store::new(&conn).list()
+    Store::new(&conn).list_page(limit, cursor.as_ref())
 }
 
 #[tauri::command]
@@ -192,6 +243,7 @@ pub fn games_clear(state: tauri::State<'_, DbState>) -> Result<(), String> {
     Store::new(&conn).clear()
 }
 
+#[cfg(test)]
 #[cfg(test)]
 #[path = "games/tests.rs"]
 mod tests;

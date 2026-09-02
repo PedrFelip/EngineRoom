@@ -17,6 +17,7 @@ import {
   type EnginePort,
   type PositionCache,
   type RawPosition,
+  type WinPctUpdate,
 } from './analysis-types'
 import {
   addSanToLines,
@@ -45,8 +46,10 @@ export async function analyzeGameAdaptive(
     cache?: PositionCache
     keepAlive?: boolean
     goTimeoutMs?: number
-    onProgress?: (winPcts: number[]) => void
-    onDetailedProgress?: (progress: AnalysisProgress) => void
+    onDetailedProgress?: (
+      progress: AnalysisProgress,
+      update?: WinPctUpdate,
+    ) => void
   } = {},
 ): Promise<ReviewResult> {
   const profile = ADAPTIVE_PROFILES[profileId]
@@ -73,7 +76,6 @@ export async function analyzeGameAdaptive(
     : positionFens.map(() => null)
   const raw: RawPosition[] = []
   const triagePuts: RawPosition[] = []
-  const winPcts: number[] = []
   const terminals = terminalCps(positionFens)
   const phases = computePhases(positionFens.map((fen) => ({ fen })))
   let cachedPositions = 0
@@ -118,19 +120,20 @@ export async function analyzeGameAdaptive(
         if (triagePuts.length >= 8) await flushTriagePuts()
       }
       raw.push(pos)
-      winPcts.push(whiteWinPct(pos.cp, sideToMoveAtPly(moves, index)))
-      opts.onProgress?.(winPcts.slice())
-      opts.onDetailedProgress?.({
-        stage: 'triage',
-        completed: index + 1,
-        total: positionFens.length,
-        currentPly: index,
-        phase: phases[index],
-        winPcts: winPcts.slice(),
-        cachedPositions,
-        enginePositions,
-        remainingBudgetMs: remainingTriagePositions * profile.triageMs,
-      })
+      const winPct = whiteWinPct(pos.cp, sideToMoveAtPly(moves, index))
+      opts.onDetailedProgress?.(
+        {
+          stage: 'triage',
+          completed: index + 1,
+          total: positionFens.length,
+          currentPly: index,
+          phase: phases[index],
+          cachedPositions,
+          enginePositions,
+          remainingBudgetMs: remainingTriagePositions * profile.triageMs,
+        },
+        { index, winPct },
+      )
     }
 
     await flushTriagePuts()
@@ -170,7 +173,6 @@ export async function analyzeGameAdaptive(
         total: refinementTargets.length,
         currentPly: refinementTargets[0].positionIndex,
         phase: phases[refinementTargets[0].positionIndex],
-        winPcts: winPcts.slice(),
         cachedPositions,
         enginePositions,
         remainingBudgetMs: remainingRefinementBudgetMs,
@@ -223,21 +225,22 @@ export async function analyzeGameAdaptive(
             refinementPuts.push(pos)
           }
           raw[index] = pos
-          winPcts[index] = whiteWinPct(pos.cp, sideToMoveAtPly(moves, index))
+          const winPct = whiteWinPct(pos.cp, sideToMoveAtPly(moves, index))
           refined++
           remainingRefinementBudgetMs -= movetimeMs
-          opts.onProgress?.(winPcts.slice())
-          opts.onDetailedProgress?.({
-            stage: 'refinement',
-            completed: refined,
-            total: refinementTargets.length,
-            currentPly: index,
-            phase: phases[index],
-            winPcts: winPcts.slice(),
-            cachedPositions,
-            enginePositions,
-            remainingBudgetMs: remainingRefinementBudgetMs,
-          })
+          opts.onDetailedProgress?.(
+            {
+              stage: 'refinement',
+              completed: refined,
+              total: refinementTargets.length,
+              currentPly: index,
+              phase: phases[index],
+              cachedPositions,
+              enginePositions,
+              remainingBudgetMs: remainingRefinementBudgetMs,
+            },
+            { index, winPct },
+          )
         }
 
         if (opts.cache && refinementPuts.length) {
@@ -257,7 +260,6 @@ export async function analyzeGameAdaptive(
       total: positionFens.length,
       currentPly: positionFens.length - 1,
       phase: phases[phases.length - 1] ?? 'opening',
-      winPcts: winPcts.slice(),
       cachedPositions,
       enginePositions,
     })

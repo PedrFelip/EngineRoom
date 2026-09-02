@@ -1,5 +1,5 @@
 import { BarChart3, Gauge, Swords } from 'lucide-react'
-import type { ReactNode } from 'react'
+import { memo, type ReactNode } from 'react'
 import { CLASSIFICATION_LABELS } from '../lib/scoring'
 import type { Classification, Phase, ReviewResult } from '../types'
 import { ClassGlyph } from './ClassificationBadge'
@@ -37,7 +37,13 @@ function countBy(moves: { classification: Classification }[]): number[] {
   )
 }
 
-export default function ReviewSummary({ result }: { result: ReviewResult }) {
+interface ReviewSummaryProps {
+  result: ReviewResult
+}
+
+const ReviewSummary = memo(function ReviewSummary({
+  result,
+}: ReviewSummaryProps) {
   const whiteMoves = result.moves.filter((move) => move.color === 'w')
   const blackMoves = result.moves.filter((move) => move.color === 'b')
   const whiteCounts = countBy(whiteMoves)
@@ -95,7 +101,9 @@ export default function ReviewSummary({ result }: { result: ReviewResult }) {
       </section>
     </Card>
   )
-}
+})
+
+export default ReviewSummary
 
 function AccuracyScoreboard({
   accuracy,

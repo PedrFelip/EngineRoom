@@ -11,6 +11,7 @@ import {
   type EnginePort,
   type PositionCache,
   type RawPosition,
+  type WinPctUpdate,
 } from './analysis-types'
 import {
   configureEngine,
@@ -35,13 +36,11 @@ export async function analyzeGame(
     keepAlive?: boolean
     /** Override do timeout do `go` por posição (default via `defaultGoTimeout`). */
     goTimeoutMs?: number
-    /**
-     * Recebe as winPcts (POV brancas) acumuladas após cada posição analisada —
-     * uma chamada por posição, sempre com a lista completa até ali. Usado para
-     * alimentar o gráfico de avaliação durante o loading.
-     */
-    onProgress?: (winPcts: number[]) => void
-    onDetailedProgress?: (progress: AnalysisProgress) => void
+    /** Atualização de progresso e, ao avaliar uma posição, seu win% pontual. */
+    onDetailedProgress?: (
+      progress: AnalysisProgress,
+      update?: WinPctUpdate,
+    ) => void
   } = {},
 ): Promise<ReviewResult> {
   const { positionFens, moves } = extractGame(pgn)
@@ -60,7 +59,6 @@ export async function analyzeGame(
     : positionFens.map(() => null)
   const pendingPuts: RawPosition[] = []
   const raw: RawPosition[] = []
-  const winPcts: number[] = []
   const terminals = terminalCps(positionFens)
   const phases = computePhases(positionFens.map((fen) => ({ fen })))
   let cachedPositions = 0
@@ -110,21 +108,24 @@ export async function analyzeGame(
         }
       }
       raw.push(pos)
-      winPcts.push(whiteWinPct(pos.cp, sideToMoveAtPly(game.moves, i)))
-      opts.onProgress?.(winPcts.slice())
-      opts.onDetailedProgress?.({
-        stage: 'analyzing',
-        completed: i + 1,
-        total: positionFens.length,
-        currentPly: i,
-        phase: phases[i],
-        winPcts: winPcts.slice(),
-        cachedPositions,
-        enginePositions,
-        ...(control.mode === 'time'
-          ? { remainingBudgetMs: remainingTimedPositions * control.movetimeMs }
-          : {}),
-      })
+      const winPct = whiteWinPct(pos.cp, sideToMoveAtPly(game.moves, i))
+      opts.onDetailedProgress?.(
+        {
+          stage: 'analyzing',
+          completed: i + 1,
+          total: positionFens.length,
+          currentPly: i,
+          phase: phases[i],
+          cachedPositions,
+          enginePositions,
+          ...(control.mode === 'time'
+            ? {
+                remainingBudgetMs: remainingTimedPositions * control.movetimeMs,
+              }
+            : {}),
+        },
+        { index: i, winPct },
+      )
     }
   } catch (err) {
     // Descarrega o buffer mesmo se a análise abortar no meio: posições já
@@ -152,7 +153,6 @@ export async function analyzeGame(
     total: positionFens.length,
     currentPly: positionFens.length - 1,
     phase: phases[phases.length - 1] ?? 'opening',
-    winPcts: winPcts.slice(),
     cachedPositions,
     enginePositions,
   })

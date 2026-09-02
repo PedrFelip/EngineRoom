@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core'
 import type {
-  GameSummary,
+  GameCursor,
+  GamePage,
   PgnMeta,
   ReviewConfig,
   ReviewResult,
@@ -18,9 +19,12 @@ import {
   gameAccuracy,
 } from './scoring'
 
-/** Lista as partidas analisadas, da mais recente para a mais antiga. */
-export function listGames(): Promise<GameSummary[]> {
-  return invoke('games_list')
+/** Página do histórico, da partida mais recente para a mais antiga. */
+export function listGames(
+  limit: number,
+  cursor: GameCursor | null = null,
+): Promise<GamePage> {
+  return invoke('games_list', { limit, cursor })
 }
 
 /** Busca a partida completa (pgn + revisão) para reabertura instantânea. */

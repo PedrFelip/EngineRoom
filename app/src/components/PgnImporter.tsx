@@ -6,6 +6,8 @@ import { Button } from './ui/button'
 interface Props {
   value: string
   onChange: (pgn: string) => void
+  /** Arquivos são validados imediatamente, sem aguardar o debounce da digitação. */
+  onImport?: (pgn: string) => void
 }
 
 type Mode = 'file' | 'paste'
@@ -19,7 +21,7 @@ function readFile(file: File): Promise<string> {
   })
 }
 
-export default function PgnImporter({ value, onChange }: Props) {
+export default function PgnImporter({ value, onChange, onImport }: Props) {
   const [mode, setMode] = useState<Mode>('file')
   const [dragActive, setDragActive] = useState(false)
   const [fileName, setFileName] = useState<string | null>(null)
@@ -30,9 +32,10 @@ export default function PgnImporter({ value, onChange }: Props) {
       if (!file) return
       const text = await readFile(file)
       setFileName(file.name)
-      onChange(text)
+      const change = onImport ?? onChange
+      change(text)
     },
-    [onChange],
+    [onChange, onImport],
   )
 
   return (

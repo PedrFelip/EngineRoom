@@ -160,7 +160,7 @@ fn migracao_games_mode_preserva_dados_legacy_sem_coluna_mode() {
 
     // Pós-migração: `mode` presente, linha legacy sobrevive com mode='depth'.
     assert!(has_column(&conn, "games", "mode").unwrap());
-    let lista = Store::new(&conn).list().unwrap();
+    let lista = Store::new(&conn).list_page(50, None).unwrap().games;
     assert_eq!(lista.len(), 1, "linha legacy deve sobreviver à migração");
     assert_eq!(
         lista[0].mode,
@@ -180,7 +180,7 @@ fn migracao_games_mode_eh_idempotente() {
     // Segunda chamada: `mode` já existe → no-op, sem duplicar.
     migrate(&conn).unwrap();
 
-    let lista = Store::new(&conn).list().unwrap();
+    let lista = Store::new(&conn).list_page(50, None).unwrap().games;
     assert_eq!(lista.len(), 1, "idempotente: sem duplicação");
     assert_eq!(lista[0].white, "Brancas");
 }
@@ -197,7 +197,9 @@ fn migrate_em_schema_atual_eh_noop() {
     let stats = Stats::new(&conn).compute().unwrap();
     assert_eq!(stats.cache_bytes, 0);
     assert_eq!(stats.games_bytes, 0);
-    assert!(Store::new(&conn).list().unwrap().is_empty());
+    assert!(Store::new(&conn)
+        .list_page(50, None)
+        .unwrap()
+        .games
+        .is_empty());
 }
-
-

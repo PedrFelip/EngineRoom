@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { memo, useEffect, useMemo, useRef } from 'react'
 import type { MoveAnalysis } from '../types'
 import ClassificationBadge from './ClassificationBadge'
 
@@ -14,7 +14,7 @@ interface Row {
   black?: MoveAnalysis
 }
 
-function MoveButton({
+const MoveButton = memo(function MoveButton({
   move,
   active,
   onSelect,
@@ -38,7 +38,7 @@ function MoveButton({
       <span>{move.san}</span>
     </button>
   )
-}
+})
 
 export default function MoveList({
   moves,
@@ -66,13 +66,16 @@ export default function MoveList({
     }
   }, [currentPly])
 
-  const rows: Row[] = []
-  moves.forEach((m) => {
-    const num = Math.ceil(m.ply / 2)
-    if (!rows[num - 1]) rows[num - 1] = { num }
-    if (m.color === 'w') rows[num - 1].white = m
-    else rows[num - 1].black = m
-  })
+  const rows = useMemo(() => {
+    const nextRows: Row[] = []
+    moves.forEach((move) => {
+      const num = Math.ceil(move.ply / 2)
+      if (!nextRows[num - 1]) nextRows[num - 1] = { num }
+      if (move.color === 'w') nextRows[num - 1].white = move
+      else nextRows[num - 1].black = move
+    })
+    return nextRows
+  }, [moves])
 
   return (
     <div ref={rootRef} className='flex flex-col gap-0.5'>

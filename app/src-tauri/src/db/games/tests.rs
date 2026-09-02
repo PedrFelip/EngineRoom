@@ -50,7 +50,7 @@ fn partida_em_modo_time_coexiste_com_depth_na_mesma_pgn() {
     time_game.depth = 3000;
     store.save(&time_game).unwrap();
 
-    let lista = store.list().unwrap();
+    let lista = store.list_page(50, None).unwrap().games;
     assert_eq!(lista.len(), 2, "mesma PGN, modos diferentes = 2 entradas");
 }
 
@@ -69,7 +69,7 @@ fn perfil_automatico_coexiste_com_tempo_manual_na_mesma_pgn() {
     automatico.depth = 1500;
     store.save(&automatico).unwrap();
 
-    let lista = store.list().unwrap();
+    let lista = store.list_page(50, None).unwrap().games;
     assert_eq!(lista.len(), 2);
     assert!(lista.iter().any(|game| game.analysis_kind == "auto-fast"));
     assert!(lista.iter().any(|game| game.analysis_kind == "manual"));
@@ -105,11 +105,40 @@ fn lista_devolve_mais_recentes_primeiro() {
     recente.white = "Recente".to_string();
     store.save(&recente).unwrap();
 
-    let lista = store.list().unwrap();
+    let lista = store.list_page(50, None).unwrap().games;
 
     assert_eq!(lista.len(), 2);
     assert_eq!(lista[0].white, "Recente");
     assert_eq!(lista[1].white, "Antiga");
+}
+
+#[test]
+fn lista_pagina_por_cursor_sem_repetir_partidas() -> Result<(), String> {
+    let conn = open_memory()?;
+    let store = Store::new(&conn);
+    for white in ["Primeira", "Segunda", "Terceira"] {
+        let mut game = partida_exemplo();
+        game.pgn = format!("1. {white}");
+        game.white = white.to_string();
+        store.save(&game)?;
+    }
+
+    let first = store.list_page(2, None)?;
+    let cursor = first
+        .next_cursor
+        .as_ref()
+        .ok_or("deve haver próxima página")?;
+    let second = store.list_page(2, Some(cursor))?;
+
+    assert_eq!(first.total, 3);
+    assert_eq!(first.games.len(), 2);
+    assert_eq!(second.games.len(), 1);
+    assert!(second.next_cursor.is_none());
+    assert!(first
+        .games
+        .iter()
+        .all(|game| second.games.iter().all(|next| next.id != game.id)));
+    Ok(())
 }
 
 #[test]
@@ -123,7 +152,7 @@ fn reanalise_com_mesma_chave_substitui_entrada() {
 
     let id = store.save(&nova).unwrap();
 
-    let lista = store.list().unwrap();
+    let lista = store.list_page(50, None).unwrap().games;
     assert_eq!(lista.len(), 1);
     assert_eq!(lista[0].accuracy_white, 100.0);
     let game = store.get(id).unwrap().unwrap();
@@ -139,7 +168,7 @@ fn delete_remove_partida_do_store() {
     store.remove(id).unwrap();
 
     assert_eq!(store.get(id).unwrap(), None);
-    assert!(store.list().unwrap().is_empty());
+    assert!(store.list_page(50, None).unwrap().games.is_empty());
 }
 
 #[test]
@@ -150,11 +179,13 @@ fn clear_games_esvazia_store_de_partidas() {
     let mut outra = partida_exemplo();
     outra.pgn = "1. d4 d5".to_string();
     store.save(&outra).unwrap();
-    assert_eq!(store.list().unwrap().len(), 2, "pré-condição");
+    assert_eq!(
+        store.list_page(50, None).unwrap().games.len(),
+        2,
+        "pré-condição"
+    );
 
     store.clear().unwrap();
 
-    assert!(store.list().unwrap().is_empty());
+    assert!(store.list_page(50, None).unwrap().games.is_empty());
 }
-
-

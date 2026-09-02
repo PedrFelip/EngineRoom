@@ -27,7 +27,7 @@ export interface UseReview {
   status: ReviewSessionState['status']
   error: string | null
   /** winPcts parciais (POV brancas) que alimentam o gráfico durante o loading. */
-  partialWinPcts: number[]
+  partialWinPcts: readonly number[]
   progress: ReviewProgress
   currentPly: number
   orientation: 'white' | 'black'
@@ -65,8 +65,8 @@ export function useReview(config: ReviewConfig): UseReview {
   const [orientation, setOrientation] = useState<'white' | 'black'>('white')
 
   const sessionRef = useRef<ReviewSession | null>(null)
-  // Buffer de winPcts parciais + id do rAF pendente: coalesce várias posições
-  // (ex.: cache hits rápidos) num único setState por frame — loading suave.
+  // A sessão atualiza seu buffer por posição; aqui o copiamos apenas uma vez por
+  // frame, preservando o snapshot imutável que entra no estado do React.
   const pendingProgressRef = useRef<ReviewProgress>(progress)
   const rafRef = useRef<number | null>(null)
 
@@ -83,7 +83,8 @@ export function useReview(config: ReviewConfig): UseReview {
         if (rafRef.current == null) {
           rafRef.current = requestAnimationFrame(() => {
             rafRef.current = null
-            setProgress(pendingProgressRef.current)
+            const pending = pendingProgressRef.current
+            setProgress({ ...pending, winPcts: pending.winPcts.slice() })
           })
         }
       },

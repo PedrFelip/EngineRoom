@@ -96,14 +96,19 @@ export type AnalysisProgressStage =
   | 'refinement'
   | 'finalizing'
 
-/** Progresso rico para a UI; `onProgress` permanece como seam do grafico. */
+/** Atualização pontual do gráfico de avaliação (POV das brancas). */
+export interface WinPctUpdate {
+  index: number
+  winPct: number
+}
+
+/** Metadados de progresso ricos para a UI. */
 export interface AnalysisProgress {
   stage: AnalysisProgressStage
   completed: number
   total: number
   currentPly: number
   phase: Phase
-  winPcts: number[]
   cachedPositions: number
   enginePositions: number
   /** Teto de tempo ainda orcado pelo modo `movetime`; ausente em depth. */

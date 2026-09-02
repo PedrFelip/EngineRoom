@@ -22,7 +22,7 @@ const STAGE_LABELS = {
 interface Props {
   config: ReviewConfig
   elapsedSeconds: number
-  partialWinPcts: number[]
+  partialWinPcts: readonly number[]
   progress: ReviewProgress
 }
 

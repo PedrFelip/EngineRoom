@@ -127,8 +127,7 @@ impl<'a> Cache<'a> {
             .conn
             .prepare(Self::lookup_sql(mode))
             .map_err(|e| e.to_string())?;
-        fens
-            .iter()
+        fens.iter()
             .map(|fen| Self::query_with_stmt(&mut stmt, fen, value, multipv))
             .collect()
     }
@@ -255,6 +254,7 @@ pub fn cache_put_many(
     Cache::new(&conn).store_many(&entries, mode, depth, multipv)
 }
 
+#[cfg(test)]
 #[cfg(test)]
 #[path = "cache/tests.rs"]
 mod tests;

@@ -1,15 +1,16 @@
 import { ArrowRight, CircleAlert } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   ADAPTIVE_PROFILES,
   adaptiveProfileForKind,
 } from '../../lib/adaptive-analysis'
 import { resolveEngineTier } from '../../lib/engine-tier'
 import { deleteGame, getGame, listGames, storedToConfig } from '../../lib/games'
-import { parsePgn, resultLabel } from '../../lib/pgn'
+import { type PgnParseResult, parsePgn, resultLabel } from '../../lib/pgn'
 import type {
   AnalysisKind,
   EngineMode,
+  GameCursor,
   GameSummary,
   ReviewConfig,
 } from '../../types'
@@ -18,11 +19,23 @@ import PgnImporter from '../PgnImporter'
 import ReviewedGamesList from '../ReviewedGamesList'
 import SettingsModal from '../settings/SettingsModal'
 import { Button } from '../ui/button'
+
 import HomeHeader from './HomeHeader'
 import HowItWorks from './HowItWorks'
 
 interface Props {
   onStart: (config: ReviewConfig) => void
+}
+
+interface PgnValidation {
+  source: string
+  result: PgnParseResult
+}
+
+const HISTORY_PAGE_SIZE = 50
+
+function initialPgnValidation(): PgnValidation {
+  return { source: '', result: parsePgn('') }
 }
 
 export default function HomePage({ onStart }: Props) {
@@ -34,53 +47,104 @@ export default function HomePage({ onStart }: Props) {
   const [analysisKind, setAnalysisKind] = useState<AnalysisKind>('auto-fast')
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [games, setGames] = useState<GameSummary[]>([])
+  const [gamesTotal, setGamesTotal] = useState(0)
+  const [nextGamesCursor, setNextGamesCursor] = useState<GameCursor | null>(
+    null,
+  )
+  const [loadingMoreGames, setLoadingMoreGames] = useState(false)
+  const [validation, setValidation] =
+    useState<PgnValidation>(initialPgnValidation)
 
-  const parse = useMemo(() => parsePgn(pgn), [pgn])
+  useEffect(() => {
+    if (validation.source === pgn) return
+    const timer = window.setTimeout(() => {
+      setValidation({ source: pgn, result: parsePgn(pgn) })
+    }, 250)
+    return () => window.clearTimeout(timer)
+  }, [pgn, validation.source])
+
+  const parse = validation.result
+  const validating = pgn.trim().length > 0 && validation.source !== pgn
   const engine = useMemo(() => resolveEngineTier(depth), [depth])
-  const canStart = parse.ok && pgn.trim().length > 0
-  const plies = parse.ok ? parse.meta.plies : 0
+  const canStart = !validating && validation.source === pgn && parse.ok
+  const plies = canStart && parse.ok ? parse.meta.plies : 0
   const adaptiveProfile = adaptiveProfileForKind(analysisKind)
 
   useEffect(() => {
     let cancelled = false
-    listGames()
-      .then((g) => !cancelled && setGames(g))
+    listGames(HISTORY_PAGE_SIZE)
+      .then((page) => {
+        if (cancelled) return
+        setGames(page.games)
+        setGamesTotal(page.total)
+        setNextGamesCursor(page.nextCursor)
+      })
       .catch((e) => console.warn('Falha ao listar partidas analisadas:', e))
     return () => {
       cancelled = true
     }
   }, [])
 
-  const openStored = async (id: number) => {
-    const game = await getGame(id).catch((e) => {
-      console.warn('Falha ao abrir partida:', e)
-      return null
-    })
-    if (game) onStart(storedToConfig(game))
-  }
+  const importPgn = useCallback(function importPgn(nextPgn: string): void {
+    setPgn(nextPgn)
+    setValidation({ source: nextPgn, result: parsePgn(nextPgn) })
+  }, [])
 
-  const removeStored = async (id: number) => {
-    await deleteGame(id).catch((e) =>
-      console.warn('Falha ao excluir partida:', e),
-    )
-    setGames((prev) => prev.filter((g) => g.id !== id))
-  }
+  const openStored = useCallback(
+    function openStored(id: number): void {
+      void getGame(id)
+        .then((game) => {
+          if (game) onStart(storedToConfig(game))
+        })
+        .catch((error) => console.warn('Falha ao abrir partida:', error))
+    },
+    [onStart],
+  )
 
-  const reanalyzeStored = async (id: number) => {
-    const game = await getGame(id).catch((e) => {
-      console.warn('Falha ao carregar partida:', e)
-      return null
-    })
-    if (game) {
-      setPgn(game.pgn)
-      window.scrollTo({ top: 0, behavior: 'smooth' })
-    }
-  }
+  const removeStored = useCallback(function removeStored(id: number): void {
+    void deleteGame(id)
+      .then(() => {
+        setGames((previous) => previous.filter((game) => game.id !== id))
+        setGamesTotal((total) => Math.max(0, total - 1))
+      })
+      .catch((error) => console.warn('Falha ao excluir partida:', error))
+  }, [])
+
+  const reanalyzeStored = useCallback(
+    function reanalyzeStored(id: number): void {
+      void getGame(id)
+        .then((game) => {
+          if (!game) return
+          importPgn(game.pgn)
+          window.scrollTo({ top: 0, behavior: 'smooth' })
+        })
+        .catch((error) => console.warn('Falha ao carregar partida:', error))
+    },
+    [importPgn],
+  )
 
   const hasGames = games.length > 0
 
-  const startReview = () => {
-    if (!parse.ok) return
+  const loadMoreGames = useCallback(
+    function loadMoreGames(): void {
+      if (!nextGamesCursor || loadingMoreGames) return
+      setLoadingMoreGames(true)
+      void listGames(HISTORY_PAGE_SIZE, nextGamesCursor)
+        .then((page) => {
+          setGames((previous) => [...previous, ...page.games])
+          setGamesTotal(page.total)
+          setNextGamesCursor(page.nextCursor)
+        })
+        .catch((error) =>
+          console.warn('Falha ao carregar mais partidas analisadas:', error),
+        )
+        .finally(() => setLoadingMoreGames(false))
+    },
+    [loadingMoreGames, nextGamesCursor],
+  )
+
+  function startReview(): void {
+    if (!canStart || !parse.ok) return
     onStart({
       pgn,
       meta: parse.meta,
@@ -108,11 +172,13 @@ export default function HomePage({ onStart }: Props) {
           </p>
 
           <div className='analysis-surface surface-glass elev-card rounded-2xl border border-edge p-5'>
-            <PgnImporter value={pgn} onChange={setPgn} />
+            <PgnImporter value={pgn} onChange={setPgn} onImport={importPgn} />
 
             {/* Validation feedback */}
             <div className='mt-3 min-h-[2.25rem]'>
-              {pgn.trim().length === 0 ? null : parse.ok ? (
+              {pgn.trim().length === 0 ? null : validating ? (
+                <p className='px-3 py-2 text-sm text-ink-dim'>Validando PGN…</p>
+              ) : parse.ok ? (
                 <div className='flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border border-good/30 bg-good/10 px-3 py-2 text-sm'>
                   <span className='font-semibold text-ink'>
                     {parse.meta.white}
@@ -263,9 +329,13 @@ export default function HomePage({ onStart }: Props) {
         {hasGames ? (
           <ReviewedGamesList
             games={games}
+            total={gamesTotal}
+            hasMore={nextGamesCursor !== null}
+            loadingMore={loadingMoreGames}
             onOpen={openStored}
             onDelete={removeStored}
             onReanalyze={reanalyzeStored}
+            onLoadMore={loadMoreGames}
           />
         ) : (
           <HowItWorks />
