@@ -2,7 +2,7 @@ import { Chess } from 'chess.js'
 import { Chessground } from 'chessground'
 import type { Api } from 'chessground/api'
 import type { Key } from 'chessground/types'
-import { memo, useEffect, useRef, useState } from 'react'
+import { createElement, memo, useEffect, useRef, useState } from 'react'
 import 'chessground/assets/chessground.base.css'
 import 'chessground/assets/chessground.brown.css'
 import 'chessground/assets/chessground.cburnett.css'
@@ -36,13 +36,13 @@ interface PendingPromotion {
 
 const promotionOptions: Array<{
   piece: PromotionPiece
+  className: string
   label: string
-  symbol: { w: string; b: string }
 }> = [
-  { piece: 'q', label: 'Dama', symbol: { w: '♕', b: '♛' } },
-  { piece: 'r', label: 'Torre', symbol: { w: '♖', b: '♜' } },
-  { piece: 'b', label: 'Bispo', symbol: { w: '♗', b: '♝' } },
-  { piece: 'n', label: 'Cavalo', symbol: { w: '♘', b: '♞' } },
+  { piece: 'q', className: 'queen', label: 'Dama' },
+  { piece: 'r', className: 'rook', label: 'Torre' },
+  { piece: 'b', className: 'bishop', label: 'Bispo' },
+  { piece: 'n', className: 'knight', label: 'Cavalo' },
 ]
 
 function promotionColor(fen: string, from: string, to: string) {
@@ -211,25 +211,38 @@ const Board = memo(function Board({
       <div className='board-frame relative'>
         <div ref={elRef} className='aspect-square w-full' />
         {pendingPromotion?.fen === fen ? (
-          <div className='absolute inset-0 z-20 flex items-center justify-center bg-black/45'>
+          <div className='promotion-backdrop absolute inset-0 z-20 flex items-center justify-center bg-black/55 p-4 backdrop-blur-[2px]'>
             <div
-              className='rounded-xl border border-edge bg-panel p-3 shadow-xl'
+              className='promotion-dialog w-full max-w-xl rounded-2xl border border-edge bg-panel/95 p-5 shadow-2xl sm:p-7'
               role='dialog'
               aria-label='Escolha a peça para promoção'
             >
-              <p className='mb-2 text-center text-sm font-medium text-ink'>
+              <p className='mb-4 text-center text-lg font-semibold text-ink sm:mb-5 sm:text-xl'>
                 Promover para
               </p>
-              <div className='flex gap-2'>
-                {promotionOptions.map(({ piece, label, symbol }) => (
+              <div className='grid grid-cols-4 gap-2 sm:gap-4'>
+                {promotionOptions.map(({ piece, className, label }, index) => (
                   <button
                     key={piece}
                     type='button'
-                    className='flex size-12 items-center justify-center rounded-lg border border-edge bg-panel-2 text-4xl text-ink transition-colors hover:bg-edge/50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent'
+                    className='promotion-option group flex aspect-square min-w-0 flex-col items-center justify-center rounded-xl border shadow-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent'
+                    style={{ animationDelay: `${index * 65}ms` }}
                     aria-label={label}
                     onClick={() => choosePromotion(piece)}
                   >
-                    {symbol[pendingPromotion.color]}
+                    <span
+                      className='promotion-piece cg-wrap'
+                      aria-hidden='true'
+                    >
+                      {createElement('piece', {
+                        className: `${className} ${
+                          pendingPromotion.color === 'w' ? 'white' : 'black'
+                        }`,
+                      })}
+                    </span>
+                    <span className='promotion-option-label mt-1 text-[0.65rem] font-semibold uppercase tracking-wide sm:mt-2 sm:text-xs'>
+                      {label}
+                    </span>
                   </button>
                 ))}
               </div>

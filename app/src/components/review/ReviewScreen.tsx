@@ -276,7 +276,9 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
               disabled={
                 !result ||
                 (review.variation
-                  ? (variationMove?.children.length ?? 0) === 0
+                  ? review.variation.path.length === 0
+                    ? review.variation.roots.length === 0
+                    : (variationMove?.children.length ?? 0) === 0
                   : currentPly >= (result?.moves.length ?? 0))
               }
               label='Próximo lance'

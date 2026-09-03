@@ -154,6 +154,13 @@ describe('createReviewStore — ramificações locais', () => {
 
     store.prev()
     expect(store.getSnapshot().variation?.path).toHaveLength(0)
+    store.next()
+    expect(store.getSnapshot().variation?.path).toEqual([
+      store.getSnapshot().variation?.roots[0]?.id,
+    ])
+    expect(store.getSnapshot().variation?.roots[0]?.san).toBe('d4')
+    store.prev()
+    expect(store.getSnapshot().variation?.path).toHaveLength(0)
     store.prev()
     expect(store.getSnapshot().variation).toBeNull()
   })

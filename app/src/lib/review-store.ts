@@ -94,16 +94,17 @@ export function createReviewStore(): ReviewStore {
       })
     },
     next() {
-      if (snapshot.variation) {
-        const current = nodeAtPath(
-          snapshot.variation.roots,
-          snapshot.variation.path,
-        )
-        const next = current?.children[0]
+      const variation = snapshot.variation
+      if (variation) {
+        const current = nodeAtPath(variation.roots, variation.path)
+        const next =
+          variation.path.length === 0
+            ? variation.roots[0]
+            : current?.children[0]
         if (!next) return
         const nextVariation = {
-          ...snapshot.variation,
-          path: [...snapshot.variation.path, next.id],
+          ...variation,
+          path: [...variation.path, next.id],
         }
         commit({
           variation: nextVariation,
