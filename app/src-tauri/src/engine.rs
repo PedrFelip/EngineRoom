@@ -51,15 +51,13 @@ struct EngineHandle {
 #[derive(Default)]
 struct UciOutputFilter {
     searching: bool,
-    depth: Option<u32>,
-    latest_lines: BTreeMap<u32, String>,
+    latest_lines: BTreeMap<u32, (u32, String)>,
 }
 
 impl UciOutputFilter {
     fn on_command(&mut self, command: &str) {
         if command.trim().starts_with("go ") {
             self.searching = true;
-            self.depth = None;
             self.latest_lines.clear();
         }
     }
@@ -76,9 +74,9 @@ impl UciOutputFilter {
 
         if line.starts_with("bestmove") {
             self.searching = false;
-            self.depth = None;
             let mut output = std::mem::take(&mut self.latest_lines)
                 .into_values()
+                .map(|(_, line)| line)
                 .collect::<Vec<_>>();
             output.push(line);
             return output;
@@ -114,16 +112,12 @@ impl UciOutputFilter {
             return;
         }
 
-        match self.depth {
-            Some(current) if depth < current => {}
-            Some(current) if depth == current => {
-                self.latest_lines.insert(multipv, line);
-            }
-            _ => {
-                self.depth = Some(depth);
-                self.latest_lines.clear();
-                self.latest_lines.insert(multipv, line);
-            }
+        let should_replace = self
+            .latest_lines
+            .get(&multipv)
+            .is_none_or(|(current_depth, _)| depth >= *current_depth);
+        if should_replace {
+            self.latest_lines.insert(multipv, (depth, line));
         }
     }
 }

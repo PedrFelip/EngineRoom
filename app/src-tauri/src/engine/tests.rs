@@ -40,6 +40,33 @@ fn compacts_verbose_search_to_the_deepest_line_per_multipv() {
 }
 
 #[test]
+fn preserves_older_multipv_lines_when_final_depth_is_partial() {
+    let mut filter = UciOutputFilter::default();
+    filter.on_command("go movetime 1000");
+
+    for multipv in 1..=3 {
+        assert!(filter
+            .on_line(format!(
+                "info depth 18 multipv {multipv} score cp 0 pv e2e4"
+            ))
+            .is_empty());
+    }
+    assert!(filter
+        .on_line("info depth 19 multipv 1 score cp 12 pv d2d4".into())
+        .is_empty());
+
+    assert_eq!(
+        filter.on_line("bestmove d2d4".into()),
+        [
+            "info depth 19 multipv 1 score cp 12 pv d2d4",
+            "info depth 18 multipv 2 score cp 0 pv e2e4",
+            "info depth 18 multipv 3 score cp 0 pv e2e4",
+            "bestmove d2d4",
+        ]
+    );
+}
+
+#[test]
 fn bounds_events_for_a_reproducible_verbose_trace() {
     let mut filter = UciOutputFilter::default();
     filter.on_command("go depth 100");
