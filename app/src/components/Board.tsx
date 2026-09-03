@@ -1,6 +1,7 @@
 import { Chess } from 'chess.js'
 import { Chessground } from 'chessground'
 import type { Api } from 'chessground/api'
+import type { DrawBrushes } from 'chessground/draw'
 import type { Key } from 'chessground/types'
 import { createElement, memo, useEffect, useRef, useState } from 'react'
 import 'chessground/assets/chessground.base.css'
@@ -12,7 +13,26 @@ import { ClassGlyph } from './ClassificationBadge'
 export interface BoardArrow {
   from: string
   to: string
-  brush?: 'green' | 'red' | 'blue' | 'yellow'
+  brush?: string
+}
+
+const BOARD_BRUSHES: DrawBrushes = {
+  green: { key: 'g', color: '#15781b', opacity: 1, lineWidth: 10 },
+  red: { key: 'r', color: '#882020', opacity: 1, lineWidth: 10 },
+  blue: { key: 'b', color: '#003088', opacity: 1, lineWidth: 10 },
+  yellow: { key: 'y', color: '#e68f00', opacity: 1, lineWidth: 10 },
+  analysisBlueMedium: {
+    key: 'analysis-blue-medium',
+    color: '#003088',
+    opacity: 0.7,
+    lineWidth: 10,
+  },
+  analysisBlueFaint: {
+    key: 'analysis-blue-faint',
+    color: '#003088',
+    opacity: 0.4,
+    lineWidth: 10,
+  },
 }
 
 export interface BoardProps {
@@ -132,7 +152,14 @@ const Board = memo(function Board({
         : undefined,
       highlight: { lastMove: true, check: true },
       animation: { enabled: true, duration: 200 },
-      drawable: { enabled: true, visible: true, shapes: shapesFrom(arrows) },
+      drawable: {
+        enabled: true,
+        visible: true,
+        // Setas da análise pertencem à posição, não à seleção do usuário.
+        eraseOnClick: false,
+        shapes: shapesFrom(arrows),
+        brushes: BOARD_BRUSHES,
+      },
     })
     return () => {
       cgRef.current?.destroy()

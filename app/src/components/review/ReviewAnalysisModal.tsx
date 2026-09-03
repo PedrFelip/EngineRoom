@@ -70,9 +70,6 @@ export default function ReviewAnalysisModal({ open, onClose }: Props) {
         </div>
         <div className='p-5'>
           <ReviewEngineSettings />
-          <p className='mt-3 text-center text-[11px] text-ink-faint'>
-            Interface de demonstração · a engine principal não é alterada
-          </p>
         </div>
       </div>
     </div>

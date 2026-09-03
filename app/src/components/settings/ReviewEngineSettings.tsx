@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { recommendedReviewThreads } from '../../lib/settings'
 import { useSettings } from '../../lib/settings-context'
 import { getSystemResources } from '../../lib/system'
+import { Switch } from '../ui/switch'
 
 function fill(value: number, min: number, max: number): CSSProperties {
   if (min === max) return { '--fill': '100%' } as CSSProperties
@@ -53,6 +54,29 @@ export default function ReviewEngineSettings() {
             updateSettings({ reviewSearchSeconds })
           }
         />
+        <label
+          htmlFor='review-move-feedback-switch'
+          className='flex items-center justify-between gap-3 text-xs text-ink-dim'
+        >
+          <span>
+            <span className='block font-medium text-ink'>
+              Feedback dos movimentos
+            </span>
+            <span className='mt-0.5 block text-ink-faint'>
+              Classifica lances jogados em novas linhas
+            </span>
+          </span>
+          <Switch
+            id='review-move-feedback-switch'
+            size='sm'
+            checked={settings.reviewMoveFeedbackEnabled}
+            disabled={disabled}
+            onCheckedChange={(reviewMoveFeedbackEnabled) =>
+              updateSettings({ reviewMoveFeedbackEnabled })
+            }
+            aria-label='Feedback dos movimentos'
+          />
+        </label>
         <SettingRange
           icon={<Split size={13} aria-hidden='true' />}
           label='Linhas de análise'

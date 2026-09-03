@@ -12,6 +12,8 @@ interface CandidateLinesProps {
   onExplore: (pv: string[]) => void
 }
 
+const MAX_VISIBLE_LINES = 3
+
 export default function CandidateLines({
   lines,
   selectedMultipv,
@@ -19,7 +21,11 @@ export default function CandidateLines({
   fen,
   onExplore,
 }: CandidateLinesProps) {
-  if (lines.length === 0) return null
+  const visibleLines = lines.slice(0, MAX_VISIBLE_LINES)
+  if (visibleLines.length === 0) return null
+  const selectedLine =
+    visibleLines.find((line) => line.multipv === selectedMultipv) ??
+    visibleLines[0]
   return (
     <div className='rounded-xl border border-border bg-card/60 p-2 shadow-sm'>
       <div className='mb-2 flex items-center gap-1.5 px-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground'>
@@ -27,7 +33,7 @@ export default function CandidateLines({
         Linhas candidatas
       </div>
       <div className='flex flex-col gap-0.5'>
-        {lines.map((l) => {
+        {visibleLines.map((l) => {
           const active = l.multipv === selectedMultipv
           const mate = cpToMate(l.cp)
           return (
@@ -61,10 +67,7 @@ export default function CandidateLines({
       </div>
       <div className='mt-2 border-t border-border px-1 pt-2'>
         <div className='flex flex-wrap gap-1 text-xs text-ink-dim'>
-          {formatPv(
-            fen,
-            lines.find((line) => line.multipv === selectedMultipv)?.pv ?? [],
-          ).map((move) => (
+          {formatPv(fen, selectedLine.pv).map((move) => (
             <span
               key={move.key}
               className='rounded bg-muted/70 px-1.5 py-0.5 font-mono'
@@ -75,11 +78,7 @@ export default function CandidateLines({
         </div>
         <button
           type='button'
-          onClick={() =>
-            onExplore(
-              lines.find((line) => line.multipv === selectedMultipv)?.pv ?? [],
-            )
-          }
+          onClick={() => onExplore(selectedLine.pv)}
           className='mt-2 flex w-full items-center justify-center gap-1.5 rounded-md border border-edge bg-panel-2 px-3 py-1.5 text-xs font-medium text-ink-dim transition hover:border-brand/40 hover:bg-brand/10 hover:text-brand'
         >
           <Play size={12} aria-hidden='true' />

@@ -12,6 +12,7 @@ interface MoveListProps {
   variations?: ReviewVariation[]
   activeVariation?: ReviewVariation | null
   onSelectVariation?: (variationId: string, path: string[]) => void
+  showVariationFeedback?: boolean
 }
 
 interface Row {
@@ -67,6 +68,7 @@ export default function MoveList({
   variations = [],
   activeVariation = null,
   onSelectVariation,
+  showVariationFeedback = true,
 }: MoveListProps) {
   const rootRef = useRef<HTMLDivElement>(null)
 
@@ -149,6 +151,7 @@ export default function MoveList({
                 variation={variation}
                 active={variation.id === activeVariation?.id}
                 onSelect={onSelectVariation}
+                showFeedback={showVariationFeedback}
               />
             ))}
         </div>
@@ -161,10 +164,12 @@ function VariationLine({
   variation,
   active,
   onSelect,
+  showFeedback,
 }: {
   variation: ReviewVariation
   active: boolean
   onSelect?: (variationId: string, path: string[]) => void
+  showFeedback: boolean
 }) {
   return (
     <div className='my-1 ml-4 sm:ml-8'>
@@ -178,6 +183,7 @@ function VariationLine({
             activePath={variation.path}
             active={active}
             onSelect={(path) => onSelect?.(variation.id, path)}
+            showFeedback={showFeedback}
           />
         ))}
       </div>
@@ -192,6 +198,7 @@ interface VariationBlockProps {
   activePath: string[]
   active: boolean
   onSelect?: (path: string[]) => void
+  showFeedback: boolean
 }
 
 interface SegmentMove {
@@ -254,6 +261,7 @@ function VariationBlock({
   activePath,
   active,
   onSelect,
+  showFeedback,
 }: VariationBlockProps) {
   const segment = buildSegment(start, parentPath, basePly)
   const blockPath = segment.moves[0]?.path ?? []
@@ -292,6 +300,11 @@ function VariationBlock({
                   {prefix}
                 </span>
               ) : null}
+              {showFeedback && move.classification ? (
+                <span className='mr-1 inline-flex align-middle'>
+                  <ClassificationBadge classification={move.classification} />
+                </span>
+              ) : null}
               {move.san}
             </button>
           )
@@ -308,6 +321,7 @@ function VariationBlock({
               activePath={activePath}
               active={active}
               onSelect={onSelect}
+              showFeedback={showFeedback}
             />
           ))}
         </div>

@@ -8,7 +8,7 @@ import {
   SkipForward,
   TriangleAlert,
 } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { evalLabel } from '../../lib/eval-label'
 import { phaseBoundaries } from '../../lib/phase'
 import { nodeAtPath } from '../../lib/review-store'
@@ -32,6 +32,13 @@ interface ReviewScreenProps {
   onExit: () => void
 }
 
+const ANALYSIS_ARROW_BRUSHES = [
+  'blue',
+  'analysisBlueMedium',
+  'analysisBlueFaint',
+] as const
+const EXPLORE_STEP_MS = 650
+
 function uciToSquares(uci: string): [string, string] | null {
   if (uci.length < 4) return null
   return [uci.slice(0, 2), uci.slice(2, 4)]
@@ -44,6 +51,63 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
     review
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
   const [analysisModalOpen, setAnalysisModalOpen] = useState(false)
+  const [isExploringLine, setIsExploringLine] = useState(false)
+  const exploreTimerRef = useRef<number | null>(null)
+
+  const stopExplorePlayback = useCallback(
+    (endPlaybackAnalysis = true) => {
+      if (exploreTimerRef.current !== null) {
+        window.clearTimeout(exploreTimerRef.current)
+        exploreTimerRef.current = null
+      }
+      setIsExploringLine(false)
+      if (endPlaybackAnalysis) review.endPlaybackAnalysis()
+    },
+    [review.endPlaybackAnalysis],
+  )
+
+  const exploreLineSlowly = useCallback(
+    (pv: string[]) => {
+      stopExplorePlayback(false)
+      review.startPlaybackAnalysis()
+      setIsExploringLine(true)
+      review.exploreLine(pv)
+      let remainingMoves = pv.length - 1
+      const advance = () => {
+        review.next()
+        remainingMoves--
+        if (remainingMoves === 0) {
+          exploreTimerRef.current = null
+          setIsExploringLine(false)
+          review.endPlaybackAnalysis()
+          return
+        }
+        exploreTimerRef.current = window.setTimeout(advance, EXPLORE_STEP_MS)
+      }
+      if (remainingMoves > 0) {
+        exploreTimerRef.current = window.setTimeout(advance, EXPLORE_STEP_MS)
+      } else {
+        setIsExploringLine(false)
+        review.endPlaybackAnalysis()
+      }
+    },
+    [
+      review.exploreLine,
+      review.next,
+      review.startPlaybackAnalysis,
+      review.endPlaybackAnalysis,
+      stopExplorePlayback,
+    ],
+  )
+
+  useEffect(
+    () => () => {
+      if (exploreTimerRef.current !== null) {
+        window.clearTimeout(exploreTimerRef.current)
+      }
+    },
+    [],
+  )
 
   useEffect(() => {
     if (status !== 'running') return
@@ -60,12 +124,21 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
     ? nodeAtPath(review.variation.roots, review.variation.path)
     : null
   const displayedFen = variationMove?.fen ?? position?.fen ?? null
+  const livePosition = displayedFen
+    ? review.liveAnalysis.positions[displayedFen]
+    : undefined
+  const displayedPosition = livePosition ?? (review.variation ? null : position)
   const stm = displayedFen?.split(' ')[1] === 'b' ? 'b' : 'w'
   const currentMove =
     currentPly > 0 ? (result?.moves[currentPly - 1] ?? null) : null
   const lastMoveUci = currentMove?.uci ?? null
-  const lastMoveClassification: Classification | null =
+  let lastMoveClassification: Classification | null =
     currentMove?.classification ?? null
+  if (review.variation) {
+    lastMoveClassification = settings.reviewMoveFeedbackEnabled
+      ? (variationMove?.classification ?? null)
+      : null
+  }
 
   const opening = useMemo(
     function findOpening() {
@@ -74,13 +147,15 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
     [result],
   )
   const evalBarLabel =
-    position && result ? evalLabel(position.cp, position.fen, stm) : undefined
+    displayedPosition && result
+      ? evalLabel(displayedPosition.cp, displayedPosition.fen, stm)
+      : undefined
 
   const [selectedMultipv, setSelectedMultipv] = useState(1)
   // biome-ignore lint/correctness/useExhaustiveDependencies: reseta a linha selecionada sempre que o usuário navega para outro lance
   useEffect(() => {
     setSelectedMultipv(1)
-  }, [currentPly, settings.reviewAnalysisLines])
+  }, [displayedFen, settings.reviewAnalysisLines])
 
   // Toca o som do lance apenas ao avançar (currentPly aumenta). Voltar/início
   // não dispara som. Ref rastreia o ply anterior sem causar re-render.
@@ -93,16 +168,6 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
     const san = result?.moves[currentPly - 1]?.san
     if (san) playMoveSound(san, settings.soundVolume)
   }, [currentPly])
-  const selectedLine =
-    position?.lines.find((l) => l.multipv === selectedMultipv) ??
-    position?.lines[0]
-
-  const bestArrow = useMemo(() => {
-    const uci = review.variation ? null : selectedLine?.pv[0]
-    if (!uci) return null
-    const sq = uciToSquares(uci)
-    return sq ? { from: sq[0], to: sq[1], brush: 'blue' as const } : null
-  }, [review.variation, selectedLine])
   const lastMove = useMemo(
     function lastMoveSquares() {
       if (!lastMoveUci) return null
@@ -112,9 +177,22 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
   )
   const arrows = useMemo(
     function boardArrows() {
-      return bestArrow ? [bestArrow] : []
+      return (displayedPosition?.lines ?? [])
+        .slice(0, ANALYSIS_ARROW_BRUSHES.length)
+        .flatMap((line, index) => {
+          const squares = line.pv[0] ? uciToSquares(line.pv[0]) : null
+          return squares
+            ? [
+                {
+                  from: squares[0],
+                  to: squares[1],
+                  brush: ANALYSIS_ARROW_BRUSHES[index],
+                },
+              ]
+            : []
+        })
     },
-    [bestArrow],
+    [displayedPosition],
   )
   const graph = useMemo(
     function graphData() {
@@ -131,6 +209,7 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
   useEffect(() => {
     if (!result) return
     const onKey = (e: KeyboardEvent) => {
+      stopExplorePlayback()
       switch (e.key) {
         case 'ArrowLeft':
           review.prev()
@@ -151,7 +230,14 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [result, review.prev, review.next, review.first, review.last])
+  }, [
+    result,
+    review.prev,
+    review.next,
+    review.first,
+    review.last,
+    stopExplorePlayback,
+  ])
 
   if (status === 'running') {
     return (
@@ -206,7 +292,7 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
             />
             <div className='flex items-stretch gap-2'>
               <EvalBar
-                winPct={position?.winPct ?? 50}
+                winPct={displayedPosition?.winPct ?? 50}
                 orientation={orientation}
                 label={evalBarLabel}
               />
@@ -219,10 +305,11 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
                       variationMove ? uciToSquares(variationMove.uci) : lastMove
                     }
                     arrows={arrows}
-                    onMove={review.makeMove}
-                    lastMoveClassification={
-                      review.variation ? null : lastMoveClassification
-                    }
+                    onMove={(from, to, promotion) => {
+                      stopExplorePlayback()
+                      return review.makeMove(from, to, promotion)
+                    }}
+                    lastMoveClassification={lastMoveClassification}
                   />
                 ) : (
                   <div className='flex aspect-square w-full items-center justify-center rounded-lg border border-edge bg-panel-2/60 text-ink-dim'>
@@ -244,35 +331,65 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
             />
           </div>
 
-          {!review.variation &&
-          settings.reviewEngineEnabled &&
-          position?.lines?.length ? (
+          {settings.reviewEngineEnabled && displayedPosition?.lines?.length ? (
             <CandidateLines
-              lines={position.lines.slice(0, settings.reviewAnalysisLines)}
+              lines={displayedPosition.lines.slice(
+                0,
+                settings.reviewAnalysisLines,
+              )}
               selectedMultipv={selectedMultipv}
-              onSelect={setSelectedMultipv}
-              fen={position.fen}
-              onExplore={review.exploreLine}
+              onSelect={(multipv) => {
+                stopExplorePlayback()
+                setSelectedMultipv(multipv)
+              }}
+              fen={displayedPosition.fen}
+              onExplore={exploreLineSlowly}
             />
+          ) : null}
+
+          {isExploringLine ? (
+            <p className='px-1 text-xs text-ink-faint' role='status'>
+              Reproduzindo linha · avaliando lances…
+            </p>
+          ) : null}
+
+          {!isExploringLine &&
+          settings.reviewEngineEnabled &&
+          review.liveAnalysis.fen === displayedFen &&
+          review.liveAnalysis.status !== 'idle' ? (
+            <p className='px-1 text-xs text-ink-faint' role='status'>
+              {review.liveAnalysis.status === 'running'
+                ? 'Analisando posição atual…'
+                : `Análise ao vivo indisponível: ${review.liveAnalysis.error}`}
+            </p>
           ) : null}
 
           <div className='surface-glass elev-card flex items-center justify-center gap-2 rounded-xl border border-edge p-2'>
             <ReviewNavButton
-              onClick={review.first}
+              onClick={() => {
+                stopExplorePlayback()
+                review.first()
+              }}
               disabled={!result}
               label='Primeiro lance'
             >
               <SkipBack size={18} strokeWidth={2} aria-hidden='true' />
             </ReviewNavButton>
             <ReviewNavButton
-              onClick={review.prev}
+              onClick={() => {
+                stopExplorePlayback()
+                review.prev()
+              }}
               disabled={!result || (!review.variation && currentPly === 0)}
               label='Lance anterior'
             >
               <ChevronLeft size={20} strokeWidth={2} aria-hidden='true' />
             </ReviewNavButton>
             <ReviewNavButton
-              onClick={review.next}
+              onClick={() => {
+                stopExplorePlayback()
+                review.next()
+              }}
               disabled={
                 !result ||
                 (review.variation
@@ -286,7 +403,10 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
               <ChevronRight size={20} strokeWidth={2} aria-hidden='true' />
             </ReviewNavButton>
             <ReviewNavButton
-              onClick={review.last}
+              onClick={() => {
+                stopExplorePlayback()
+                review.last()
+              }}
               disabled={
                 !result ||
                 (!review.variation && currentPly >= (result?.moves.length ?? 0))
@@ -319,11 +439,21 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
                 <MoveList
                   moves={result.moves}
                   currentPly={review.variation ? -1 : currentPly}
-                  onSelect={review.goTo}
-                  onBranchFrom={review.goTo}
+                  onSelect={(ply) => {
+                    stopExplorePlayback()
+                    review.goTo(ply)
+                  }}
+                  onBranchFrom={(ply) => {
+                    stopExplorePlayback()
+                    review.goTo(ply)
+                  }}
                   variations={review.variations}
                   activeVariation={review.variation}
-                  onSelectVariation={review.goToVariation}
+                  onSelectVariation={(variationId, path) => {
+                    stopExplorePlayback()
+                    review.goToVariation(variationId, path)
+                  }}
+                  showVariationFeedback={settings.reviewMoveFeedbackEnabled}
                 />
               </div>
             </div>
@@ -345,7 +475,10 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
           <EvalGraph
             winPcts={graph.winPcts}
             currentPly={currentPly}
-            onSelect={review.goTo}
+            onSelect={(ply) => {
+              stopExplorePlayback()
+              review.goTo(ply)
+            }}
             phases={graph.phases}
           />
         </div>
