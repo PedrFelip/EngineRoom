@@ -8,6 +8,7 @@ import {
   getStorageStats,
   type StorageStats,
 } from '../../lib/storage'
+import ReviewEngineSettings from './ReviewEngineSettings'
 import SettingsPreferences from './SettingsPreferences'
 
 interface Props {
@@ -126,6 +127,14 @@ export default function SettingsModal({
 
         <div className='max-h-[70vh] space-y-6 overflow-y-auto px-5 py-5'>
           <SettingsPreferences />
+
+          <section>
+            <h3 className='mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-ink-dim'>
+              <Cpu size={13} strokeWidth={2.2} aria-hidden='true' />
+              Análise na revisão
+            </h3>
+            <ReviewEngineSettings />
+          </section>
 
           {/* Engine */}
           <section>

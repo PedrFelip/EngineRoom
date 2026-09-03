@@ -9,8 +9,9 @@ import {
   TriangleAlert,
 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { evalLabel, sideToMoveAtPly } from '../../lib/eval-label'
+import { evalLabel } from '../../lib/eval-label'
 import { phaseBoundaries } from '../../lib/phase'
+import { nodeAtPath } from '../../lib/review-store'
 import { useSettings } from '../../lib/settings-context'
 import { playMoveSound } from '../../lib/sound'
 import { useReview } from '../../lib/use-review'
@@ -21,6 +22,7 @@ import EvalBar from '../EvalBar'
 import EvalGraph from '../EvalGraph'
 import MoveList from '../MoveList'
 import ReviewSummary from '../ReviewSummary'
+import ReviewAnalysisModal from './ReviewAnalysisModal'
 import ReviewHeader from './ReviewHeader'
 import ReviewLoading from './ReviewLoading'
 import { PlayerTag, ReviewNavButton } from './ReviewNavigation'
@@ -41,6 +43,7 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
   const { result, status, error, partialWinPcts, currentPly, orientation } =
     review
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
+  const [analysisModalOpen, setAnalysisModalOpen] = useState(false)
 
   useEffect(() => {
     if (status !== 'running') return
@@ -53,7 +56,11 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
   }, [status])
 
   const position = result?.positions[currentPly] ?? null
-  const stm = result ? sideToMoveAtPly(result.moves, currentPly) : 'w'
+  const variationMove = review.variation
+    ? nodeAtPath(review.variation.roots, review.variation.path)
+    : null
+  const displayedFen = variationMove?.fen ?? position?.fen ?? null
+  const stm = displayedFen?.split(' ')[1] === 'b' ? 'b' : 'w'
   const currentMove =
     currentPly > 0 ? (result?.moves[currentPly - 1] ?? null) : null
   const lastMoveUci = currentMove?.uci ?? null
@@ -73,7 +80,7 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
   // biome-ignore lint/correctness/useExhaustiveDependencies: reseta a linha selecionada sempre que o usuário navega para outro lance
   useEffect(() => {
     setSelectedMultipv(1)
-  }, [currentPly])
+  }, [currentPly, settings.reviewAnalysisLines])
 
   // Toca o som do lance apenas ao avançar (currentPly aumenta). Voltar/início
   // não dispara som. Ref rastreia o ply anterior sem causar re-render.
@@ -91,11 +98,11 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
     position?.lines[0]
 
   const bestArrow = useMemo(() => {
-    const uci = selectedLine?.pv[0]
+    const uci = review.variation ? null : selectedLine?.pv[0]
     if (!uci) return null
     const sq = uciToSquares(uci)
     return sq ? { from: sq[0], to: sq[1], brush: 'blue' as const } : null
-  }, [selectedLine])
+  }, [review.variation, selectedLine])
   const lastMove = useMemo(
     function lastMoveSquares() {
       if (!lastMoveUci) return null
@@ -159,7 +166,17 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
 
   return (
     <div className='mx-auto flex min-h-full max-w-6xl flex-col gap-4 px-4 py-6'>
-      <ReviewHeader config={config} opening={opening} onExit={onExit} />
+      <ReviewHeader
+        config={config}
+        opening={opening}
+        onExit={onExit}
+        onOpenAnalysisSettings={() => setAnalysisModalOpen(true)}
+      />
+
+      <ReviewAnalysisModal
+        open={analysisModalOpen}
+        onClose={() => setAnalysisModalOpen(false)}
+      />
 
       {status === 'error' && (
         <div className='flex items-center gap-2.5 rounded-xl border border-blunder/50 bg-blunder/10 p-4 text-sm text-blunder'>
@@ -194,13 +211,18 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
                 label={evalBarLabel}
               />
               <div className='min-w-0 flex-1'>
-                {position ? (
+                {displayedFen ? (
                   <Board
-                    fen={position.fen}
+                    fen={displayedFen}
                     orientation={orientation}
-                    lastMove={lastMove}
+                    lastMove={
+                      variationMove ? uciToSquares(variationMove.uci) : lastMove
+                    }
                     arrows={arrows}
-                    lastMoveClassification={lastMoveClassification}
+                    onMove={review.makeMove}
+                    lastMoveClassification={
+                      review.variation ? null : lastMoveClassification
+                    }
                   />
                 ) : (
                   <div className='flex aspect-square w-full items-center justify-center rounded-lg border border-edge bg-panel-2/60 text-ink-dim'>
@@ -222,11 +244,15 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
             />
           </div>
 
-          {position?.lines?.length ? (
+          {!review.variation &&
+          settings.reviewEngineEnabled &&
+          position?.lines?.length ? (
             <CandidateLines
-              lines={position.lines}
+              lines={position.lines.slice(0, settings.reviewAnalysisLines)}
               selectedMultipv={selectedMultipv}
               onSelect={setSelectedMultipv}
+              fen={position.fen}
+              onExplore={review.exploreLine}
             />
           ) : null}
 
@@ -240,21 +266,29 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
             </ReviewNavButton>
             <ReviewNavButton
               onClick={review.prev}
-              disabled={!result || currentPly === 0}
+              disabled={!result || (!review.variation && currentPly === 0)}
               label='Lance anterior'
             >
               <ChevronLeft size={20} strokeWidth={2} aria-hidden='true' />
             </ReviewNavButton>
             <ReviewNavButton
               onClick={review.next}
-              disabled={!result || currentPly >= (result?.moves.length ?? 0)}
+              disabled={
+                !result ||
+                (review.variation
+                  ? (variationMove?.children.length ?? 0) === 0
+                  : currentPly >= (result?.moves.length ?? 0))
+              }
               label='Próximo lance'
             >
               <ChevronRight size={20} strokeWidth={2} aria-hidden='true' />
             </ReviewNavButton>
             <ReviewNavButton
               onClick={review.last}
-              disabled={!result || currentPly >= (result?.moves.length ?? 0)}
+              disabled={
+                !result ||
+                (!review.variation && currentPly >= (result?.moves.length ?? 0))
+              }
               label='Último lance'
             >
               <SkipForward size={18} strokeWidth={2} aria-hidden='true' />
@@ -282,8 +316,12 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
               <div className='max-h-[42vh] overflow-y-auto pr-1 lg:max-h-[50vh]'>
                 <MoveList
                   moves={result.moves}
-                  currentPly={currentPly}
+                  currentPly={review.variation ? -1 : currentPly}
                   onSelect={review.goTo}
+                  onBranchFrom={review.goTo}
+                  variations={review.variations}
+                  activeVariation={review.variation}
+                  onSelectVariation={review.goToVariation}
                 />
               </div>
             </div>
