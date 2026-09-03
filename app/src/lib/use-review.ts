@@ -20,7 +20,11 @@ import {
   type ReviewSession,
   type ReviewSessionState,
 } from './review-session'
-import { createReviewStore, type ReviewStore } from './review-store'
+import {
+  createReviewStore,
+  type ReviewStore,
+  type ReviewVariation,
+} from './review-store'
 
 export interface UseReview {
   result: ReviewResult | null
@@ -31,19 +35,25 @@ export interface UseReview {
   progress: ReviewProgress
   currentPly: number
   orientation: 'white' | 'black'
+  variation: ReviewVariation | null
+  variations: ReviewVariation[]
   goTo: (ply: number) => void
   next: () => void
   prev: () => void
   first: () => void
   last: () => void
   flip: () => void
+  makeMove: (from: string, to: string, promotion?: string) => boolean
+  exploreLine: (pv: string[]) => void
+  goToVariation: (variationId: string, path: string[]) => void
+  exitVariation: () => void
 }
 
 export function useReview(config: ReviewConfig): UseReview {
   const storeRef = useRef<ReviewStore | null>(null)
   if (!storeRef.current) storeRef.current = createReviewStore()
   const store = storeRef.current
-  const { result, currentPly } = useSyncExternalStore(
+  const { result, currentPly, variation, variations } = useSyncExternalStore(
     store.subscribe,
     store.getSnapshot,
   )
@@ -110,6 +120,21 @@ export function useReview(config: ReviewConfig): UseReview {
     () => setOrientation((o) => (o === 'white' ? 'black' : 'white')),
     [],
   )
+  const makeMove = useCallback(
+    (from: string, to: string, promotion?: string) =>
+      store.makeMove(from, to, promotion),
+    [store],
+  )
+  const exploreLine = useCallback(
+    (pv: string[]) => store.exploreLine(pv),
+    [store],
+  )
+  const goToVariation = useCallback(
+    (variationId: string, path: string[]) =>
+      store.goToVariation(variationId, path),
+    [store],
+  )
+  const exitVariation = useCallback(() => store.exitVariation(), [store])
 
   return {
     result,
@@ -119,11 +144,17 @@ export function useReview(config: ReviewConfig): UseReview {
     progress,
     currentPly,
     orientation,
+    variation,
+    variations,
     goTo,
     next,
     prev,
     first,
     last,
     flip,
+    makeMove,
+    exploreLine,
+    goToVariation,
+    exitVariation,
   }
 }

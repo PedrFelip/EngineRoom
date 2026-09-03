@@ -141,3 +141,87 @@ describe('createReviewStore — navegação na linha principal', () => {
     expect(store.getSnapshot().currentPly).toBe(0)
   })
 })
+
+describe('createReviewStore — ramificações locais', () => {
+  it('cria uma ramificação com um lance legal e permite navegar nela', () => {
+    const store = createReviewStore()
+    store.setResult(e4e5Result())
+    store.goTo(0)
+
+    expect(store.makeMove('d2', 'd4')).toBe(true)
+    expect(store.getSnapshot().variation?.roots[0]?.san).toBe('d4')
+    expect(store.getSnapshot().variation?.path).toHaveLength(1)
+
+    store.prev()
+    expect(store.getSnapshot().variation?.path).toHaveLength(0)
+    store.prev()
+    expect(store.getSnapshot().variation).toBeNull()
+  })
+
+  it('carrega uma PV e cria uma alternativa sem apagar sua continuação', () => {
+    const store = createReviewStore()
+    store.setResult(e4e5Result())
+    store.goTo(0)
+    store.exploreLine(['e2e4', 'e7e5', 'g1f3'])
+
+    expect(
+      store.getSnapshot().variation?.roots[0]?.children[0]?.children[0]?.san,
+    ).toBe('Nf3')
+    expect(store.getSnapshot().variation?.path).toHaveLength(1)
+    expect(store.makeMove('c7', 'c5')).toBe(true)
+    const children = store.getSnapshot().variation?.roots[0]?.children
+    expect(children?.map((move) => move.san)).toEqual(['e5', 'c5'])
+  })
+
+  it('cria uma alternativa dentro de outra alternativa', () => {
+    const store = createReviewStore()
+    store.setResult(e4e5Result())
+    store.goTo(0)
+    store.exploreLine(['e2e4', 'e7e5'])
+    expect(store.makeMove('c7', 'c5')).toBe(true)
+    expect(store.makeMove('g1', 'f3')).toBe(true)
+    store.prev()
+    expect(store.makeMove('b1', 'c3')).toBe(true)
+
+    const alternative = store.getSnapshot().variation?.roots[0]?.children[1]
+    expect(alternative?.san).toBe('c5')
+    expect(alternative?.children.map((move) => move.san)).toEqual([
+      'Nf3',
+      'Nc3',
+    ])
+
+    const nestedPath = store.getSnapshot().variation?.path
+    const variationId = store.getSnapshot().variation?.id
+    expect(nestedPath).toHaveLength(3)
+    store.goToVariation(variationId ?? '', nestedPath?.slice(0, 2) ?? [])
+    expect(store.getSnapshot().variation?.path).toEqual(nestedPath?.slice(0, 2))
+  })
+
+  it('preserva linhas alternativas ao navegar pela partida principal', () => {
+    const store = createReviewStore()
+    store.setResult(e4e5Result())
+    store.goTo(0)
+    store.makeMove('d2', 'd4')
+    const savedId = store.getSnapshot().variation?.id
+
+    store.goTo(2)
+    expect(store.getSnapshot().variation).toBeNull()
+    expect(store.getSnapshot().variations).toHaveLength(1)
+
+    store.goToVariation(
+      savedId ?? '',
+      store.getSnapshot().variations[0]?.path ?? [],
+    )
+    expect(store.getSnapshot().variation?.id).toBe(savedId)
+    expect(store.getSnapshot().currentPly).toBe(0)
+  })
+
+  it('rejeita lances ilegais sem criar ramificação', () => {
+    const store = createReviewStore()
+    store.setResult(e4e5Result())
+    store.goTo(0)
+
+    expect(store.makeMove('e2', 'e5')).toBe(false)
+    expect(store.getSnapshot().variation).toBeNull()
+  })
+})
