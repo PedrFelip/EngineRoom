@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { DEFAULT_SETTINGS, loadSettings } from './settings'
+import {
+  DEFAULT_SETTINGS,
+  loadSettings,
+  recommendedReviewThreads,
+} from './settings'
 
 function stubStorage(raw: string | null) {
   vi.stubGlobal('localStorage', {
@@ -54,5 +58,37 @@ describe('loadSettings (som)', () => {
     const settings = loadSettings()
     expect(settings).toEqual(DEFAULT_SETTINGS)
     expect(settings).not.toHaveProperty('enginePath')
+  })
+})
+
+describe('configurações da análise na revisão', () => {
+  it('migra configurações antigas usando os novos padrões', () => {
+    stubStorage(JSON.stringify({ theme: 'light' }))
+    const settings = loadSettings()
+    expect(settings.reviewEngineEnabled).toBe(true)
+    expect(settings.reviewSearchSeconds).toBe(8)
+    expect(settings.reviewAnalysisLines).toBe(1)
+    expect(settings.reviewMemoryMb).toBe(16)
+  })
+
+  it('normaliza valores persistidos fora dos limites', () => {
+    stubStorage(
+      JSON.stringify({
+        reviewSearchSeconds: 99,
+        reviewAnalysisLines: 0,
+        reviewThreads: 4.6,
+        reviewMemoryMb: 8,
+      }),
+    )
+    const settings = loadSettings()
+    expect(settings.reviewSearchSeconds).toBe(30)
+    expect(settings.reviewAnalysisLines).toBe(1)
+    expect(settings.reviewThreads).toBe(5)
+    expect(settings.reviewMemoryMb).toBe(16)
+  })
+
+  it('recomenda cerca de um terço dos processadores lógicos', () => {
+    expect(recommendedReviewThreads(32)).toBe(11)
+    expect(recommendedReviewThreads(2)).toBe(1)
   })
 })

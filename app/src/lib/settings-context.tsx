@@ -17,6 +17,7 @@ import {
 
 interface SettingsContextValue {
   settings: Settings
+  updateSettings: (patch: Partial<Settings>) => void
   setTheme: (theme: Theme) => void
   setSoundEnabled: (enabled: boolean) => void
   setSoundVolume: (volume: number) => void
@@ -57,16 +58,29 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     [],
   )
   const reset = useCallback(() => setSettings({ ...DEFAULT_SETTINGS }), [])
+  const updateSettings = useCallback(
+    (patch: Partial<Settings>) =>
+      setSettings((current) => ({ ...current, ...patch })),
+    [],
+  )
 
   const value = useMemo<SettingsContextValue>(
     () => ({
       settings,
+      updateSettings,
       setTheme,
       setSoundEnabled,
       setSoundVolume,
       reset,
     }),
-    [settings, setTheme, setSoundEnabled, setSoundVolume, reset],
+    [
+      settings,
+      updateSettings,
+      setTheme,
+      setSoundEnabled,
+      setSoundVolume,
+      reset,
+    ],
   )
 
   return (
