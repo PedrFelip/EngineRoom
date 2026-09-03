@@ -6,8 +6,10 @@ export interface Settings {
   soundEnabled: boolean
   /** Volume do som de movimentação, em [0, 1]. */
   soundVolume: number
-  /** Habilita o mock da futura análise exploratória durante a revisão. */
+  /** Habilita a análise ao vivo da posição exibida durante a revisão. */
   reviewEngineEnabled: boolean
+  /** Exibe a classificação dos lances jogados em variações. */
+  reviewMoveFeedbackEnabled: boolean
   reviewSearchSeconds: number
   reviewAnalysisLines: number
   reviewThreadsAuto: boolean
@@ -22,8 +24,9 @@ export const DEFAULT_SETTINGS: Settings = {
   soundEnabled: true,
   soundVolume: 0.7,
   reviewEngineEnabled: true,
+  reviewMoveFeedbackEnabled: true,
   reviewSearchSeconds: 8,
-  reviewAnalysisLines: 1,
+  reviewAnalysisLines: 3,
   reviewThreadsAuto: true,
   reviewThreads: 1,
   reviewMemoryMb: 16,
@@ -55,6 +58,7 @@ export function loadSettings(): Settings {
       soundEnabled: parsed.soundEnabled !== false,
       soundVolume: clampVolume(parsed.soundVolume),
       reviewEngineEnabled: parsed.reviewEngineEnabled !== false,
+      reviewMoveFeedbackEnabled: parsed.reviewMoveFeedbackEnabled !== false,
       reviewSearchSeconds: clampInteger(
         parsed.reviewSearchSeconds,
         1,

@@ -6,14 +6,22 @@
  */
 
 import { Chess } from 'chess.js'
-import type { ReviewResult } from '../types'
+import type { Classification, PositionAnalysis, ReviewResult } from '../types'
 
 export interface VariationMove {
   id: string
   uci: string
   san: string
   fen: string
+  classification?: Classification
   children: VariationMove[]
+}
+
+export interface LiveAnalysisState {
+  fen: string | null
+  status: 'idle' | 'running' | 'error'
+  error: string | null
+  positions: Record<string, PositionAnalysis>
 }
 
 export interface ReviewVariation {
@@ -28,6 +36,7 @@ export interface ReviewStoreSnapshot {
   currentPly: number
   variation: ReviewVariation | null
   variations: ReviewVariation[]
+  liveAnalysis: LiveAnalysisState
 }
 
 export interface ReviewStore {
@@ -44,6 +53,10 @@ export interface ReviewStore {
   exploreLine(pv: string[]): void
   goToVariation(variationId: string, path: string[]): void
   exitVariation(): void
+  startLiveAnalysis(fen: string): void
+  setLiveAnalysis(fen: string, analysis: PositionAnalysis): void
+  failLiveAnalysis(fen: string, error: string): void
+  setVariationClassification(nodeId: string, value: Classification): void
 }
 
 export function createReviewStore(): ReviewStore {
@@ -53,6 +66,12 @@ export function createReviewStore(): ReviewStore {
     currentPly: 0,
     variation: null,
     variations: [],
+    liveAnalysis: {
+      fen: null,
+      status: 'idle',
+      error: null,
+      positions: {},
+    },
   }
   const listeners = new Set<() => void>()
 
@@ -62,7 +81,8 @@ export function createReviewStore(): ReviewStore {
       nextSnapshot.result === snapshot.result &&
       nextSnapshot.currentPly === snapshot.currentPly &&
       nextSnapshot.variation === snapshot.variation &&
-      nextSnapshot.variations === snapshot.variations
+      nextSnapshot.variations === snapshot.variations &&
+      nextSnapshot.liveAnalysis === snapshot.liveAnalysis
     ) {
       return
     }
@@ -202,7 +222,12 @@ export function createReviewStore(): ReviewStore {
     },
     exploreLine(pv) {
       const result = snapshot.result
-      const fen = result?.positions[snapshot.currentPly]?.fen
+      const activeVariation = snapshot.variation
+      const activeNode = activeVariation
+        ? nodeAtPath(activeVariation.roots, activeVariation.path)
+        : null
+      const fen =
+        activeNode?.fen ?? result?.positions[snapshot.currentPly]?.fen ?? null
       if (!result || !fen || pv.length === 0) return
       const chess = new Chess(fen)
       let root: VariationMove | null = null
@@ -232,6 +257,25 @@ export function createReviewStore(): ReviewStore {
         return
       }
       if (root) {
+        if (activeVariation) {
+          const roots = appendAtPath(
+            activeVariation.roots,
+            activeVariation.path,
+            root,
+          )
+          const nextVariation = {
+            ...activeVariation,
+            roots,
+            path: [...activeVariation.path, root.id],
+          }
+          commit({
+            variation: nextVariation,
+            variations: snapshot.variations.map((saved) =>
+              saved.id === nextVariation.id ? nextVariation : saved,
+            ),
+          })
+          return
+        }
         const nextVariation: ReviewVariation = {
           id: `tree-${nextVariationId++}`,
           basePly: snapshot.currentPly,
@@ -262,7 +306,67 @@ export function createReviewStore(): ReviewStore {
     exitVariation() {
       commit({ variation: null })
     },
+    startLiveAnalysis(fen) {
+      commit({
+        liveAnalysis: {
+          ...snapshot.liveAnalysis,
+          fen,
+          status: 'running',
+          error: null,
+        },
+      })
+    },
+    setLiveAnalysis(fen, analysis) {
+      commit({
+        liveAnalysis: {
+          fen,
+          status: 'idle',
+          error: null,
+          positions: { ...snapshot.liveAnalysis.positions, [fen]: analysis },
+        },
+      })
+    },
+    failLiveAnalysis(fen, error) {
+      if (snapshot.liveAnalysis.fen !== fen) return
+      commit({
+        liveAnalysis: {
+          ...snapshot.liveAnalysis,
+          status: 'error',
+          error,
+        },
+      })
+    },
+    setVariationClassification(nodeId, value) {
+      const variations = snapshot.variations.map((variation) => ({
+        ...variation,
+        roots: updateNodeClassification(variation.roots, nodeId, value),
+      }))
+      const variation = snapshot.variation
+        ? (variations.find((item) => item.id === snapshot.variation?.id) ??
+          null)
+        : null
+      commit({ variations, variation })
+    },
   }
+}
+
+function updateNodeClassification(
+  nodes: VariationMove[],
+  nodeId: string,
+  value: Classification,
+): VariationMove[] {
+  let changed = false
+  const next = nodes.map((node) => {
+    if (node.id === nodeId) {
+      changed = true
+      return { ...node, classification: value }
+    }
+    const children = updateNodeClassification(node.children, nodeId, value)
+    if (children === node.children) return node
+    changed = true
+    return { ...node, children }
+  })
+  return changed ? next : nodes
 }
 
 export function nodeAtPath(

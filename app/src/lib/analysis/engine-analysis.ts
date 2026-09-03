@@ -125,6 +125,7 @@ export async function evalPosition(
   fen: string,
   control: AnalyzeControl,
   goTimeoutMs: number,
+  stopAfterMs?: number,
 ): Promise<RawPosition> {
   const byPv = new Map<
     number,
@@ -135,6 +136,9 @@ export async function evalPosition(
     control.mode === 'depth'
       ? `go depth ${control.depth}`
       : `go movetime ${control.movetimeMs}`
+  const stopTimer = stopAfterMs
+    ? setTimeout(() => void port.send('stop'), stopAfterMs)
+    : null
   try {
     await ask(
       port,
@@ -160,6 +164,8 @@ export async function evalPosition(
     // Aborta a busca órfã para que a engine volte a ficar reutilizável.
     await port.send('stop')
     throw err
+  } finally {
+    if (stopTimer) clearTimeout(stopTimer)
   }
   const lines: RawLine[] = [...byPv.entries()]
     .sort((a, b) => a[0] - b[0])

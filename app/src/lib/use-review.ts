@@ -22,9 +22,12 @@ import {
 } from './review-session'
 import {
   createReviewStore,
+  type LiveAnalysisState,
+  nodeAtPath,
   type ReviewStore,
   type ReviewVariation,
 } from './review-store'
+import { useSettings } from './settings-context'
 
 export interface UseReview {
   result: ReviewResult | null
@@ -37,6 +40,9 @@ export interface UseReview {
   orientation: 'white' | 'black'
   variation: ReviewVariation | null
   variations: ReviewVariation[]
+  liveAnalysis: LiveAnalysisState
+  startPlaybackAnalysis: () => void
+  endPlaybackAnalysis: () => void
   goTo: (ply: number) => void
   next: () => void
   prev: () => void
@@ -50,13 +56,12 @@ export interface UseReview {
 }
 
 export function useReview(config: ReviewConfig): UseReview {
+  const { settings } = useSettings()
   const storeRef = useRef<ReviewStore | null>(null)
   if (!storeRef.current) storeRef.current = createReviewStore()
   const store = storeRef.current
-  const { result, currentPly, variation, variations } = useSyncExternalStore(
-    store.subscribe,
-    store.getSnapshot,
-  )
+  const { result, currentPly, variation, variations, liveAnalysis } =
+    useSyncExternalStore(store.subscribe, store.getSnapshot)
 
   const [sessionState, setSessionState] = useState<ReviewSessionState>({
     status: 'running',
@@ -73,6 +78,7 @@ export function useReview(config: ReviewConfig): UseReview {
     enginePositions: 0,
   })
   const [orientation, setOrientation] = useState<'white' | 'black'>('white')
+  const [playbackFastPass, setPlaybackFastPass] = useState(false)
 
   const sessionRef = useRef<ReviewSession | null>(null)
   // A sessão atualiza seu buffer por posição; aqui o copiamos apenas uma vez por
@@ -111,6 +117,65 @@ export function useReview(config: ReviewConfig): UseReview {
     }
   }, [config, store])
 
+  const variationMove = variation
+    ? nodeAtPath(variation.roots, variation.path)
+    : null
+  const displayedFen =
+    variationMove?.fen ?? result?.positions[currentPly]?.fen ?? null
+  const parentMove =
+    variation && variation.path.length > 1
+      ? nodeAtPath(variation.roots, variation.path.slice(0, -1))
+      : null
+  const sourcePosition = variation
+    ? (liveAnalysis.positions[
+        parentMove?.fen ?? result?.positions[variation.basePly]?.fen ?? ''
+      ] ?? result?.positions[variation.basePly])
+    : undefined
+  const sourceFen = variation
+    ? (parentMove?.fen ?? result?.positions[variation.basePly]?.fen)
+    : undefined
+
+  useEffect(() => {
+    const session = sessionRef.current
+    if (!session || !result || sessionState.status !== 'done') return
+    if (!settings.reviewEngineEnabled || !displayedFen) {
+      session.cancelLiveAnalysis()
+      return
+    }
+    session.analyzePosition(
+      {
+        fen: displayedFen,
+        variationNodeId: variationMove?.id,
+        sourceFen,
+        sourceAnalysis: sourcePosition,
+      },
+      {
+        searchSeconds: settings.reviewSearchSeconds,
+        lines: settings.reviewAnalysisLines,
+        threadsAuto: settings.reviewThreadsAuto,
+        threads: settings.reviewThreads,
+        memoryMb: settings.reviewMemoryMb,
+        moveFeedbackEnabled: settings.reviewMoveFeedbackEnabled,
+        fastPass: playbackFastPass,
+      },
+    )
+  }, [
+    displayedFen,
+    result,
+    sessionState.status,
+    settings.reviewEngineEnabled,
+    settings.reviewThreadsAuto,
+    settings.reviewMoveFeedbackEnabled,
+    settings.reviewSearchSeconds,
+    settings.reviewAnalysisLines,
+    settings.reviewThreads,
+    settings.reviewMemoryMb,
+    playbackFastPass,
+    sourceFen,
+    sourcePosition,
+    variationMove?.id,
+  ])
+
   const goTo = useCallback((ply: number) => store.goTo(ply), [store])
   const next = useCallback(() => store.next(), [store])
   const prev = useCallback(() => store.prev(), [store])
@@ -135,6 +200,11 @@ export function useReview(config: ReviewConfig): UseReview {
     [store],
   )
   const exitVariation = useCallback(() => store.exitVariation(), [store])
+  const startPlaybackAnalysis = useCallback(() => {
+    sessionRef.current?.cancelLiveAnalysis()
+    setPlaybackFastPass(true)
+  }, [])
+  const endPlaybackAnalysis = useCallback(() => setPlaybackFastPass(false), [])
 
   return {
     result,
@@ -146,6 +216,9 @@ export function useReview(config: ReviewConfig): UseReview {
     orientation,
     variation,
     variations,
+    liveAnalysis,
+    startPlaybackAnalysis,
+    endPlaybackAnalysis,
     goTo,
     next,
     prev,

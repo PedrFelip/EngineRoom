@@ -66,9 +66,15 @@ describe('configurações da análise na revisão', () => {
     stubStorage(JSON.stringify({ theme: 'light' }))
     const settings = loadSettings()
     expect(settings.reviewEngineEnabled).toBe(true)
+    expect(settings.reviewMoveFeedbackEnabled).toBe(true)
     expect(settings.reviewSearchSeconds).toBe(8)
-    expect(settings.reviewAnalysisLines).toBe(1)
+    expect(settings.reviewAnalysisLines).toBe(3)
     expect(settings.reviewMemoryMb).toBe(16)
+  })
+
+  it('preserva feedback de movimentos desligado', () => {
+    stubStorage(JSON.stringify({ reviewMoveFeedbackEnabled: false }))
+    expect(loadSettings().reviewMoveFeedbackEnabled).toBe(false)
   })
 
   it('normaliza valores persistidos fora dos limites', () => {

@@ -180,6 +180,24 @@ describe('createReviewStore — ramificações locais', () => {
     expect(children?.map((move) => move.san)).toEqual(['e5', 'c5'])
   })
 
+  it('anexa uma nova PV à posição atual de uma variação', () => {
+    const store = createReviewStore()
+    store.setResult(e4e5Result())
+    store.goTo(0)
+    store.makeMove('d2', 'd4')
+
+    store.exploreLine(['d7d5', 'c2c4'])
+
+    const root = store.getSnapshot().variation?.roots[0]
+    expect(root?.san).toBe('d4')
+    expect(root?.children[0]?.san).toBe('d5')
+    expect(root?.children[0]?.children[0]?.san).toBe('c4')
+    expect(store.getSnapshot().variation?.path).toEqual([
+      root?.id,
+      root?.children[0]?.id,
+    ])
+  })
+
   it('cria uma alternativa dentro de outra alternativa', () => {
     const store = createReviewStore()
     store.setResult(e4e5Result())
