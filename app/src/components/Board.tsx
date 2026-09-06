@@ -7,14 +7,11 @@ import { createElement, memo, useEffect, useRef, useState } from 'react'
 import 'chessground/assets/chessground.base.css'
 import 'chessground/assets/chessground.brown.css'
 import 'chessground/assets/chessground.cburnett.css'
+import { analysisDrawing, type BoardArrow } from '../lib/board-drawing'
 import type { Classification } from '../types'
 import { ClassGlyph } from './ClassificationBadge'
 
-export interface BoardArrow {
-  from: string
-  to: string
-  brush?: string
-}
+export type { BoardArrow } from '../lib/board-drawing'
 
 const BOARD_BRUSHES: DrawBrushes = {
   green: { key: 'g', color: '#15781b', opacity: 1, lineWidth: 10 },
@@ -96,14 +93,6 @@ function toKeys(pair: [string, string]): Key[] {
   return [pair[0] as Key, pair[1] as Key]
 }
 
-function shapesFrom(arrows: BoardArrow[]) {
-  return arrows.map((a) => ({
-    orig: a.from as Key,
-    dest: a.to as Key,
-    brush: a.brush ?? 'green',
-  }))
-}
-
 /** Posição (%,%) do canto superior esquerdo da casa, conforme a orientação. */
 function squarePosition(square: string, orientation: 'white' | 'black') {
   const file = square.charCodeAt(0) - 97
@@ -123,6 +112,7 @@ const Board = memo(function Board({
 }: BoardProps) {
   const elRef = useRef<HTMLDivElement>(null)
   const cgRef = useRef<Api | null>(null)
+  const appliedFenRef = useRef(fen)
   const [pendingPromotion, setPendingPromotion] =
     useState<PendingPromotion | null>(null)
   const [boardBounds, setBoardBounds] = useState({
@@ -157,7 +147,7 @@ const Board = memo(function Board({
         visible: true,
         // Setas da análise pertencem à posição, não à seleção do usuário.
         eraseOnClick: false,
-        shapes: shapesFrom(arrows),
+        ...analysisDrawing(arrows),
         brushes: BOARD_BRUSHES,
       },
     })
@@ -191,9 +181,13 @@ const Board = memo(function Board({
   }, [])
 
   useEffect(() => {
-    const hasPendingPromotion = pendingPromotion?.fen === fen
+    const positionChanged = appliedFenRef.current !== fen
+    appliedFenRef.current = fen
+    if (positionChanged) setPendingPromotion(null)
+    const hasPendingPromotion =
+      !positionChanged && pendingPromotion?.fen === fen
     cgRef.current?.set({
-      fen,
+      ...(positionChanged ? { fen, selected: undefined } : {}),
       orientation,
       lastMove: lastMove ? toKeys(lastMove) : undefined,
       turnColor: turnColor(fen),
@@ -209,7 +203,13 @@ const Board = memo(function Board({
                   setPendingPromotion({ from, to, color, fen })
                   return
                 }
-                onMove(from, to)
+                if (!onMove(from, to)) {
+                  cgRef.current?.set({
+                    fen,
+                    turnColor: turnColor(fen),
+                    movable: { color: turnColor(fen), dests: legalDests(fen) },
+                  })
+                }
               },
             },
           }
@@ -217,9 +217,12 @@ const Board = memo(function Board({
             color: undefined,
             dests: new Map(),
           },
-      drawable: { enabled: true, visible: true, shapes: shapesFrom(arrows) },
     })
-  }, [fen, orientation, lastMove, arrows, onMove, pendingPromotion])
+  }, [fen, orientation, lastMove, onMove, pendingPromotion])
+
+  useEffect(() => {
+    cgRef.current?.set({ drawable: analysisDrawing(arrows) })
+  }, [arrows])
 
   const choosePromotion = (piece: PromotionPiece) => {
     if (!pendingPromotion || pendingPromotion.fen !== fen || !onMove) return
