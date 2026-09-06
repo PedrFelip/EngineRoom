@@ -57,6 +57,14 @@ export async function configureEngine(
     await port.send(`setoption name Hash value ${opts.hashMb}`)
   }
   await port.send(`setoption name Multipv value ${Math.max(1, opts.multipv)}`)
+  await ask(port, 'isready', isReadyOk, timeoutMs)
+}
+
+export class MissingEvaluationError extends Error {
+  constructor() {
+    super('A engine encerrou a busca sem avaliação da posição.')
+    this.name = 'MissingEvaluationError'
+  }
 }
 
 /** Aguarda uma resposta UCI, falhando por timeout ou término da engine. */
@@ -182,7 +190,7 @@ export async function evalPosition(
     }))
   const principal = lines.find((l) => l.multipv === 1) ?? lines[0]
   if (!principal) {
-    throw new Error('A engine encerrou a busca sem avaliação da posição.')
+    throw new MissingEvaluationError()
   }
   return {
     fen,

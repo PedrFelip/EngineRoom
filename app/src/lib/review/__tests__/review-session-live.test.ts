@@ -21,12 +21,57 @@ const LIVE_SETTINGS: LiveAnalysisSettings = {
 }
 
 describe('createReviewSession — análise ao vivo', () => {
+  it('aguarda configurações e recupera uma busca sem score', async () => {
+    const port = fakeEnginePort()
+    const send = port.send.bind(port)
+    let configuring = false
+    let releaseReady = () => {}
+    let searches = 0
+    port.send = (command) => {
+      if (command.startsWith('setoption ')) configuring = true
+      if (command === 'isready' && configuring) {
+        releaseReady = () => {
+          configuring = false
+          port.emit('readyok')
+        }
+      } else if (command.startsWith('go ') && ++searches === 1) {
+        port.emit('bestmove e2e4')
+      } else send(command)
+    }
+    const backend = fakeBackend(port)
+    const cache = missCache()
+    const put = vi.spyOn(cache, 'put')
+    backend.createPositionCache = () => cache
+    const { session, store } = startSession({
+      config: depthConfig({ initialResult: existingResult() }),
+      backend,
+    })
+    await session.start()
+    const fen = existingResult().positions[0].fen
+    try {
+      session.analyzePosition({ fen }, LIVE_SETTINGS)
+      await vi.waitFor(() => expect(configuring).toBe(true))
+      expect(searches).toBe(0)
+      releaseReady()
+      await vi.waitFor(() => {
+        expect(store.getState().liveAnalysis.positions[fen]).toBeDefined()
+      })
+      expect(searches).toBe(2)
+      expect(put).toHaveBeenCalledTimes(1)
+    } finally {
+      session.dispose()
+    }
+  })
+
   it('preserva a avaliação anterior quando a busca termina sem score', async () => {
     const port = fakeEnginePort()
     const send = port.send.bind(port)
+    let searches = 0
     port.send = (command) => {
-      if (command.startsWith('go ')) port.emit('bestmove e2e4')
-      else send(command)
+      if (command.startsWith('go ')) {
+        searches++
+        port.emit('bestmove e2e4')
+      } else send(command)
     }
     const backend = fakeBackend(port)
     const cache = missCache()
@@ -47,6 +92,7 @@ describe('createReviewSession — análise ao vivo', () => {
       })
       expect(selectDisplayedPosition(store.getState())?.cp).toBe(180)
       expect(put).not.toHaveBeenCalled()
+      expect(searches).toBe(2)
     } finally {
       session.dispose()
     }

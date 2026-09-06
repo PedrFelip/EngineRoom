@@ -291,13 +291,19 @@ describe('configureEngine', () => {
       'setoption name Threads value 4',
       'setoption name Hash value 512',
       'setoption name Multipv value 3',
+      'isready',
     ])
   })
 
   it('omite Threads/Hash quando não fornecidos', async () => {
     const { port, sent } = recordingPort()
     await configureEngine(port, { multipv: 1 })
-    expect(sent).toEqual(['uci', 'isready', 'setoption name Multipv value 1'])
+    expect(sent).toEqual([
+      'uci',
+      'isready',
+      'setoption name Multipv value 1',
+      'isready',
+    ])
   })
 
   it('rejeita com mensagem clara quando a engine não responde (timeout)', async () => {

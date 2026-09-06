@@ -16,8 +16,10 @@ import { adaptiveProfileForKind } from './adaptive-analysis'
 import type { RawPosition } from './analysis/analysis-types'
 import {
   addSanToLines,
+  ask,
   configureEngine,
   evalPosition,
+  MissingEvaluationError,
   terminalCp,
 } from './analysis/engine-analysis'
 import {
@@ -33,6 +35,7 @@ import type { ReviewStore } from './review-store'
 import { classifyMove, cpToWinPct, whiteCp, whiteWinPct } from './scoring'
 import { recommendedReviewThreads } from './settings'
 import { recommendedHashMb } from './system'
+import { isReadyOk } from './uci'
 
 export interface ReviewSessionState {
   status: 'running' | 'done' | 'error'
@@ -249,6 +252,7 @@ export function createReviewSession(opts: ReviewSessionOpts): ReviewSession {
     await livePort.send(`setoption name Threads value ${settings.threads}`)
     await livePort.send(`setoption name Hash value ${settings.memoryMb}`)
     await livePort.send(`setoption name MultiPV value ${plan.multipv}`)
+    await ask(livePort, 'isready', isReadyOk)
     appliedLiveSettings = settings
     return livePort
   }
@@ -293,13 +297,29 @@ export function createReviewSession(opts: ReviewSessionOpts): ReviewSession {
           throw new Error('A análise da posição foi cancelada.')
         }
         try {
-          raw = await evalPosition(
-            engine,
-            fen,
-            { mode: 'time', movetimeMs: plan.movetimeMs },
-            plan.movetimeMs + 10_000,
-            plan.movetimeMs,
-          )
+          for (let attempt = 0; attempt < 2; attempt++) {
+            try {
+              raw = await evalPosition(
+                engine,
+                fen,
+                { mode: 'time', movetimeMs: plan.movetimeMs },
+                plan.movetimeMs + 10_000,
+                plan.movetimeMs,
+              )
+              break
+            } catch (error) {
+              if (
+                !(error instanceof MissingEvaluationError) ||
+                attempt > 0 ||
+                cancelled ||
+                generation !== liveGeneration
+              ) {
+                throw error
+              }
+              await ask(engine, 'isready', isReadyOk)
+              if (cancelled || generation !== liveGeneration) throw error
+            }
+          }
         } catch (error) {
           await discardLivePort()
           throw error
@@ -307,6 +327,7 @@ export function createReviewSession(opts: ReviewSessionOpts): ReviewSession {
         if (cancelled || generation !== liveGeneration) {
           throw new Error('A análise da posição foi cancelada.')
         }
+        if (!raw) throw new MissingEvaluationError()
         addSanToLines(raw)
         await cache.put(raw, 'time', plan.movetimeMs, plan.multipv)
       }
