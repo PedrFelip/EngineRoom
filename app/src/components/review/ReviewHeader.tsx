@@ -19,7 +19,10 @@ export default function ReviewHeader({
   onExit,
   onOpenAnalysisSettings,
 }: Props) {
-  const { settings, updateSettings } = useSettings()
+  const reviewEngineEnabled = useSettings(
+    (state) => state.settings.reviewEngineEnabled,
+  )
+  const updateSettings = useSettings((state) => state.updateSettings)
 
   return (
     <header className='flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4'>
@@ -53,7 +56,7 @@ export default function ReviewHeader({
             <Switch
               id='review-analysis-switch'
               size='sm'
-              checked={settings.reviewEngineEnabled}
+              checked={reviewEngineEnabled}
               onCheckedChange={(reviewEngineEnabled) =>
                 updateSettings({ reviewEngineEnabled })
               }

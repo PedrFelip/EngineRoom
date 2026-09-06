@@ -3,15 +3,19 @@ import {
   ChartLine,
   ChevronLeft,
   ChevronRight,
-  ListOrdered,
   SkipBack,
   SkipForward,
   TriangleAlert,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useStore } from 'zustand'
 import { evalLabel } from '../../lib/eval-label'
 import { phaseBoundaries } from '../../lib/phase'
-import { nodeAtPath } from '../../lib/review-store'
+import {
+  selectDisplayedFen,
+  selectDisplayedPosition,
+  selectVariationMove,
+} from '../../lib/review-selectors'
 import { useSettings } from '../../lib/settings-context'
 import { playMoveSound } from '../../lib/sound'
 import { useReview } from '../../lib/use-review'
@@ -20,12 +24,12 @@ import Board from '../Board'
 import CandidateLines from '../CandidateLines'
 import EvalBar from '../EvalBar'
 import EvalGraph from '../EvalGraph'
-import MoveList from '../MoveList'
-import ReviewSummary from '../ReviewSummary'
 import ReviewAnalysisModal from './ReviewAnalysisModal'
 import ReviewHeader from './ReviewHeader'
+import ReviewLiveStatus from './ReviewLiveStatus'
 import ReviewLoading from './ReviewLoading'
 import { PlayerTag, ReviewNavButton } from './ReviewNavigation'
+import ReviewSidebar from './ReviewSidebar'
 
 interface ReviewScreenProps {
   config: ReviewConfig
@@ -46,7 +50,13 @@ function uciToSquares(uci: string): [string, string] | null {
 
 export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
   const review = useReview(config)
-  const { settings } = useSettings()
+  const settings = useSettings(({ settings }) => ({
+    reviewEngineEnabled: settings.reviewEngineEnabled,
+    reviewMoveFeedbackEnabled: settings.reviewMoveFeedbackEnabled,
+    reviewAnalysisLines: settings.reviewAnalysisLines,
+    soundEnabled: settings.soundEnabled,
+    soundVolume: settings.soundVolume,
+  }))
   const { result, status, error, partialWinPcts, currentPly, orientation } =
     review
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
@@ -119,15 +129,9 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
     return () => window.clearInterval(timer)
   }, [status])
 
-  const position = result?.positions[currentPly] ?? null
-  const variationMove = review.variation
-    ? nodeAtPath(review.variation.roots, review.variation.path)
-    : null
-  const displayedFen = variationMove?.fen ?? position?.fen ?? null
-  const livePosition = displayedFen
-    ? review.liveAnalysis.positions[displayedFen]
-    : undefined
-  const displayedPosition = livePosition ?? (review.variation ? null : position)
+  const variationMove = useStore(review.store, selectVariationMove)
+  const displayedFen = useStore(review.store, selectDisplayedFen)
+  const displayedPosition = useStore(review.store, selectDisplayedPosition)
   const stm = displayedFen?.split(' ')[1] === 'b' ? 'b' : 'w'
   const currentMove =
     currentPly > 0 ? (result?.moves[currentPly - 1] ?? null) : null
@@ -353,16 +357,7 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
             </p>
           ) : null}
 
-          {!isExploringLine &&
-          settings.reviewEngineEnabled &&
-          review.liveAnalysis.fen === displayedFen &&
-          review.liveAnalysis.status !== 'idle' ? (
-            <p className='px-1 text-xs text-ink-faint' role='status'>
-              {review.liveAnalysis.status === 'running'
-                ? 'Analisando posição atual…'
-                : `Análise ao vivo indisponível: ${review.liveAnalysis.error}`}
-            </p>
-          ) : null}
+          {!isExploringLine && <ReviewLiveStatus store={review.store} />}
 
           <div className='surface-glass elev-card flex items-center justify-center gap-2 rounded-xl border border-edge p-2'>
             <ReviewNavButton
@@ -422,43 +417,7 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
           </div>
         </div>
 
-        <aside className='flex flex-col gap-4'>
-          {result && <ReviewSummary result={result} />}
-          {result && (
-            <div className='rounded-xl border border-border bg-card/60 p-2 shadow-sm'>
-              <div className='flex items-center justify-between px-1 py-1.5 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase'>
-                <span className='flex items-center gap-1.5'>
-                  <ListOrdered size={13} strokeWidth={2.2} aria-hidden='true' />
-                  Lances
-                </span>
-                <span className='font-mono text-[10px] normal-case'>
-                  {Math.ceil(result.moves.length / 2)}
-                </span>
-              </div>
-              <div className='max-h-[42vh] overflow-y-auto pr-1 lg:max-h-[50vh]'>
-                <MoveList
-                  moves={result.moves}
-                  currentPly={review.variation ? -1 : currentPly}
-                  onSelect={(ply) => {
-                    stopExplorePlayback()
-                    review.goTo(ply)
-                  }}
-                  onBranchFrom={(ply) => {
-                    stopExplorePlayback()
-                    review.goTo(ply)
-                  }}
-                  variations={review.variations}
-                  activeVariation={review.variation}
-                  onSelectVariation={(variationId, path) => {
-                    stopExplorePlayback()
-                    review.goToVariation(variationId, path)
-                  }}
-                  showVariationFeedback={settings.reviewMoveFeedbackEnabled}
-                />
-              </div>
-            </div>
-          )}
-        </aside>
+        <ReviewSidebar store={review.store} onNavigate={stopExplorePlayback} />
       </div>
 
       {result && graph && (
