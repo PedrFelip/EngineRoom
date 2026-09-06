@@ -81,10 +81,16 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
       stopExplorePlayback(false)
       review.startPlaybackAnalysis()
       setIsExploringLine(true)
-      review.exploreLine(pv)
-      let remainingMoves = pv.length - 1
+      const path = review.exploreLine(pv)
+      const variation = review.store.getState().variation
+      if (!variation || path.length === 0) {
+        stopExplorePlayback()
+        return
+      }
+      let cursor = variation.path.length
+      let remainingMoves = path.length - cursor
       const advance = () => {
-        review.next()
+        review.goToVariation(variation.id, path.slice(0, ++cursor))
         remainingMoves--
         if (remainingMoves === 0) {
           exploreTimerRef.current = null
@@ -103,7 +109,8 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
     },
     [
       review.exploreLine,
-      review.next,
+      review.store,
+      review.goToVariation,
       review.startPlaybackAnalysis,
       review.endPlaybackAnalysis,
       stopExplorePlayback,

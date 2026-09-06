@@ -14,7 +14,8 @@ export default function ReviewLiveStatus({ store }: { store: ReviewStore }) {
       error: state.liveAnalysis.error,
     })),
   )
-  if (!enabled || !active || status === 'idle') return null
+  if (!enabled || !active || status === 'idle' || status === 'cancelled')
+    return null
   return (
     <p className='px-1 text-xs text-ink-faint' role='status'>
       {status === 'running'

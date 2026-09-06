@@ -111,6 +111,12 @@ export type Phase = 'opening' | 'middlegame' | 'endgame'
 
 /** Resultado da análise do engine numa única posição. */
 export interface PositionAnalysis {
+  /** Metadados transitórios da busca ao vivo; ausentes em revisões antigas. */
+  search?: {
+    purpose: 'playback' | 'refinement'
+    movetimeMs: number
+    multipv: number
+  }
   ply: number
   fen: string
   phase: Phase

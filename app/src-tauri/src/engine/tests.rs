@@ -84,3 +84,50 @@ fn bounds_events_for_a_reproducible_verbose_trace() {
     let output = filter.on_line("bestmove e2e4".into());
     assert_eq!(output.len(), 4, "300 infos + bestmove viram 4 eventos");
 }
+
+#[tokio::test]
+async fn stop_waits_for_writer_and_terminates_reader() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+    use tokio::sync::{mpsc, oneshot};
+
+    let (tx, _incoming) = mpsc::unbounded_channel();
+    let (shutdown, shutdown_rx) = oneshot::channel();
+    let (release, released) = oneshot::channel();
+    let (ready, started) = oneshot::channel();
+    let reader_alive = Arc::new(AtomicBool::new(true));
+    struct ReaderGuard(Arc<AtomicBool>);
+    impl Drop for ReaderGuard {
+        fn drop(&mut self) {
+            self.0.store(false, Ordering::SeqCst);
+        }
+    }
+    let alive = Arc::clone(&reader_alive);
+    let reader = tauri::async_runtime::spawn(async move {
+        let _guard = ReaderGuard(alive);
+        let _ = ready.send(());
+        std::future::pending::<()>().await;
+    });
+    started.await.unwrap();
+    let writer = tauri::async_runtime::spawn(async move {
+        shutdown_rx.await.unwrap();
+        released.await.unwrap();
+    });
+    let handle = super::EngineHandle {
+        tx,
+        shutdown,
+        reader,
+        writer,
+    };
+    let stopping = tokio::spawn(handle.stop());
+    while reader_alive.load(Ordering::SeqCst) {
+        tokio::task::yield_now().await;
+    }
+    assert!(
+        !stopping.is_finished(),
+        "stop must await writer termination"
+    );
+    release.send(()).unwrap();
+    stopping.await.unwrap();
+    assert!(!reader_alive.load(Ordering::SeqCst));
+}

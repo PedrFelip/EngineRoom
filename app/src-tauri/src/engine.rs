@@ -42,6 +42,18 @@ struct EngineHandle {
     tx: mpsc::UnboundedSender<String>,
     /// Signalling this stops the writer task and kills the child.
     shutdown: oneshot::Sender<()>,
+    reader: tauri::async_runtime::JoinHandle<()>,
+    writer: tauri::async_runtime::JoinHandle<()>,
+}
+
+impl EngineHandle {
+    async fn stop(self) {
+        // Interrompa e aguarde o emissor antes de permitir outra engine.
+        self.reader.abort();
+        let _ = self.reader.await;
+        let _ = self.shutdown.send(());
+        let _ = self.writer.await;
+    }
 }
 
 /// Reduz o volume de eventos durante uma busca sem mudar o contrato UCI visto
@@ -129,9 +141,7 @@ fn forward_line(app: &AppHandle, filter: &Arc<Mutex<UciOutputFilter>>, line: Str
     }
 }
 
-fn spawn_engine(
-    app: &AppHandle,
-) -> Result<(mpsc::UnboundedSender<String>, oneshot::Sender<()>), String> {
+fn spawn_engine(app: &AppHandle) -> Result<EngineHandle, String> {
     let command = app
         .shell()
         .sidecar(SIDECAR)
@@ -146,7 +156,7 @@ fn spawn_engine(
     // agrupar mais de uma linha UCI no mesmo evento stdout.
     let app_reader = app.clone();
     let reader_filter = Arc::clone(&filter);
-    tauri::async_runtime::spawn(async move {
+    let reader = tauri::async_runtime::spawn(async move {
         let mut reported_exit = false;
         let mut stdout = Vec::new();
         while let Some(event) = rx.recv().await {
@@ -213,7 +223,7 @@ fn spawn_engine(
     let (tx, mut incoming) = mpsc::unbounded_channel::<String>();
     let (shutdown, mut shutdown_rx) = oneshot::channel::<()>();
     let writer_filter = Arc::clone(&filter);
-    tauri::async_runtime::spawn(async move {
+    let writer = tauri::async_runtime::spawn(async move {
         let mut child = child;
         loop {
             tokio::select! {
@@ -233,7 +243,12 @@ fn spawn_engine(
         }
     });
 
-    Ok((tx, shutdown))
+    Ok(EngineHandle {
+        tx,
+        shutdown,
+        reader,
+        writer,
+    })
 }
 
 #[tauri::command]
@@ -243,8 +258,7 @@ pub fn engine_spawn(app: AppHandle, state: tauri::State<'_, EngineState>) -> Res
         return Err("A engine já está em execução.".into());
     }
 
-    let (tx, shutdown) = spawn_engine(&app)?;
-    *guard = Some(EngineHandle { tx, shutdown });
+    *guard = Some(spawn_engine(&app)?);
     Ok(())
 }
 
@@ -261,10 +275,10 @@ pub fn engine_send(state: tauri::State<'_, EngineState>, line: String) -> Result
 }
 
 #[tauri::command]
-pub fn engine_stop(state: tauri::State<'_, EngineState>) -> Result<(), String> {
-    let mut guard = state.inner.lock().map_err(|e| e.to_string())?;
-    if let Some(handle) = guard.take() {
-        let _ = handle.shutdown.send(());
+pub async fn engine_stop(state: tauri::State<'_, EngineState>) -> Result<(), String> {
+    let handle = state.inner.lock().map_err(|e| e.to_string())?.take();
+    if let Some(handle) = handle {
+        handle.stop().await;
     }
     Ok(())
 }
