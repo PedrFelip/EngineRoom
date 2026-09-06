@@ -1,3 +1,4 @@
+import { preferredAnalysis } from './analysis-quality'
 import { nodeAtPath, type ReviewStoreSnapshot } from './review-store'
 
 export function selectVariationMove(state: ReviewStoreSnapshot) {
@@ -15,10 +16,12 @@ export function selectDisplayedFen(state: ReviewStoreSnapshot) {
 
 export function selectDisplayedPosition(state: ReviewStoreSnapshot) {
   const fen = selectDisplayedFen(state)
-  const live = fen ? state.liveAnalysis.positions[fen] : undefined
-  if (live) return live
-  if (state.variation) return null
-  return state.result?.positions[state.currentPly] ?? null
+  if (!fen) return null
+  const base = state.result?.positions[state.currentPly]
+  const original = base?.fen === fen ? base : undefined
+  const live = state.liveAnalysis.positions[fen]
+  if (live?.fen === fen) return preferredAnalysis(original, live)
+  return original ?? null
 }
 
 export function selectSourceFen(state: ReviewStoreSnapshot) {
@@ -32,7 +35,8 @@ export function selectSourcePosition(state: ReviewStoreSnapshot) {
   const fen = selectSourceFen(state)
   if (!fen || !state.variation) return undefined
   const live = state.liveAnalysis.positions[fen]
-  if (live?.fen === fen) return live
   const base = state.result?.positions[state.variation.basePly]
-  return base?.fen === fen ? base : undefined
+  const original = base?.fen === fen ? base : undefined
+  if (live?.fen === fen) return preferredAnalysis(original, live)
+  return original
 }

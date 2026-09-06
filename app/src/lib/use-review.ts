@@ -49,7 +49,7 @@ export interface UseReview {
   last: () => void
   flip: () => void
   makeMove: (from: string, to: string, promotion?: string) => boolean
-  exploreLine: (pv: string[]) => void
+  exploreLine: (pv: string[]) => string[]
   goToVariation: (variationId: string, path: string[]) => void
   exitVariation: () => void
 }

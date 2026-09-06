@@ -253,6 +253,13 @@ export function createReviewSession(opts: ReviewSessionOpts): ReviewSession {
     return livePort
   }
 
+  async function discardLivePort(): Promise<void> {
+    const failed = livePort
+    livePort = null
+    appliedLiveSettings = null
+    await failed?.dispose()
+  }
+
   async function analyzeFen(
     fen: string,
     settings: ResolvedLiveAnalysisSettings,
@@ -275,22 +282,43 @@ export function createReviewSession(opts: ReviewSessionOpts): ReviewSession {
           lines: [{ multipv: 1, cp: terminal, pv: [] }],
         }
       } else {
-        const engine = await ensureLivePort(settings, plan, generation)
+        let engine: NonNullable<typeof livePort>
+        try {
+          engine = await ensureLivePort(settings, plan, generation)
+        } catch (error) {
+          await discardLivePort()
+          throw error
+        }
         if (cancelled || generation !== liveGeneration) {
           throw new Error('A análise da posição foi cancelada.')
         }
-        raw = await evalPosition(
-          engine,
-          fen,
-          { mode: 'time', movetimeMs: plan.movetimeMs },
-          plan.movetimeMs + 10_000,
-          plan.movetimeMs,
-        )
+        try {
+          raw = await evalPosition(
+            engine,
+            fen,
+            { mode: 'time', movetimeMs: plan.movetimeMs },
+            plan.movetimeMs + 10_000,
+            plan.movetimeMs,
+          )
+        } catch (error) {
+          await discardLivePort()
+          throw error
+        }
+        if (cancelled || generation !== liveGeneration) {
+          throw new Error('A análise da posição foi cancelada.')
+        }
         addSanToLines(raw)
         await cache.put(raw, 'time', plan.movetimeMs, plan.multipv)
       }
     }
-    return positionAnalysis(raw)
+    return {
+      ...positionAnalysis(raw),
+      search: {
+        purpose: settings.fastPass ? 'playback' : 'refinement',
+        movetimeMs: plan.movetimeMs,
+        multipv: plan.multipv,
+      },
+    }
   }
 
   function runLiveAnalysis(
@@ -380,6 +408,7 @@ export function createReviewSession(opts: ReviewSessionOpts): ReviewSession {
     },
     cancelLiveAnalysis() {
       liveGeneration++
+      store.cancelLiveAnalysis()
       void livePort?.send('stop')
     },
     dispose() {

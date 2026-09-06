@@ -178,6 +178,56 @@ describe('createReviewStore — navegação na linha principal', () => {
 })
 
 describe('createReviewStore — ramificações locais', () => {
+  it('reutiliza a raiz ao repetir um lance e preserva sua continuação e classificação', () => {
+    const store = createReviewStore()
+    store.setResult(e4e5Result())
+    store.first()
+    store.exploreLine(['e2e4', 'e7e5'])
+    const initial = store.getState().variation
+    if (!initial) throw new Error('Variação esperada')
+    const rootId = initial.roots[0].id
+    store.setVariationClassification(rootId, 'bom')
+    const before = store.getState().variation
+    if (!before) throw new Error('Variação esperada')
+    store.prev()
+
+    expect(store.makeMove('e2', 'e4')).toBe(true)
+
+    const after = store.getState()
+    expect(after.variation?.roots).toBe(before.roots)
+    expect(after.variation?.roots).toHaveLength(1)
+    expect(after.variation?.roots[0].classification).toBe('bom')
+    expect(after.variation?.path).toEqual([rootId])
+    expect(after.variations).toHaveLength(1)
+    expect(after.variations[0]).toBe(after.variation)
+    store.next()
+    expect(store.getState().variation?.path).toEqual([
+      rootId,
+      before.roots[0].children[0].id,
+    ])
+  })
+
+  it('mantém raízes distintas e reutiliza filhos sem alterar snapshots anteriores', () => {
+    const store = createReviewStore()
+    store.setResult(e4e5Result())
+    store.first()
+    store.makeMove('e2', 'e4')
+    const before = store.getState()
+    store.prev()
+    store.makeMove('d2', 'd4')
+    store.makeMove('d7', 'd5')
+    const branch = store.getState().variation
+    if (!branch) throw new Error('Variação esperada')
+    store.prev()
+    store.makeMove('d7', 'd5')
+
+    expect(before.variation?.roots.map((move) => move.uci)).toEqual(['e2e4'])
+    expect(store.getState().variation?.roots).toBe(branch.roots)
+    expect(branch.roots.map((move) => move.uci)).toEqual(['e2e4', 'd2d4'])
+    expect(store.getState().variation?.path).toEqual(branch.path)
+    expect(store.getState().variations[0]).toBe(store.getState().variation)
+  })
+
   it('cria uma ramificação com um lance legal e permite navegar nela', () => {
     const store = createReviewStore()
     store.setResult(e4e5Result())

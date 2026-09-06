@@ -1,11 +1,13 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { PositionCache } from '../../analyze'
+import { selectDisplayedPosition } from '../../review-selectors'
 import type { LiveAnalysisSettings } from '../../review-session'
 import {
   depthConfig,
   existingResult,
   fakeBackend,
   fakeEnginePort,
+  missCache,
   startSession,
 } from './review-session-test-helpers'
 
@@ -19,6 +21,81 @@ const LIVE_SETTINGS: LiveAnalysisSettings = {
 }
 
 describe('createReviewSession — análise ao vivo', () => {
+  it('preserva a avaliação anterior quando a busca termina sem score', async () => {
+    const port = fakeEnginePort()
+    const send = port.send.bind(port)
+    port.send = (command) => {
+      if (command.startsWith('go ')) port.emit('bestmove e2e4')
+      else send(command)
+    }
+    const backend = fakeBackend(port)
+    const cache = missCache()
+    const put = vi.spyOn(cache, 'put')
+    backend.createPositionCache = () => cache
+    const result = existingResult()
+    result.positions[0].cp = 180
+    const { session, store } = startSession({
+      config: depthConfig({ initialResult: result }),
+      backend,
+    })
+    await session.start()
+    store.first()
+    try {
+      session.analyzePosition({ fen: result.positions[0].fen }, LIVE_SETTINGS)
+      await vi.waitFor(() => {
+        expect(store.getState().liveAnalysis.status).toBe('error')
+      })
+      expect(selectDisplayedPosition(store.getState())?.cp).toBe(180)
+      expect(put).not.toHaveBeenCalled()
+    } finally {
+      session.dispose()
+    }
+  })
+
+  it('não grava no cache a avaliação de uma busca cancelada', async () => {
+    const port = fakeEnginePort()
+    const send = port.send.bind(port)
+    let searching = false
+    port.send = (command) => {
+      if (command.startsWith('go ')) searching = true
+      else if (command === 'stop' && searching) {
+        port.emit('info depth 1 score cp 0 pv e2e4')
+        port.emit('bestmove e2e4')
+      } else send(command)
+    }
+    const backend = fakeBackend(port)
+    const cache = missCache()
+    const put = vi.spyOn(cache, 'put')
+    const get = vi.spyOn(cache, 'get')
+    backend.createPositionCache = () => cache
+    const result = existingResult()
+    const { session, store } = startSession({
+      config: depthConfig({ initialResult: result }),
+      backend,
+    })
+    await session.start()
+    try {
+      session.analyzePosition({ fen: result.positions[0].fen }, LIVE_SETTINGS)
+      await vi.waitFor(() => expect(searching).toBe(true))
+      session.cancelLiveAnalysis()
+      // Uma segunda tarefa concluída garante que a busca cancelada drenou.
+      const terminalFen = '8/8/8/8/8/8/4K3/7k w - - 0 1'
+      session.analyzePosition({ fen: terminalFen }, LIVE_SETTINGS)
+      await vi.waitFor(() => {
+        expect(
+          store.getState().liveAnalysis.positions[terminalFen],
+        ).toBeDefined()
+      })
+      expect(get).toHaveBeenCalledTimes(2)
+      expect(put).not.toHaveBeenCalled()
+      expect(
+        store.getState().liveAnalysis.positions[result.positions[0].fen],
+      ).toBeUndefined()
+    } finally {
+      session.dispose()
+    }
+  })
+
   it.each([
     { incompatible: false, fastPass: false },
     { incompatible: true, fastPass: false },

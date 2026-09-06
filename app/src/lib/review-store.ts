@@ -8,19 +8,22 @@
 import { Chess } from 'chess.js'
 import { createStore } from 'zustand/vanilla'
 import type { Classification, PositionAnalysis, ReviewResult } from '../types'
+import { preferredAnalysis } from './analysis-quality'
 
-export interface VariationMove {
-  id: string
-  uci: string
-  san: string
-  fen: string
-  classification?: Classification
-  children: VariationMove[]
-}
+import {
+  appendAtPath,
+  childrenAtPath,
+  mergeLineAtPath,
+  nodeAtPath,
+  updateNodeClassification,
+  type VariationMove,
+} from './variation-tree'
+
+export { nodeAtPath, type VariationMove } from './variation-tree'
 
 export interface LiveAnalysisState {
   fen: string | null
-  status: 'idle' | 'running' | 'error'
+  status: 'idle' | 'running' | 'cancelled' | 'error'
   error: string | null
   positions: Record<string, PositionAnalysis>
 }
@@ -58,9 +61,10 @@ export interface ReviewStore {
   first(): void
   last(): void
   makeMove(from: string, to: string, promotion?: string): boolean
-  exploreLine(pv: string[]): void
+  exploreLine(pv: string[]): string[]
   goToVariation(variationId: string, path: string[]): void
   exitVariation(): void
+  cancelLiveAnalysis(): void
   startLiveAnalysis(fen: string): void
   setLiveAnalysis(fen: string, analysis: PositionAnalysis): void
   failLiveAnalysis(fen: string, error: string): void
@@ -91,6 +95,18 @@ export function createReviewStore(): ReviewStore {
     })
   }
 
+  function commitVariation(variation: ReviewVariation): void {
+    const saved = state.getState().variations
+    const exists = saved.some((item) => item.id === variation.id)
+    commit({
+      currentPly: variation.basePly,
+      variation,
+      variations: exists
+        ? saved.map((item) => (item.id === variation.id ? variation : item))
+        : [...saved, variation],
+    })
+  }
+
   return {
     getState: state.getState,
     getInitialState: state.getInitialState,
@@ -116,22 +132,13 @@ export function createReviewStore(): ReviewStore {
       const snapshot = state.getState()
       const variation = snapshot.variation
       if (variation) {
-        const current = nodeAtPath(variation.roots, variation.path)
-        const next =
-          variation.path.length === 0
-            ? variation.roots[0]
-            : current?.children[0]
+        const next = childrenAtPath(variation.roots, variation.path)[0]
         if (!next) return
         const nextVariation = {
           ...variation,
           path: [...variation.path, next.id],
         }
-        commit({
-          variation: nextVariation,
-          variations: snapshot.variations.map((saved) =>
-            saved.id === nextVariation.id ? nextVariation : saved,
-          ),
-        })
+        commitVariation(nextVariation)
         return
       }
       const total = snapshot.result?.moves.length ?? 0
@@ -147,12 +154,7 @@ export function createReviewStore(): ReviewStore {
             ...snapshot.variation,
             path: snapshot.variation.path.slice(0, -1),
           }
-          commit({
-            variation: nextVariation,
-            variations: snapshot.variations.map((saved) =>
-              saved.id === nextVariation.id ? nextVariation : saved,
-            ),
-          })
+          commitVariation(nextVariation)
         }
         return
       }
@@ -183,45 +185,35 @@ export function createReviewStore(): ReviewStore {
         const chess = new Chess(fen)
         const move = chess.move({ from, to, promotion })
         if (!move) return false
-        const nextMove = {
+        const path = variation?.path ?? []
+        const uci = `${move.from}${move.to}${move.promotion ?? ''}`
+        const existing = variation
+          ? childrenAtPath(variation.roots, path).find(
+              (candidate) => candidate.uci === uci,
+            )
+          : undefined
+        if (existing && variation) {
+          commitVariation({
+            ...variation,
+            path: [...path, existing.id],
+          })
+          return true
+        }
+        const nextMove: VariationMove = {
           id: `variation-${nextVariationId++}`,
-          uci: `${move.from}${move.to}${move.promotion ?? ''}`,
+          uci,
           san: move.san,
           fen: chess.fen(),
           children: [],
         }
-        const existing = current?.children.find(
-          (candidate) => candidate.uci === nextMove.uci,
-        )
-        if (existing && variation) {
-          const nextVariation = {
-            ...variation,
-            path: [...variation.path, existing.id],
-          }
-          commit({
-            variation: nextVariation,
-            variations: snapshot.variations.map((saved) =>
-              saved.id === variation.id ? nextVariation : saved,
-            ),
-          })
-          return true
-        }
-        const path = variation?.path ?? []
-        const roots = variation
-          ? appendAtPath(variation.roots, path, nextMove)
-          : [nextMove]
-        const nextVariation: ReviewVariation = {
+        commitVariation({
           id: variation?.id ?? `tree-${nextVariationId++}`,
           basePly,
-          roots,
+          roots: variation
+            ? appendAtPath(variation.roots, path, nextMove)
+            : [nextMove],
           path: [...path, nextMove.id],
-        }
-        const variations = variation
-          ? snapshot.variations.map((saved) =>
-              saved.id === variation.id ? nextVariation : saved,
-            )
-          : [...snapshot.variations, nextVariation]
-        commit({ variation: nextVariation, variations })
+        })
         return true
       } catch {
         return false
@@ -230,71 +222,63 @@ export function createReviewStore(): ReviewStore {
     exploreLine(pv) {
       const snapshot = state.getState()
       const result = snapshot.result
-      const activeVariation = snapshot.variation
-      const activeNode = activeVariation
-        ? nodeAtPath(activeVariation.roots, activeVariation.path)
-        : null
-      const fen =
-        activeNode?.fen ?? result?.positions[snapshot.currentPly]?.fen ?? null
-      if (!result || !fen || pv.length === 0) return
-      const chess = new Chess(fen)
+      const active = snapshot.variation
+      const basePly = active?.basePly ?? snapshot.currentPly
+      const activeNode = active ? nodeAtPath(active.roots, active.path) : null
+      const fen = activeNode?.fen ?? result?.positions[basePly]?.fen
+      if (!result || !fen || pv.length === 0) return []
+      // Valide a PV inteira antes de publicar qualquer mudança na árvore.
       let root: VariationMove | null = null
       let tail: VariationMove | null = null
-      const path: string[] = []
+      const moves: string[] = []
       try {
+        const chess = new Chess(fen)
         for (const uci of pv) {
           const move = chess.move({
             from: uci.slice(0, 2),
             to: uci.slice(2, 4),
             promotion: uci[4] ?? 'q',
           })
-          if (!move) break
           const node: VariationMove = {
             id: `variation-${nextVariationId++}`,
-            uci,
+            uci: `${move.from}${move.to}${move.promotion ?? ''}`,
             san: move.san,
             fen: chess.fen(),
             children: [],
           }
-          path.push(node.id)
+          moves.push(node.uci)
           if (tail) tail.children.push(node)
           else root = node
           tail = node
         }
       } catch {
-        return
+        return []
       }
-      if (root) {
-        if (activeVariation) {
-          const roots = appendAtPath(
-            activeVariation.roots,
-            activeVariation.path,
-            root,
-          )
-          const nextVariation = {
-            ...activeVariation,
-            roots,
-            path: [...activeVariation.path, root.id],
-          }
-          commit({
-            variation: nextVariation,
-            variations: snapshot.variations.map((saved) =>
-              saved.id === nextVariation.id ? nextVariation : saved,
-            ),
-          })
-          return
-        }
-        const nextVariation: ReviewVariation = {
-          id: `tree-${nextVariationId++}`,
-          basePly: snapshot.currentPly,
-          roots: [root],
-          path: path.slice(0, 1),
-        }
-        commit({
-          variation: nextVariation,
-          variations: [...snapshot.variations, nextVariation],
-        })
+      if (!root) return []
+      const saved =
+        active ??
+        snapshot.variations.find(
+          (item) =>
+            item.basePly === basePly &&
+            item.roots.some((node) => node.uci === moves[0]),
+        )
+      const path = active?.path ?? []
+      const roots = mergeLineAtPath(saved?.roots ?? [], path, root)
+      const fullPath = [...path]
+      for (const uci of moves) {
+        const node = childrenAtPath(roots, fullPath).find(
+          (item) => item.uci === uci,
+        )
+        if (!node) return []
+        fullPath.push(node.id)
       }
+      commitVariation({
+        id: saved?.id ?? `tree-${nextVariationId++}`,
+        basePly,
+        roots,
+        path: fullPath.slice(0, path.length + 1),
+      })
+      return fullPath
     },
     goToVariation(variationId, path) {
       const snapshot = state.getState()
@@ -304,16 +288,17 @@ export function createReviewStore(): ReviewStore {
       if (!variation) return
       if (path.length > 0 && !nodeAtPath(variation.roots, path)) return
       const nextVariation = { ...variation, path }
-      commit({
-        currentPly: variation.basePly,
-        variation: nextVariation,
-        variations: snapshot.variations.map((saved) =>
-          saved.id === variationId ? nextVariation : saved,
-        ),
-      })
+      commitVariation(nextVariation)
     },
     exitVariation() {
       commit({ variation: null })
+    },
+    cancelLiveAnalysis() {
+      const liveAnalysis = state.getState().liveAnalysis
+      if (liveAnalysis.status !== 'running') return
+      commit({
+        liveAnalysis: { ...liveAnalysis, status: 'cancelled', error: null },
+      })
     },
     startLiveAnalysis(fen) {
       const snapshot = state.getState()
@@ -333,7 +318,13 @@ export function createReviewStore(): ReviewStore {
           fen,
           status: 'idle',
           error: null,
-          positions: { ...snapshot.liveAnalysis.positions, [fen]: analysis },
+          positions: {
+            ...snapshot.liveAnalysis.positions,
+            [fen]: preferredAnalysis(
+              snapshot.liveAnalysis.positions[fen],
+              analysis,
+            ),
+          },
         },
       })
     },
@@ -361,51 +352,4 @@ export function createReviewStore(): ReviewStore {
       commit({ variations, variation })
     },
   }
-}
-
-function updateNodeClassification(
-  nodes: VariationMove[],
-  nodeId: string,
-  value: Classification,
-): VariationMove[] {
-  let changed = false
-  const next = nodes.map((node) => {
-    if (node.id === nodeId) {
-      changed = true
-      return { ...node, classification: value }
-    }
-    const children = updateNodeClassification(node.children, nodeId, value)
-    if (children === node.children) return node
-    changed = true
-    return { ...node, children }
-  })
-  return changed ? next : nodes
-}
-
-export function nodeAtPath(
-  roots: VariationMove[],
-  path: string[],
-): VariationMove | null {
-  let candidates = roots
-  let current: VariationMove | null = null
-  for (const id of path) {
-    current = candidates.find((node) => node.id === id) ?? null
-    if (!current) return null
-    candidates = current.children
-  }
-  return current
-}
-
-function appendAtPath(
-  roots: VariationMove[],
-  path: string[],
-  move: VariationMove,
-): VariationMove[] {
-  if (path.length === 0) return [...roots, move]
-  const [id, ...rest] = path
-  return roots.map((node) =>
-    node.id === id
-      ? { ...node, children: appendAtPath(node.children, rest, move) }
-      : node,
-  )
 }
