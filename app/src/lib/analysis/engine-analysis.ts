@@ -90,7 +90,12 @@ export function ask(
       cleanup()
       reject(new Error(`A engine não respondeu a '${cmd}' em ${timeoutMs}ms.`))
     }, timeoutMs)
-    void port.send(cmd)
+    void Promise.resolve()
+      .then(() => port.send(cmd))
+      .catch((error) => {
+        cleanup()
+        reject(error)
+      })
   })
 }
 
@@ -176,11 +181,14 @@ export async function evalPosition(
       depth: l.depth,
     }))
   const principal = lines.find((l) => l.multipv === 1) ?? lines[0]
+  if (!principal) {
+    throw new Error('A engine encerrou a busca sem avaliação da posição.')
+  }
   return {
     fen,
-    cp: principal?.cp ?? 0,
+    cp: principal.cp,
     depth: byPv.get(1)?.depth ?? 0,
-    pv: principal?.pv ?? [],
+    pv: principal.pv,
     lines,
   }
 }
