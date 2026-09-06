@@ -1,30 +1,18 @@
 import {
   createContext,
   type ReactNode,
-  useCallback,
   useContext,
   useEffect,
-  useMemo,
   useState,
 } from 'react'
-import {
-  DEFAULT_SETTINGS,
-  loadSettings,
-  type Settings,
-  saveSettings,
-  type Theme,
-} from './settings'
+import { useStore } from 'zustand'
+import { useShallow } from 'zustand/react/shallow'
+import { loadSettings, saveSettings, type Theme } from './settings'
+import { createSettingsStore, type SettingsState } from './settings-store'
 
-interface SettingsContextValue {
-  settings: Settings
-  updateSettings: (patch: Partial<Settings>) => void
-  setTheme: (theme: Theme) => void
-  setSoundEnabled: (enabled: boolean) => void
-  setSoundVolume: (volume: number) => void
-  reset: () => void
-}
-
-const SettingsContext = createContext<SettingsContextValue | null>(null)
+const SettingsContext = createContext<ReturnType<
+  typeof createSettingsStore
+> | null>(null)
 
 function applyTheme(theme: Theme) {
   const root = document.documentElement
@@ -34,65 +22,29 @@ function applyTheme(theme: Theme) {
 }
 
 export function SettingsProvider({ children }: { children: ReactNode }) {
-  const [settings, setSettings] = useState<Settings>(() => loadSettings())
+  const [store] = useState(() => createSettingsStore(loadSettings()))
 
   useEffect(() => {
-    applyTheme(settings.theme)
-    saveSettings(settings)
-  }, [settings])
-
-  const setTheme = useCallback(
-    (theme: Theme) => setSettings((s) => ({ ...s, theme })),
-    [],
-  )
-  const setSoundEnabled = useCallback(
-    (enabled: boolean) => setSettings((s) => ({ ...s, soundEnabled: enabled })),
-    [],
-  )
-  const setSoundVolume = useCallback(
-    (volume: number) =>
-      setSettings((s) => ({
-        ...s,
-        soundVolume: Math.max(0, Math.min(1, volume)),
-      })),
-    [],
-  )
-  const reset = useCallback(() => setSettings({ ...DEFAULT_SETTINGS }), [])
-  const updateSettings = useCallback(
-    (patch: Partial<Settings>) =>
-      setSettings((current) => ({ ...current, ...patch })),
-    [],
-  )
-
-  const value = useMemo<SettingsContextValue>(
-    () => ({
-      settings,
-      updateSettings,
-      setTheme,
-      setSoundEnabled,
-      setSoundVolume,
-      reset,
-    }),
-    [
-      settings,
-      updateSettings,
-      setTheme,
-      setSoundEnabled,
-      setSoundVolume,
-      reset,
-    ],
-  )
+    applyTheme(store.getState().settings.theme)
+    saveSettings(store.getState().settings)
+    return store.subscribe((state, previous) => {
+      if (state.settings.theme !== previous.settings.theme) {
+        applyTheme(state.settings.theme)
+      }
+      saveSettings(state.settings)
+    })
+  }, [store])
 
   return (
-    <SettingsContext.Provider value={value}>
+    <SettingsContext.Provider value={store}>
       {children}
     </SettingsContext.Provider>
   )
 }
 
-export function useSettings(): SettingsContextValue {
-  const ctx = useContext(SettingsContext)
-  if (!ctx)
+export function useSettings<T>(selector: (state: SettingsState) => T): T {
+  const store = useContext(SettingsContext)
+  if (!store)
     throw new Error('useSettings precisa estar dentro de <SettingsProvider>')
-  return ctx
+  return useStore(store, useShallow(selector))
 }

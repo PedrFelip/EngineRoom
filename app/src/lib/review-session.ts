@@ -318,7 +318,10 @@ export function createReviewSession(opts: ReviewSessionOpts): ReviewSession {
         ) {
           return
         }
-        let source = request.sourceAnalysis
+        let source =
+          request.sourceAnalysis?.fen === request.sourceFen
+            ? request.sourceAnalysis
+            : undefined
         if (!source && request.sourceFen === request.fen) {
           source = analysis
         }

@@ -3,6 +3,7 @@ import type { CSSProperties, ReactNode } from 'react'
 import { useEffect, useState } from 'react'
 import { recommendedReviewThreads } from '../../lib/settings'
 import { useSettings } from '../../lib/settings-context'
+import { selectReviewEngineSettings } from '../../lib/settings-store'
 import { getSystemResources } from '../../lib/system'
 import { Switch } from '../ui/switch'
 
@@ -14,7 +15,8 @@ function fill(value: number, min: number, max: number): CSSProperties {
 }
 
 export default function ReviewEngineSettings() {
-  const { settings, updateSettings } = useSettings()
+  const settings = useSettings(selectReviewEngineSettings)
+  const updateSettings = useSettings((state) => state.updateSettings)
   const [maxThreads, setMaxThreads] = useState(
     Math.max(1, navigator.hardwareConcurrency || 1),
   )

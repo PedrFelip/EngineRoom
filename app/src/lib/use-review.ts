@@ -5,15 +5,16 @@
  * rAF e orientação do tabuleiro.
  */
 
-import {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-  useSyncExternalStore,
-} from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { useStore } from 'zustand'
 import type { ReviewConfig, ReviewResult } from '../types'
 import { createTauriBackend } from './backend'
+import {
+  selectDisplayedFen,
+  selectSourceFen,
+  selectSourcePosition,
+  selectVariationMove,
+} from './review-selectors'
 import {
   createReviewSession,
   type ReviewProgress,
@@ -22,12 +23,11 @@ import {
 } from './review-session'
 import {
   createReviewStore,
-  type LiveAnalysisState,
-  nodeAtPath,
   type ReviewStore,
   type ReviewVariation,
 } from './review-store'
 import { useSettings } from './settings-context'
+import { selectReviewEngineSettings } from './settings-store'
 
 export interface UseReview {
   result: ReviewResult | null
@@ -39,8 +39,7 @@ export interface UseReview {
   currentPly: number
   orientation: 'white' | 'black'
   variation: ReviewVariation | null
-  variations: ReviewVariation[]
-  liveAnalysis: LiveAnalysisState
+  store: ReviewStore
   startPlaybackAnalysis: () => void
   endPlaybackAnalysis: () => void
   goTo: (ply: number) => void
@@ -56,12 +55,11 @@ export interface UseReview {
 }
 
 export function useReview(config: ReviewConfig): UseReview {
-  const { settings } = useSettings()
-  const storeRef = useRef<ReviewStore | null>(null)
-  if (!storeRef.current) storeRef.current = createReviewStore()
-  const store = storeRef.current
-  const { result, currentPly, variation, variations, liveAnalysis } =
-    useSyncExternalStore(store.subscribe, store.getSnapshot)
+  const settings = useSettings(selectReviewEngineSettings)
+  const [store] = useState(createReviewStore)
+  const result = useStore(store, (state) => state.result)
+  const currentPly = useStore(store, (state) => state.currentPly)
+  const variation = useStore(store, (state) => state.variation)
 
   const [sessionState, setSessionState] = useState<ReviewSessionState>({
     status: 'running',
@@ -117,23 +115,13 @@ export function useReview(config: ReviewConfig): UseReview {
     }
   }, [config, store])
 
-  const variationMove = variation
-    ? nodeAtPath(variation.roots, variation.path)
-    : null
-  const displayedFen =
-    variationMove?.fen ?? result?.positions[currentPly]?.fen ?? null
-  const parentMove =
-    variation && variation.path.length > 1
-      ? nodeAtPath(variation.roots, variation.path.slice(0, -1))
-      : null
-  const sourcePosition = variation
-    ? (liveAnalysis.positions[
-        parentMove?.fen ?? result?.positions[variation.basePly]?.fen ?? ''
-      ] ?? result?.positions[variation.basePly])
-    : undefined
-  const sourceFen = variation
-    ? (parentMove?.fen ?? result?.positions[variation.basePly]?.fen)
-    : undefined
+  const variationNodeId = useStore(
+    store,
+    (state) => selectVariationMove(state)?.id,
+  )
+  const displayedFen = useStore(store, selectDisplayedFen)
+  const sourcePosition = useStore(store, selectSourcePosition)
+  const sourceFen = useStore(store, selectSourceFen)
 
   useEffect(() => {
     const session = sessionRef.current
@@ -145,7 +133,7 @@ export function useReview(config: ReviewConfig): UseReview {
     session.analyzePosition(
       {
         fen: displayedFen,
-        variationNodeId: variationMove?.id,
+        variationNodeId,
         sourceFen,
         sourceAnalysis: sourcePosition,
       },
@@ -173,33 +161,13 @@ export function useReview(config: ReviewConfig): UseReview {
     playbackFastPass,
     sourceFen,
     sourcePosition,
-    variationMove?.id,
+    variationNodeId,
   ])
 
-  const goTo = useCallback((ply: number) => store.goTo(ply), [store])
-  const next = useCallback(() => store.next(), [store])
-  const prev = useCallback(() => store.prev(), [store])
-  const first = useCallback(() => store.first(), [store])
-  const last = useCallback(() => store.last(), [store])
   const flip = useCallback(
     () => setOrientation((o) => (o === 'white' ? 'black' : 'white')),
     [],
   )
-  const makeMove = useCallback(
-    (from: string, to: string, promotion?: string) =>
-      store.makeMove(from, to, promotion),
-    [store],
-  )
-  const exploreLine = useCallback(
-    (pv: string[]) => store.exploreLine(pv),
-    [store],
-  )
-  const goToVariation = useCallback(
-    (variationId: string, path: string[]) =>
-      store.goToVariation(variationId, path),
-    [store],
-  )
-  const exitVariation = useCallback(() => store.exitVariation(), [store])
   const startPlaybackAnalysis = useCallback(() => {
     sessionRef.current?.cancelLiveAnalysis()
     setPlaybackFastPass(true)
@@ -215,19 +183,18 @@ export function useReview(config: ReviewConfig): UseReview {
     currentPly,
     orientation,
     variation,
-    variations,
-    liveAnalysis,
+    store,
     startPlaybackAnalysis,
     endPlaybackAnalysis,
-    goTo,
-    next,
-    prev,
-    first,
-    last,
+    goTo: store.goTo,
+    next: store.next,
+    prev: store.prev,
+    first: store.first,
+    last: store.last,
     flip,
-    makeMove,
-    exploreLine,
-    goToVariation,
-    exitVariation,
+    makeMove: store.makeMove,
+    exploreLine: store.exploreLine,
+    goToVariation: store.goToVariation,
+    exitVariation: store.exitVariation,
   }
 }

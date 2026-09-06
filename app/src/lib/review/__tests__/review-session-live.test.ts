@@ -19,6 +19,61 @@ const LIVE_SETTINGS: LiveAnalysisSettings = {
 }
 
 describe('createReviewSession — análise ao vivo', () => {
+  it.each([
+    { incompatible: false, fastPass: false },
+    { incompatible: true, fastPass: false },
+    { incompatible: false, fastPass: true },
+    { incompatible: true, fastPass: true },
+  ])(
+    'trata pai ausente ou incompatível: %j',
+    async ({ incompatible, fastPass }) => {
+      const port = fakeEnginePort()
+      const result = existingResult()
+      const { session, store } = startSession({
+        config: depthConfig({ initialResult: result }),
+        backend: fakeBackend(port),
+      })
+      await session.start()
+      store.first()
+      store.exploreLine(['d2d4', 'd7d5'])
+      store.next()
+      const parent = store.getSnapshot().variation?.roots[0]
+      const move = parent?.children[0]
+      if (!parent || !move) throw new Error('Variação de dois lances esperada')
+      const classify = vi.spyOn(store, 'setVariationClassification')
+
+      try {
+        session.analyzePosition(
+          {
+            fen: move.fen,
+            variationNodeId: move.id,
+            sourceFen: parent.fen,
+            sourceAnalysis: incompatible
+              ? { ...result.positions[0], cp: 2000 }
+              : undefined,
+          },
+          { ...LIVE_SETTINGS, fastPass },
+        )
+        await vi.waitFor(() => {
+          expect(
+            store.getSnapshot().liveAnalysis.positions[move.fen],
+          ).toBeDefined()
+          if (!fastPass)
+            expect(classify).toHaveBeenCalledWith(move.id, 'melhor')
+        })
+        expect(port.sent).toContain(`position fen ${move.fen}`)
+        if (fastPass) {
+          expect(classify).not.toHaveBeenCalled()
+          expect(port.sent).not.toContain(`position fen ${parent.fen}`)
+        } else {
+          expect(port.sent).toContain(`position fen ${parent.fen}`)
+        }
+      } finally {
+        session.dispose()
+      }
+    },
+  )
+
   it('analisa a posição atual com tempo, MultiPV e recursos configurados', async () => {
     const port = fakeEnginePort()
     const { session, store } = startSession({

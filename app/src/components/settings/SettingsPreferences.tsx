@@ -4,7 +4,18 @@ import type { Theme } from '../../lib/settings'
 import { useSettings } from '../../lib/settings-context'
 
 export default function SettingsPreferences() {
-  const { settings, setTheme, setSoundEnabled, setSoundVolume } = useSettings()
+  const settings = useSettings(({ settings }) => ({
+    theme: settings.theme,
+    soundEnabled: settings.soundEnabled,
+    soundVolume: settings.soundVolume,
+  }))
+  const { setTheme, setSoundEnabled, setSoundVolume } = useSettings(
+    (state) => ({
+      setTheme: state.setTheme,
+      setSoundEnabled: state.setSoundEnabled,
+      setSoundVolume: state.setSoundVolume,
+    }),
+  )
 
   return (
     <>

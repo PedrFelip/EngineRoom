@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import { selectDisplayedPosition } from './review-selectors'
 import { createReviewStore } from './review-store'
 
 const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1'
@@ -57,6 +58,40 @@ function e4e5Result() {
 }
 
 describe('createReviewStore — resultado e snapshot', () => {
+  it('preserva seleções da tela quando só o status ao vivo muda', () => {
+    const store = createReviewStore()
+    store.setResult(e4e5Result())
+    const before = store.getState()
+    const position = selectDisplayedPosition(before)
+    store.startLiveAnalysis(AFTER_E5)
+    store.failLiveAnalysis(AFTER_E5, 'Falha de teste')
+    const after = store.getState()
+    expect(after.result).toBe(before.result)
+    expect(after.variations).toBe(before.variations)
+    expect(selectDisplayedPosition(after)).toBe(position)
+  })
+
+  it('mantém stores de revisões independentes', () => {
+    const first = createReviewStore()
+    const second = createReviewStore()
+    first.setResult(e4e5Result())
+    expect(second.getState().result).toBeNull()
+    expect(first.getInitialState().result).toBeNull()
+  })
+
+  it('preserva a seleção ao reutilizar e classificar um filho existente', () => {
+    const store = createReviewStore()
+    store.setResult(e4e5Result())
+    store.first()
+    store.exploreLine(['d2d4', 'd7d5'])
+    expect(store.makeMove('d7', 'd5')).toBe(true)
+    const variation = store.getSnapshot().variation
+    if (!variation) throw new Error('Variação esperada após explorar linha')
+    expect(store.getSnapshot().variations[0]).toBe(variation)
+    store.setVariationClassification(variation.path[1], 'bom')
+    expect(store.getSnapshot().variation?.path).toEqual(variation.path)
+  })
+
   it('setResult posiciona no último lance e expõe o resultado no snapshot', () => {
     const store = createReviewStore()
     const result = e4e5Result()
