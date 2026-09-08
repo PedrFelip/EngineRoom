@@ -141,6 +141,34 @@ fn forward_line(app: &AppHandle, filter: &Arc<Mutex<UciOutputFilter>>, line: Str
     }
 }
 
+/// Consome as linhas UCI completas acumuladas em `stdout`.
+///
+/// Um evento do shell pode conter várias linhas. Guardamos o sufixo sem `\n`
+/// para o próximo evento e removemos todo o prefixo já consumido apenas uma
+/// vez; remover cada linha individualmente deslocaria o restante do buffer a
+/// cada `drain`.
+pub(super) fn consume_stdout_lines(stdout: &mut Vec<u8>, mut on_line: impl FnMut(String)) {
+    let mut start = 0;
+
+    for end in 0..stdout.len() {
+        if stdout[end] != b'\n' {
+            continue;
+        }
+
+        let line = String::from_utf8_lossy(&stdout[start..end])
+            .trim()
+            .to_string();
+        if !line.is_empty() {
+            on_line(line);
+        }
+        start = end + 1;
+    }
+
+    if start > 0 {
+        stdout.drain(..start);
+    }
+}
+
 fn spawn_engine(app: &AppHandle) -> Result<EngineHandle, String> {
     let command = app
         .shell()
@@ -163,13 +191,9 @@ fn spawn_engine(app: &AppHandle) -> Result<EngineHandle, String> {
             match event {
                 CommandEvent::Stdout(bytes) => {
                     stdout.extend_from_slice(&bytes);
-                    while let Some(end) = stdout.iter().position(|byte| *byte == b'\n') {
-                        let raw = stdout.drain(..=end).collect::<Vec<_>>();
-                        let line = String::from_utf8_lossy(&raw).trim().to_string();
-                        if !line.is_empty() {
-                            forward_line(&app_reader, &reader_filter, line);
-                        }
-                    }
+                    consume_stdout_lines(&mut stdout, |line| {
+                        forward_line(&app_reader, &reader_filter, line);
+                    });
                 }
                 CommandEvent::Terminated(p) => {
                     if !reported_exit {
@@ -266,12 +290,35 @@ pub fn engine_spawn(app: AppHandle, state: tauri::State<'_, EngineState>) -> Res
 pub fn engine_send(state: tauri::State<'_, EngineState>, line: String) -> Result<(), String> {
     let guard = state.inner.lock().map_err(|e| e.to_string())?;
     match guard.as_ref() {
-        Some(handle) => handle
-            .tx
-            .send(line)
-            .map_err(|_| "Não foi possível enviar comando à engine.".into()),
+        Some(handle) => enqueue_uci_lines(&handle.tx, [line]),
         None => Err("A engine não está em execução.".into()),
     }
+}
+
+#[tauri::command]
+pub fn engine_send_batch(
+    state: tauri::State<'_, EngineState>,
+    lines: Vec<String>,
+) -> Result<(), String> {
+    if lines.is_empty() {
+        return Err("O batch UCI não pode estar vazio.".into());
+    }
+    let guard = state.inner.lock().map_err(|e| e.to_string())?;
+    match guard.as_ref() {
+        Some(handle) => enqueue_uci_lines(&handle.tx, lines),
+        None => Err("A engine não está em execução.".into()),
+    }
+}
+
+fn enqueue_uci_lines(
+    tx: &mpsc::UnboundedSender<String>,
+    lines: impl IntoIterator<Item = String>,
+) -> Result<(), String> {
+    for line in lines {
+        tx.send(line)
+            .map_err(|_| "Não foi possível enviar comando à engine.".to_string())?;
+    }
+    Ok(())
 }
 
 #[tauri::command]

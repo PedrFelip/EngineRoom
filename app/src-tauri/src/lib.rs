@@ -31,6 +31,7 @@ pub fn run() {
             db::stats::storage_stats,
             engine::engine_spawn,
             engine::engine_send,
+            engine::engine_send_batch,
             engine::engine_stop,
             system::system_resources,
         ])

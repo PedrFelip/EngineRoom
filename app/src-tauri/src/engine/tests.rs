@@ -1,4 +1,28 @@
-use super::UciOutputFilter;
+use super::{consume_stdout_lines, enqueue_uci_lines, UciOutputFilter};
+
+#[test]
+fn consumes_all_complete_stdout_lines_and_preserves_partial_suffix() {
+    let mut stdout = b"info depth 1\r\nbestmove e2e4\npartial".to_vec();
+    let mut lines = Vec::new();
+
+    consume_stdout_lines(&mut stdout, |line| lines.push(line));
+
+    assert_eq!(lines, ["info depth 1", "bestmove e2e4"]);
+    assert_eq!(stdout, b"partial");
+}
+
+#[test]
+fn consumes_stdout_lines_across_chunk_boundaries() {
+    let mut stdout = b"info depth 1".to_vec();
+    let mut lines = Vec::new();
+
+    consume_stdout_lines(&mut stdout, |line| lines.push(line));
+    stdout.extend_from_slice(b" score cp 20\nbestmove e2e4\n");
+    consume_stdout_lines(&mut stdout, |line| lines.push(line));
+
+    assert_eq!(lines, ["info depth 1 score cp 20", "bestmove e2e4"]);
+    assert!(stdout.is_empty());
+}
 
 #[test]
 fn forwards_protocol_responses_outside_searches() {
@@ -83,6 +107,17 @@ fn bounds_events_for_a_reproducible_verbose_trace() {
 
     let output = filter.on_line("bestmove e2e4".into());
     assert_eq!(output.len(), 4, "300 infos + bestmove viram 4 eventos");
+}
+
+#[test]
+fn production_batch_preserves_uci_command_order() {
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let lines = vec!["position fen first".to_string(), "go depth 20".to_string()];
+
+    enqueue_uci_lines(&tx, lines.clone()).unwrap();
+
+    assert_eq!(rx.try_recv().unwrap(), lines[0]);
+    assert_eq!(rx.try_recv().unwrap(), lines[1]);
 }
 
 #[tokio::test]
