@@ -33,6 +33,40 @@ function position(
   }
 }
 describe('regressões de avaliação e variações', () => {
+  it('não interrompe a busca enquanto a engine ainda está preparando a avaliação', async () => {
+    vi.useFakeTimers()
+    const port = fakeEnginePort()
+    const send = port.send.bind(port)
+    let stopped = false
+    let searches = 0
+    port.send = (command) => {
+      if (command.startsWith('go ')) {
+        searches++
+        stopped = false
+        setTimeout(() => {
+          if (!stopped) port.emit('info depth 8 score cp 42 pv e2e4')
+          port.emit('bestmove e2e4')
+        }, 2500)
+      } else if (command === 'stop') {
+        stopped = true
+      } else send(command)
+    }
+    const { session, store } = startSession({
+      config: depthConfig({ initialResult: existingResult() }),
+      backend: fakeBackend(port),
+    })
+    await session.start()
+    const fen = existingResult().positions[0].fen
+    try {
+      session.analyzePosition({ fen }, settings)
+      await vi.advanceTimersByTimeAsync(5000)
+      expect(store.getState().liveAnalysis.positions[fen]?.cp).toBe(42)
+      expect(searches).toBe(1)
+    } finally {
+      session.dispose()
+    }
+  })
+
   it('recupera a avaliação na base sem emprestar a nota a outra posição', () => {
     const store = createReviewStore()
     const result = existingResult()

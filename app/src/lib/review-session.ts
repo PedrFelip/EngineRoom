@@ -304,7 +304,6 @@ export function createReviewSession(opts: ReviewSessionOpts): ReviewSession {
                 fen,
                 { mode: 'time', movetimeMs: plan.movetimeMs },
                 plan.movetimeMs + 10_000,
-                plan.movetimeMs,
               )
               break
             } catch (error) {

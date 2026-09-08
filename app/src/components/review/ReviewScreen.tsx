@@ -139,7 +139,10 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
   const variationMove = useStore(review.store, selectVariationMove)
   const displayedFen = useStore(review.store, selectDisplayedFen)
   const displayedPosition = useStore(review.store, selectDisplayedPosition)
-  const stm = displayedFen?.split(' ')[1] === 'b' ? 'b' : 'w'
+  const evalBarPositionRef = useRef(displayedPosition)
+  if (displayedPosition) evalBarPositionRef.current = displayedPosition
+  const evalBarPosition = displayedPosition ?? evalBarPositionRef.current
+  const evalBarStm = evalBarPosition?.fen.split(' ')[1] === 'b' ? 'b' : 'w'
   const currentMove =
     currentPly > 0 ? (result?.moves[currentPly - 1] ?? null) : null
   const lastMoveUci = currentMove?.uci ?? null
@@ -158,8 +161,8 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
     [result],
   )
   const evalBarLabel =
-    displayedPosition && result
-      ? evalLabel(displayedPosition.cp, displayedPosition.fen, stm)
+    evalBarPosition && result
+      ? evalLabel(evalBarPosition.cp, evalBarPosition.fen, evalBarStm)
       : undefined
 
   const [selectedMultipv, setSelectedMultipv] = useState(1)
@@ -303,7 +306,7 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
             />
             <div className='flex items-stretch gap-2'>
               <EvalBar
-                winPct={displayedPosition?.winPct ?? 50}
+                winPct={evalBarPosition?.winPct ?? 50}
                 orientation={orientation}
                 label={evalBarLabel}
               />

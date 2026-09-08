@@ -4,7 +4,27 @@ import { evalPosition } from '../engine-analysis'
 
 afterEach(() => vi.useRealTimers())
 
-describe('evalPosition — limite rígido da busca ao vivo', () => {
+describe('evalPosition — conclusão e cancelamento da busca ao vivo', () => {
+  it('interrompe a engine se o timeout de segurança expirar', async () => {
+    vi.useFakeTimers()
+    const send = vi.fn()
+    const off = vi.fn()
+    const port: EnginePort = { send, onLine: () => off }
+    const result = evalPosition(
+      port,
+      'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
+      { mode: 'time', movetimeMs: 100 },
+      1000,
+    )
+    const rejected = expect(result).rejects.toThrow('não respondeu')
+    await vi.advanceTimersByTimeAsync(100)
+    expect(send).not.toHaveBeenCalledWith('stop')
+    await vi.advanceTimersByTimeAsync(900)
+    await rejected
+    expect(send).toHaveBeenCalledWith('stop')
+    expect(off).toHaveBeenCalledOnce()
+  })
+
   it('não transforma uma busca sem score em avaliação zero', async () => {
     let onLine: (line: string) => void = () => {}
     const port: EnginePort = {
@@ -30,7 +50,7 @@ describe('evalPosition — limite rígido da busca ao vivo', () => {
   })
 
   it.each([0, 24])(
-    'envia stop ao atingir o teto e conserva o score %i recebido',
+    'conserva o score %i recebido ao cancelar uma busca com stop',
     async (cp) => {
       vi.useFakeTimers()
       const sent: string[] = []
@@ -56,9 +76,10 @@ describe('evalPosition — limite rígido da busca ao vivo', () => {
         'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
         { mode: 'time', movetimeMs: 100 },
         10_000,
-        100,
       )
       await vi.advanceTimersByTimeAsync(100)
+      expect(sent).not.toContain('stop')
+      await port.send('stop')
       const result = await resultPromise
 
       expect(sent).toContain('go movetime 100')
