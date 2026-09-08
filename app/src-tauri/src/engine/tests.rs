@@ -1,4 +1,7 @@
-use super::{consume_stdout_lines, enqueue_uci_lines, UciOutputFilter};
+use super::{
+    consume_stdout_lines, enqueue_benchmark_lines, enqueue_uci_lines, BenchmarkUciState,
+    UciOutputFilter,
+};
 
 #[test]
 fn consumes_all_complete_stdout_lines_and_preserves_partial_suffix() {
@@ -107,6 +110,23 @@ fn bounds_events_for_a_reproducible_verbose_trace() {
 
     let output = filter.on_line("bestmove e2e4".into());
     assert_eq!(output.len(), 4, "300 infos + bestmove viram 4 eventos");
+}
+
+#[test]
+fn benchmark_batch_preserves_uci_command_order() {
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let state = BenchmarkUciState { tx };
+    let lines = vec![
+        "position fen first".to_string(),
+        "go depth 20".to_string(),
+        "position fen second".to_string(),
+    ];
+
+    enqueue_benchmark_lines(&state, lines.clone()).unwrap();
+
+    assert_eq!(rx.try_recv().unwrap(), lines[0]);
+    assert_eq!(rx.try_recv().unwrap(), lines[1]);
+    assert_eq!(rx.try_recv().unwrap(), lines[2]);
 }
 
 #[test]

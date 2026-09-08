@@ -6,6 +6,7 @@ use engine::EngineState;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let benchmark_mode = std::env::args().any(|arg| arg == "--bench-uci-ipc");
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .setup(|app| {
@@ -17,6 +18,8 @@ pub fn run() {
             Ok(())
         })
         .manage(EngineState::default())
+        .manage(engine::BenchmarkUciState::default())
+        .manage(engine::BenchmarkMode(benchmark_mode))
         .invoke_handler(tauri::generate_handler![
             db::cache::cache_get,
             db::cache::cache_put,
@@ -33,6 +36,10 @@ pub fn run() {
             engine::engine_send,
             engine::engine_send_batch,
             engine::engine_stop,
+            engine::benchmark_uci_enabled,
+            engine::benchmark_uci_send,
+            engine::benchmark_uci_send_batch,
+            engine::benchmark_uci_report,
             system::system_resources,
         ])
         .run(tauri::generate_context!())

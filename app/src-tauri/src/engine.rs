@@ -37,6 +37,28 @@ pub struct EngineState {
     inner: Mutex<Option<EngineHandle>>,
 }
 
+/// Transporte sem sidecar usado exclusivamente pelo benchmark de IPC. Mantém
+/// o mesmo enfileiramento e filtro de comandos do writer real, sem deixar uma
+/// busca do Stockfish contaminar a medição.
+pub struct BenchmarkUciState {
+    tx: mpsc::UnboundedSender<String>,
+}
+
+impl Default for BenchmarkUciState {
+    fn default() -> Self {
+        let (tx, mut incoming) = mpsc::unbounded_channel::<String>();
+        tauri::async_runtime::spawn(async move {
+            let mut filter = UciOutputFilter::default();
+            while let Some(message) = incoming.recv().await {
+                filter.on_command(&message);
+            }
+        });
+        Self { tx }
+    }
+}
+
+pub struct BenchmarkMode(pub bool);
+
 struct EngineHandle {
     /// Channel used to send UCI commands to the engine's stdin.
     tx: mpsc::UnboundedSender<String>,
@@ -318,6 +340,67 @@ fn enqueue_uci_lines(
         tx.send(line)
             .map_err(|_| "Não foi possível enviar comando à engine.".to_string())?;
     }
+    Ok(())
+}
+
+fn ensure_benchmark_mode(mode: &BenchmarkMode) -> Result<(), String> {
+    if mode.0 {
+        Ok(())
+    } else {
+        Err("Comando disponível somente no modo de benchmark.".into())
+    }
+}
+
+fn enqueue_benchmark_lines(
+    state: &BenchmarkUciState,
+    lines: impl IntoIterator<Item = String>,
+) -> Result<(), String> {
+    for line in lines {
+        state
+            .tx
+            .send(line)
+            .map_err(|_| "Não foi possível enviar comando ao benchmark UCI.".to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn benchmark_uci_enabled(mode: tauri::State<'_, BenchmarkMode>) -> bool {
+    mode.0
+}
+
+#[tauri::command]
+pub fn benchmark_uci_send(
+    mode: tauri::State<'_, BenchmarkMode>,
+    state: tauri::State<'_, BenchmarkUciState>,
+    line: String,
+) -> Result<(), String> {
+    ensure_benchmark_mode(&mode)?;
+    enqueue_benchmark_lines(&state, [line])
+}
+
+#[tauri::command]
+pub fn benchmark_uci_send_batch(
+    mode: tauri::State<'_, BenchmarkMode>,
+    state: tauri::State<'_, BenchmarkUciState>,
+    lines: Vec<String>,
+) -> Result<(), String> {
+    ensure_benchmark_mode(&mode)?;
+    if lines.is_empty() {
+        return Err("O batch UCI não pode estar vazio.".into());
+    }
+    enqueue_benchmark_lines(&state, lines)
+}
+
+#[tauri::command]
+pub fn benchmark_uci_report(
+    app: AppHandle,
+    mode: tauri::State<'_, BenchmarkMode>,
+    report: serde_json::Value,
+) -> Result<(), String> {
+    ensure_benchmark_mode(&mode)?;
+    println!("UCI_IPC_BENCHMARK_JSON={report}");
+    app.exit(0);
     Ok(())
 }
 

@@ -11,6 +11,8 @@
     "tauri": "tauri",
     "test": "vitest run",
     "test:watch": "vitest",
+    "bench:effect": "bun scripts/bench-effect.mjs",
+    "bench:uci-ipc": "tauri dev -- -- --bench-uci-ipc",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.tests.json",
     "lint": "biome check src",
     "format": "biome format --write src"
