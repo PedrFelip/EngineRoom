@@ -28,12 +28,12 @@ cargo test
 ```
 There is no CI and no pre-commit hook — verification is manual.
 
-Frontend tests run under Vitest (19 files, all pure logic — no component tests). To run one module's tests: `bun run test src/lib/<module>.test.ts`.
+Frontend tests run under Vitest 4 (pure logic and injected Effect I/O — no component tests). Effect's TestContext/TestClock work directly with the existing runner; do not install `@effect/vitest` 0.30 (it requires Vitest 3). To run one module: `bun run test src/lib/<module>.test.ts`.
 
 ## Gotchas
 
 - **`tauri dev` starts Vite itself** via `beforeDevCommand: "bun run dev"`, strict port 1420. Don't run a separate Vite dev server alongside it.
-- **Test files are excluded from `tsconfig.json`** (`exclude: ["src/**/*.test.ts", "src/**/*.test.tsx"]`). `bun run typecheck` does NOT typecheck tests — test-only type errors surface only under Vitest.
+- **Test files have a separate TS config.** `bun run typecheck` checks both the app and `tsconfig.tests.json`. Vitest transpiles tests without checking their types; keep both compiler passes.
 - **Vitest runs in the `node` environment, not jsdom.** Existing tests are pure logic over `chess.js`; don't reach for DOM APIs.
 - **The position cache key is `(fen, mode, depth, multipv)`**, not `(fen, depth, multipv)` as the root README says. `mode` is `"depth"` (`go depth N`) or `"time"` (`go movetime N`); the same numeric value means different things across modes — never collide them.
 - **The engine process is a singleton.** `EngineState(Mutex<Option<EngineHandle>>)` in `src-tauri/src/engine.rs`; a second `engine_spawn` errors with `"A engine já está em execução."`.
@@ -43,8 +43,10 @@ Frontend tests run under Vitest (19 files, all pure logic — no component tests
 
 ## Architectural invariants (don't break)
 
-- **`EnginePort` is the test seam.** `analyzeGame` in `src/lib/analyze.ts` takes `port: { send, onLine }`. The whole pipeline (win%, classification, accuracy, multipv, cache) is tested with a fake port — never with the real Stockfish. Extend analysis through this seam; don't hardcode the Tauri adapter (`createTauriEnginePort`).
-- **The review decomposes into store + session + glue.** State and transitions (cursor, variations, `makeMove`) live in `review-store.ts` (pure, no React); I/O orchestration (engine boot, sizing, analysis, persistence, live refinement) lives in `review-session.ts` behind the `Backend` seam (`backend.ts`: engine port factory, system resources, position cache, games store — two adapters: Tauri and test fakes). `use-review.ts` is view glue only (rAF progress coalescing, orientation, settings) — don't move I/O back into the hook; extend through store/session, tested with fakes.
+- **`EnginePort` is the test seam.** `send` and cache methods return Effects; `onLine`/`onExit` register local callbacks. `analyzeGame` returns Effect and accepts the injected port. Keep fake-engine tests; never hardcode Tauri. Old Promise-shaped regression fixtures are adapted only under `__tests__`.
+- **The review decomposes into store + session + glue.** State/transitions live in `review-store.ts`; scoped orchestration lives in `review-session.ts`. `backend.ts` declares Context services (Engine, PositionCache, GamesRepository, SystemResources), composed as production Layers in `tauri-backend.ts` or fake Layers in tests. `use-review.ts` and `effect/ui-runtime.ts` are UI/runtime glue: do not move I/O into React.
+- **Resource ownership is scoped.** Acquire the production port inside a Scope; never run its acquisition in an unmanaged `runPromise`. The shared permit covers startup through completed teardown, including Settings probes. A cancelled/failed live search discards the process before reuse to prevent stale `bestmove` responses.
+- **Use Effect at I/O boundaries, ordinary functions in the pure core.** Execute Effects only at the UI/test boundary. Expected errors are tagged; cancellation uses fiber interruption. Preserve critical cache errors, best-effort sizing/saves and legacy Schema normalization.
 - **Pure core vs. injected I/O.** `lib/uci.ts`, `lib/scoring.ts`, `lib/eco.ts`, and `buildReview` are side-effect-free. Engine, cache, and DB are always injected — keep them that way.
 - **PGN is the single source of truth** for game metadata (Elo, event, result). Don't duplicate into the DB or settings.
 
