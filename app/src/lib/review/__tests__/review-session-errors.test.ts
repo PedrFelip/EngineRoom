@@ -5,6 +5,7 @@ import {
   fakeEnginePort,
   startSession,
 } from './review-session-test-helpers'
+import type { EnginePortHandle } from './review-test-runtime'
 
 describe('createReviewSession — falhas', () => {
   /** Port que responde handshake mas morre (sync) no primeiro `go`. */

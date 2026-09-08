@@ -1,5 +1,7 @@
+import type { Effect } from 'effect'
 import type { Phase } from '../../types'
 import type { EcoEntry } from '../eco'
+import type { CacheError, EngineCommandError } from '../effect/errors'
 
 export interface BookInfo {
   maxPly: number
@@ -52,7 +54,11 @@ export interface EngineExitReason {
  * engine morrer, em vez de esperar o timeout completo.
  */
 export interface EnginePort {
-  send(cmd: string): void | Promise<void>
+  send(cmd: string): Effect.Effect<void, EngineCommandError>
+  /** Envia comandos UCI consecutivos em uma única ida-e-volta IPC. */
+  sendBatch?(
+    commands: readonly string[],
+  ): Effect.Effect<void, EngineCommandError>
   onLine(handler: (line: string) => void): () => void
   onExit?(handler: (reason: EngineExitReason) => void): () => void
 }
@@ -130,25 +136,25 @@ export interface PositionCache {
     mode: EngineMode,
     value: number,
     multipv: number,
-  ): Promise<RawPosition | null>
+  ): Effect.Effect<RawPosition | null, CacheError>
   put(
     pos: RawPosition,
     mode: EngineMode,
     value: number,
     multipv: number,
-  ): Promise<void>
+  ): Effect.Effect<void, CacheError>
   /** Prefetch dos hits para N fens, numa única chamada. Ordem preservada. */
   getBulk(
     fens: string[],
     mode: EngineMode,
     value: number,
     multipv: number,
-  ): Promise<(RawPosition | null)[]>
+  ): Effect.Effect<(RawPosition | null)[], CacheError>
   /** Grava N posições numa única chamada (transação). */
   putMany(
     entries: RawPosition[],
     mode: EngineMode,
     value: number,
     multipv: number,
-  ): Promise<void>
+  ): Effect.Effect<void, CacheError>
 }

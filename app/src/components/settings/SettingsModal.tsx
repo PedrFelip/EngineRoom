@@ -1,5 +1,6 @@
 import { Check, CircleAlert, Cpu, Database, X } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { runUi } from '../../lib/effect/ui-runtime'
 import { type ProbeResult, probeEngine } from '../../lib/engine'
 import { clearGames } from '../../lib/games'
 import {
@@ -31,35 +32,51 @@ export default function SettingsModal({
   const [confirmTarget, setConfirmTarget] = useState<ConfirmTarget | null>(null)
   const [acting, setActing] = useState(false)
   const [storageError, setStorageError] = useState<string | null>(null)
+  const probeController = useRef<AbortController | null>(null)
 
   useEffect(() => {
     if (!isOpen) return
-    let cancelled = false
+    const controller = new AbortController()
     setStorageError(null)
-    getStorageStats()
-      .then((s) => !cancelled && setStats(s))
+    runUi(getStorageStats(), controller.signal)
+      .then((s) => !controller.signal.aborted && setStats(s))
       .catch((e) => {
+        if (controller.signal.aborted) return
         console.warn('Falha ao ler armazenamento:', e)
-        if (!cancelled) setStorageError('Não foi possível ler o tamanho.')
+        setStorageError('Não foi possível ler o tamanho.')
       })
     return () => {
-      cancelled = true
+      controller.abort()
+      probeController.current?.abort()
     }
   }, [isOpen])
 
   if (!isOpen) return null
 
   async function test() {
+    const controller = new AbortController()
+    probeController.current?.abort()
+    probeController.current = controller
     setTesting(true)
     setResult(null)
-    const res = await probeEngine()
-    setResult(res)
-    setTesting(false)
+    try {
+      const res = await runUi(probeEngine(), controller.signal)
+      if (!controller.signal.aborted) setResult(res)
+    } catch (error) {
+      if (!controller.signal.aborted) {
+        setResult({ ok: false, name: null, error: String(error) })
+      }
+    } finally {
+      if (probeController.current === controller) {
+        probeController.current = null
+        setTesting(false)
+      }
+    }
   }
 
   async function refreshStats() {
     try {
-      setStats(await getStorageStats())
+      setStats(await runUi(getStorageStats()))
     } catch (e) {
       console.warn('Falha ao reler armazenamento:', e)
     }
@@ -68,7 +85,7 @@ export default function SettingsModal({
   async function runClearCache() {
     setActing(true)
     try {
-      await clearCache()
+      await runUi(clearCache())
       await refreshStats()
       setStorageError(null)
     } catch (e) {
@@ -83,7 +100,7 @@ export default function SettingsModal({
   async function runClearGames() {
     setActing(true)
     try {
-      await clearGames()
+      await runUi(clearGames())
       await refreshStats()
       onGamesCleared?.()
       setStorageError(null)

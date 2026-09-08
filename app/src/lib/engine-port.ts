@@ -1,73 +1,96 @@
+import { listen } from '@tauri-apps/api/event'
+import { Effect, Either, Schema } from 'effect'
 import type { EngineExitReason, EnginePort } from './analyze'
+import { bestEffort } from './effect/diagnostics'
 import {
-  engineSend,
-  engineStart,
-  engineStop,
-  onEngineExit,
-  onEngineLine,
-} from './engine'
+  EngineCommandError,
+  EngineSpawnError,
+  errorMessage,
+} from './effect/errors'
+import { ipc } from './effect/ipc'
+import { EngineExitSchema } from './effect/schemas'
 
-export interface TauriEnginePort extends EnginePort {
-  dispose: () => Promise<void>
+export const ENGINE_LINE_EVENT = 'engine://line'
+export const ENGINE_EXIT_EVENT = 'engine://exit'
+
+// Shared by every production Layer, including Settings. An owner must finish
+// cleanup before another can spawn; never stop a process owned by someone else.
+const enginePermit = Effect.unsafeMakeSemaphore(1)
+
+export function engineCommand(command: string, args?: Record<string, unknown>) {
+  return ipc(
+    command,
+    args,
+    (cause) =>
+      new EngineCommandError({
+        command,
+        cause,
+        message: errorMessage(cause),
+      }),
+  ).pipe(Effect.asVoid)
 }
 
-/**
- * Cria um EnginePort sobre o processo Stockfish do Tauri.
- *
- * `isCancelled` é consultado entre cada etapa (stop → start → listen) para que
- * um efeito abortado (ex.: StrictMode em dev, que monta→desmonta→monta) saia
- * antes de spawnar a engine — evitando "engine já está em execução".
- * O listener de linhas é registrado antes de qualquer send para nunca perder
- * respostas (mesmo uciok/readyok). O listener de exit permite que um `ask()`
- * pendente rejeite na hora se a engine morrer, em vez de esperar o timeout.
- * Devolve null se abortado.
- */
-export async function createTauriEnginePort(
-  isCancelled: () => boolean,
-): Promise<TauriEnginePort | null> {
-  await engineStop().catch(() => {})
-  if (isCancelled()) return null
-  await engineStart()
-  if (isCancelled()) {
-    await engineStop().catch(() => {})
-    return null
+/** invoke/listen cannot abort: finish each acquisition and register its release
+ * before honoring interruption. Each partial acquisition has its own finalizer. */
+export const createTauriEnginePort = Effect.gen(function* () {
+  yield* Effect.acquireRelease(Effect.interruptible(enginePermit.take(1)), () =>
+    enginePermit.release(1),
+  )
+  const lines = new Set<(line: string) => void>()
+  const exits = new Set<(reason: EngineExitReason) => void>()
+  let lastExit: EngineExitReason | undefined
+  const reportExit = (reason: EngineExitReason) => {
+    lastExit = reason
+    for (const handler of exits) handler(reason)
   }
-  const handlers = new Set<(line: string) => void>()
-  const unlisten = await onEngineLine((line) => {
-    handlers.forEach((h) => {
-      h(line)
-    })
+  const subscribe = (event: string, handler: (payload: unknown) => void) =>
+    Effect.acquireRelease(
+      Effect.tryPromise({
+        try: () => listen<unknown>(event, (e) => handler(e.payload)),
+        catch: (cause) =>
+          new EngineSpawnError({ cause, message: errorMessage(cause) }),
+      }),
+      (off) => Effect.sync(off),
+    )
+  yield* subscribe(ENGINE_LINE_EVENT, (payload) => {
+    if (typeof payload === 'string')
+      for (const handler of lines) handler(payload)
+    else reportExit({ code: null, signal: null, error: 'Linha UCI inválida.' })
   })
-  const exitHandlers = new Set<(r: EngineExitReason) => void>()
-  const unlistenExit = await onEngineExit((payload) => {
-    exitHandlers.forEach((h) => {
-      h(payload)
-    })
+  yield* subscribe(ENGINE_EXIT_EVENT, (payload) => {
+    const decoded = Schema.decodeUnknownEither(EngineExitSchema)(payload)
+    const reason = Either.isRight(decoded)
+      ? decoded.right
+      : {
+          code: null,
+          signal: null,
+          error: 'Evento de saída inválido.',
+        }
+    reportExit(reason)
   })
-  if (isCancelled()) {
-    unlisten()
-    unlistenExit()
-    await engineStop().catch(() => {})
-    return null
-  }
+  yield* Effect.acquireRelease(
+    ipc(
+      'engine_spawn',
+      undefined,
+      (cause) => new EngineSpawnError({ cause, message: errorMessage(cause) }),
+    ),
+    () => bestEffort(engineCommand('engine_stop'), 'engine.stop'),
+  )
   return {
-    send: (cmd: string) => engineSend(cmd),
-    onLine(handler: (line: string) => void) {
-      handlers.add(handler)
+    send: (line) => engineCommand('engine_send', { line }),
+    sendBatch: (lines) => engineCommand('engine_send_batch', { lines }),
+    onLine(handler) {
+      lines.add(handler)
       return () => {
-        handlers.delete(handler)
+        lines.delete(handler)
       }
     },
-    onExit(handler: (r: EngineExitReason) => void) {
-      exitHandlers.add(handler)
+    onExit(handler) {
+      exits.add(handler)
+      if (lastExit) handler(lastExit)
       return () => {
-        exitHandlers.delete(handler)
+        exits.delete(handler)
       }
     },
-    async dispose() {
-      unlisten()
-      unlistenExit()
-      await engineStop().catch(() => {})
-    },
-  }
-}
+  } satisfies EnginePort
+})

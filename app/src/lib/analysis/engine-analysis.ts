@@ -1,4 +1,14 @@
 import { Chess } from 'chess.js'
+import { Deferred, Effect, Exit, Metric } from 'effect'
+import { bestEffort, metrics } from '../effect/diagnostics'
+import {
+  type EngineError,
+  EngineExitedError,
+  EngineTimeoutError,
+  InvalidPayloadError,
+  MissingEvaluationError,
+} from '../effect/errors'
+
 import type { InfoScore } from '../uci'
 import { isReadyOk, isUciOk, parseInfo, scoreToCp } from '../uci'
 import type {
@@ -9,6 +19,8 @@ import type {
   RawLine,
   RawPosition,
 } from './analysis-types'
+
+export { MissingEvaluationError } from '../effect/errors'
 
 interface ExtractedGame {
   positionFens: string[]
@@ -38,7 +50,7 @@ export function extractGame(pgn: string): ExtractedGame {
 }
 
 /** Faz o handshake UCI e configura Threads, Hash e MultiPV. */
-export async function configureEngine(
+export function configureEngine(
   port: EnginePort,
   opts: {
     threads?: number
@@ -46,76 +58,103 @@ export async function configureEngine(
     multipv: number
     timeoutMs?: number
   },
-): Promise<void> {
-  const timeoutMs = opts.timeoutMs ?? 10_000
-  await ask(port, 'uci', isUciOk, timeoutMs)
-  await ask(port, 'isready', isReadyOk, timeoutMs)
-  if (opts.threads && opts.threads > 1) {
-    await port.send(`setoption name Threads value ${opts.threads}`)
-  }
-  if (opts.hashMb && opts.hashMb > 0) {
-    await port.send(`setoption name Hash value ${opts.hashMb}`)
-  }
-  await port.send(`setoption name Multipv value ${Math.max(1, opts.multipv)}`)
-  await ask(port, 'isready', isReadyOk, timeoutMs)
+): Effect.Effect<void, EngineError> {
+  return Effect.gen(function* () {
+    const timeoutMs = opts.timeoutMs ?? 10_000
+    yield* ask(port, 'uci', isUciOk, timeoutMs)
+    yield* ask(port, 'isready', isReadyOk, timeoutMs)
+    if (opts.threads && opts.threads > 1) {
+      yield* port.send(`setoption name Threads value ${opts.threads}`)
+    }
+    if (opts.hashMb && opts.hashMb > 0) {
+      yield* port.send(`setoption name Hash value ${opts.hashMb}`)
+    }
+    yield* port.send(
+      `setoption name Multipv value ${Math.max(1, opts.multipv)}`,
+    )
+    yield* ask(port, 'isready', isReadyOk, timeoutMs)
+  })
 }
 
-export class MissingEvaluationError extends Error {
-  constructor() {
-    super('A engine encerrou a busca sem avaliação da posição.')
-    this.name = 'MissingEvaluationError'
-  }
-}
-
-/** Aguarda uma resposta UCI, falhando por timeout ou término da engine. */
+/** One scoped subscription per request. Parse callbacks synchronously so a
+ * burst of UCI info does not allocate a stream chunk/fiber for every line. */
 export function ask(
   port: EnginePort,
   cmd: string,
   done: (line: string) => boolean,
   timeoutMs = 10_000,
-): Promise<void> {
-  return new Promise((resolve, reject) => {
-    let off: () => void = () => {}
-    let offExit: () => void = () => {}
-    let timer: ReturnType<typeof setTimeout>
-    const cleanup = () => {
-      off()
-      offExit()
-      clearTimeout(timer)
-    }
-    off = port.onLine((line) => {
-      if (done(line)) {
-        cleanup()
-        resolve()
+  dispatch?: Effect.Effect<void, EngineError>,
+): Effect.Effect<void, EngineError> {
+  return Effect.scoped(
+    Effect.gen(function* () {
+      const response = yield* Deferred.make<void, EngineError>()
+      let finished = false
+      const finish = (result: Effect.Effect<void, EngineError>) => {
+        if (finished) return
+        finished = true
+        Deferred.unsafeDone(response, result)
       }
-    })
-    offExit =
-      port.onExit?.((reason) => {
-        cleanup()
-        reject(new Error(formatEngineExit(cmd, reason)))
-      }) ?? (() => {})
-    timer = setTimeout(() => {
-      cleanup()
-      reject(new Error(`A engine não respondeu a '${cmd}' em ${timeoutMs}ms.`))
-    }, timeoutMs)
-    void Promise.resolve()
-      .then(() => port.send(cmd))
-      .catch((error) => {
-        cleanup()
-        reject(error)
-      })
-  })
+      yield* Effect.acquireRelease(
+        Effect.sync(() =>
+          port.onLine((line) => {
+            if (finished) return
+            try {
+              if (done(line)) finish(Effect.void)
+            } catch (defect) {
+              finish(Effect.die(defect))
+            }
+          }),
+        ),
+        (off) =>
+          Effect.sync(() => {
+            finished = true
+            off()
+          }),
+      )
+      if (port.onExit) {
+        yield* Effect.acquireRelease(
+          Effect.sync(
+            () =>
+              port.onExit?.((reason) => {
+                finish(
+                  Effect.fail(
+                    new EngineExitedError({
+                      message: formatEngineExit(cmd, reason),
+                      code: reason.code,
+                      signal: reason.signal,
+                    }),
+                  ),
+                )
+              }) ?? (() => {}),
+          ),
+          (off) => Effect.sync(off),
+        )
+      }
+      if (!finished) yield* dispatch ?? port.send(cmd)
+      yield* Deferred.await(response)
+    }),
+  ).pipe(
+    Effect.timeoutFail({
+      duration: timeoutMs,
+      onTimeout: () =>
+        new EngineTimeoutError({
+          message: `A engine não respondeu a '${cmd}' em ${timeoutMs}ms.`,
+          command: cmd,
+          timeoutMs,
+        }),
+    }),
+    Effect.tapErrorTag('EngineTimeoutError', () =>
+      Metric.increment(metrics.timeouts),
+    ),
+  )
 }
 
 /** Formata a mensagem de erro quando a engine encerra durante um comando. */
 function formatEngineExit(cmd: string, reason: EngineExitReason): string {
-  const detail = reason.error
-    ? `: ${reason.error}`
-    : reason.signal !== null
-      ? ` (sinal ${reason.signal})`
-      : reason.code !== null
-        ? ` (código ${reason.code})`
-        : ''
+  let detail = ''
+  if (reason.error) detail = `: ${reason.error}`
+  else if (reason.signal !== null) detail = ` (sinal ${reason.signal})`
+  else if (reason.code !== null) detail = ` (código ${reason.code})`
   return `A engine encerrou durante '${cmd}'${detail}.`
 }
 
@@ -133,23 +172,27 @@ export function uciToSan(fen: string, uci: string): string | null {
   }
 }
 
-export async function evalPosition(
+export function evalPosition(
   port: EnginePort,
   fen: string,
   control: AnalyzeControl,
   goTimeoutMs: number,
-): Promise<RawPosition> {
-  const byPv = new Map<
-    number,
-    { depth: number; score?: InfoScore; pv: string[] }
-  >()
-  await port.send(`position fen ${fen}`)
-  const goCmd =
-    control.mode === 'depth'
-      ? `go depth ${control.depth}`
-      : `go movetime ${control.movetimeMs}`
-  try {
-    await ask(
+): Effect.Effect<RawPosition, EngineError> {
+  return Effect.gen(function* () {
+    const byPv = new Map<
+      number,
+      { depth: number; score?: InfoScore; pv: string[] }
+    >()
+    const goCmd =
+      control.mode === 'depth'
+        ? `go depth ${control.depth}`
+        : `go movetime ${control.movetimeMs}`
+    const positionCmd = `position fen ${fen}`
+    const dispatch = port.sendBatch
+      ? port.sendBatch([positionCmd, goCmd])
+      : undefined
+    if (!dispatch) yield* port.send(positionCmd)
+    yield* ask(
       port,
       goCmd,
       (line) => {
@@ -168,31 +211,37 @@ export async function evalPosition(
         return line.trim().startsWith('bestmove')
       },
       goTimeoutMs,
+      dispatch,
+    ).pipe(
+      Effect.onExit((exit) =>
+        Exit.isFailure(exit)
+          ? bestEffort(port.send('stop'), 'engine.stop_search')
+          : Effect.void,
+      ),
     )
-  } catch (err) {
-    // Aborta a busca órfã para que a engine volte a ficar reutilizável.
-    await port.send('stop')
-    throw err
-  }
-  const lines: RawLine[] = [...byPv.entries()]
-    .sort((a, b) => a[0] - b[0])
-    .map(([multipv, l]) => ({
-      multipv,
-      cp: scoreToCp(l.score) ?? 0,
-      pv: l.pv,
-      depth: l.depth,
-    }))
-  const principal = lines.find((l) => l.multipv === 1) ?? lines[0]
-  if (!principal) {
-    throw new MissingEvaluationError()
-  }
-  return {
-    fen,
-    cp: principal.cp,
-    depth: byPv.get(1)?.depth ?? 0,
-    pv: principal.pv,
-    lines,
-  }
+    const lines: RawLine[] = [...byPv.entries()]
+      .sort((a, b) => a[0] - b[0])
+      .map(([multipv, l]) => ({
+        multipv,
+        cp: scoreToCp(l.score) ?? 0,
+        pv: l.pv,
+        depth: l.depth,
+      }))
+    const principal = lines.find((l) => l.multipv === 1) ?? lines[0]
+    if (!principal) {
+      return yield* new MissingEvaluationError()
+    }
+    return {
+      fen,
+      cp: principal.cp,
+      depth: byPv.get(1)?.depth ?? 0,
+      pv: principal.pv,
+      lines,
+    }
+  }).pipe(
+    Effect.tap(() => Metric.increment(metrics.positions)),
+    Metric.trackDuration(metrics.duration),
+  )
 }
 
 export function addSanToLines(pos: RawPosition): void {
@@ -225,4 +274,16 @@ export function terminalCp(fen: string): number | null {
 /** Calcula uma vez os terminais usados pelos loops e pelos orçamentos. */
 export function terminalCps(fens: string[]): (number | null)[] {
   return fens.map(terminalCp)
+}
+
+export function extractGameEffect(pgn: string) {
+  return Effect.try({
+    try: () => extractGame(pgn),
+    catch: (cause) =>
+      new InvalidPayloadError({
+        source: 'PGN',
+        cause,
+        message: 'PGN inválido para análise.',
+      }),
+  })
 }

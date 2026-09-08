@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   depthConfig,
   fakeBackend,
@@ -29,9 +29,9 @@ describe('createReviewSession — descarte e cancelamento', () => {
     const port = fakeEnginePort()
     const backend = fakeBackend(port)
     // Factory fiel ao contrato: devolve null se cancelado durante o boot.
-    backend.createEnginePort = async (_path, isCancelled) => {
+    backend.createEnginePort = async () => {
       await tick()
-      return isCancelled() ? null : port
+      return null
     }
     const { session, store, states } = startSession({
       config: depthConfig(),
@@ -51,14 +51,21 @@ describe('createReviewSession — descarte e cancelamento', () => {
     const port = fakeEnginePort()
     const backend = fakeBackend(port)
     // Factory que ignora isCancelled: devolve a porta mesmo cancelada.
-    backend.createEnginePort = async () => {
-      await tick()
+    let release = () => {}
+    const acquiring = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    backend.createEnginePort = vi.fn(async () => {
+      await acquiring
       return port
-    }
+    })
     const { session } = startSession({ config: depthConfig(), backend })
     const startPromise = session.start()
 
-    session.dispose()
+    await vi.waitFor(() => expect(backend.createEnginePort).toHaveBeenCalled())
+    const disposed = session.dispose()
+    release()
+    await disposed
     await startPromise
     await tick()
 

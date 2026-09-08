@@ -8,19 +8,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useStore } from 'zustand'
 import type { ReviewConfig, ReviewResult } from '../types'
-import { createTauriBackend } from './backend'
+import {
+  type MountedReviewSession,
+  mountReviewSession,
+} from './effect/ui-runtime'
 import {
   selectDisplayedFen,
   selectSourceFen,
   selectSourcePosition,
   selectVariationMove,
 } from './review-selectors'
-import {
-  createReviewSession,
-  type ReviewProgress,
-  type ReviewSession,
-  type ReviewSessionState,
-} from './review-session'
+import type { ReviewProgress, ReviewSessionState } from './review-session'
 import {
   createReviewStore,
   type ReviewStore,
@@ -28,6 +26,7 @@ import {
 } from './review-store'
 import { useSettings } from './settings-context'
 import { selectReviewEngineSettings } from './settings-store'
+import { TauriBackend } from './tauri-backend'
 
 export interface UseReview {
   result: ReviewResult | null
@@ -78,31 +77,33 @@ export function useReview(config: ReviewConfig): UseReview {
   const [orientation, setOrientation] = useState<'white' | 'black'>('white')
   const [playbackFastPass, setPlaybackFastPass] = useState(false)
 
-  const sessionRef = useRef<ReviewSession | null>(null)
+  const sessionRef = useRef<MountedReviewSession | null>(null)
   // A sessão atualiza seu buffer por posição; aqui o copiamos apenas uma vez por
   // frame, preservando o snapshot imutável que entra no estado do React.
   const pendingProgressRef = useRef<ReviewProgress>(progress)
   const rafRef = useRef<number | null>(null)
 
   useEffect(() => {
-    const session = createReviewSession({
-      config,
-      backend: createTauriBackend(),
-      store,
-      onStateChange: (s) => {
-        setSessionState(s)
+    const session = mountReviewSession(
+      {
+        config,
+        store,
+        onStateChange: (s) => {
+          setSessionState(s)
+        },
+        onProgress: (nextProgress) => {
+          pendingProgressRef.current = nextProgress
+          if (rafRef.current == null) {
+            rafRef.current = requestAnimationFrame(() => {
+              rafRef.current = null
+              const pending = pendingProgressRef.current
+              setProgress({ ...pending, winPcts: pending.winPcts.slice() })
+            })
+          }
+        },
       },
-      onProgress: (nextProgress) => {
-        pendingProgressRef.current = nextProgress
-        if (rafRef.current == null) {
-          rafRef.current = requestAnimationFrame(() => {
-            rafRef.current = null
-            const pending = pendingProgressRef.current
-            setProgress({ ...pending, winPcts: pending.winPcts.slice() })
-          })
-        }
-      },
-    })
+      TauriBackend,
+    )
     sessionRef.current = session
     void session.start()
     return () => {
@@ -111,7 +112,7 @@ export function useReview(config: ReviewConfig): UseReview {
         rafRef.current = null
       }
       sessionRef.current = null
-      session.dispose()
+      void session.dispose()
     }
   }, [config, store])
 

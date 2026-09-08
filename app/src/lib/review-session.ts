@@ -1,3 +1,15 @@
+import {
+  Cause,
+  Chunk,
+  Deferred,
+  Effect,
+  Exit,
+  Fiber,
+  Metric,
+  Option,
+  Queue,
+  Scope,
+} from 'effect'
 /**
  * Sessão de revisão: orquestração de I/O de uma partida — boot da engine
  * (com sizing best-effort), análise nova ou reabertura do store e persistência.
@@ -10,7 +22,6 @@ import type {
   Phase,
   PositionAnalysis,
   ReviewConfig,
-  ReviewResult,
 } from '../types'
 import { adaptiveProfileForKind } from './adaptive-analysis'
 import type { RawPosition } from './analysis/analysis-types'
@@ -22,6 +33,7 @@ import {
   MissingEvaluationError,
   terminalCp,
 } from './analysis/engine-analysis'
+import type { EnginePort } from './analyze'
 import {
   type AnalysisProgress,
   type AnalyzeControl,
@@ -29,7 +41,14 @@ import {
   analyzeGameAdaptive,
   type WinPctUpdate,
 } from './analyze'
-import type { Backend } from './backend'
+import {
+  Engine,
+  GamesRepository,
+  PositionCache,
+  SystemResources,
+} from './backend'
+import { metrics, warn } from './effect/diagnostics'
+import { type AnalysisError, errorMessage } from './effect/errors'
 import { phaseOfPosition } from './phase'
 import type { ReviewStore } from './review-store'
 import { classifyMove, cpToWinPct, whiteCp, whiteWinPct } from './scoring'
@@ -57,7 +76,6 @@ export interface ReviewProgress {
 
 export interface ReviewSessionOpts {
   config: ReviewConfig
-  backend: Backend
   store: ReviewStore
   onStateChange(state: ReviewSessionState): void
   /** Progresso rico da engine — cru, antes do coalescing por rAF da view. */
@@ -65,14 +83,12 @@ export interface ReviewSessionOpts {
 }
 
 export interface ReviewSession {
-  start(): Promise<void>
+  start(): Effect.Effect<void>
   analyzePosition(
     request: LiveAnalysisRequest,
     settings: LiveAnalysisSettings,
-  ): void
-  cancelLiveAnalysis(): void
-  /** Aborta tudo: engine, listeners. Assíncrono por dentro. */
-  dispose(): void
+  ): Effect.Effect<void>
+  cancelLiveAnalysis(): Effect.Effect<void>
 }
 
 export interface LiveAnalysisSettings {
@@ -103,6 +119,17 @@ export interface LiveAnalysisRequest {
   sourceAnalysis?: PositionAnalysis
 }
 
+/** Synchronous restoration, also used before starting the UI runtime. */
+export function restoreInitialReview(opts: ReviewSessionOpts): boolean {
+  const result = opts.config.initialResult
+  if (!result) return false
+  if (opts.store.getState().result !== result) {
+    opts.store.setResult(result)
+    opts.onStateChange({ status: 'done', error: null })
+  }
+  return true
+}
+
 function manualAnalysisControl(config: ReviewConfig): AnalyzeControl {
   if (config.mode === 'time') {
     return { mode: 'time', movetimeMs: config.movetimeMs ?? 5000 }
@@ -110,339 +137,289 @@ function manualAnalysisControl(config: ReviewConfig): AnalyzeControl {
   return { mode: 'depth', depth: config.engine.depth }
 }
 
-export function createReviewSession(opts: ReviewSessionOpts): ReviewSession {
-  const { config, backend, store } = opts
-  let cancelled = false
-  let port: Awaited<ReturnType<Backend['createEnginePort']>> = null
-  let livePort: Awaited<ReturnType<Backend['createEnginePort']>> = null
-  let appliedLiveSettings: ResolvedLiveAnalysisSettings | null = null
-  let detectedLiveResources: {
-    threads: number
-    memoryMb: number
-  } | null = null
-  let liveGeneration = 0
-  let liveTask: Promise<void> = Promise.resolve()
-  const partialWinPcts: number[] = []
-  const cache = backend.createPositionCache()
+/** The enclosing Scope owns dispatch, searches, persistence and engine leases. */
+export function createReviewSession(opts: ReviewSessionOpts) {
+  return Effect.gen(function* () {
+    const { config, store } = opts
+    const engineService = yield* Engine
+    const cache = yield* PositionCache
+    const games = yield* GamesRepository
+    const resources = yield* SystemResources
+    const scope = yield* Effect.scope
+    const initialized = yield* Deferred.make<void>()
+    const requests = yield* Queue.sliding<{
+      request: LiveAnalysisRequest
+      settings: LiveAnalysisSettings
+    } | null>(1)
+    yield* Effect.addFinalizer(() => Queue.shutdown(requests))
+    const partialWinPcts: number[] = []
+    let livePort: EnginePort | undefined
+    let liveScope: Scope.CloseableScope | undefined
+    let appliedLiveSettings: ResolvedLiveAnalysisSettings | undefined
+    let detectedLiveResources: { threads: number; memoryMb: number } | undefined
 
-  const notify = (state: ReviewSessionState) => {
-    if (!cancelled) opts.onStateChange(state)
-  }
+    const discardLivePort = Effect.suspend(() => {
+      const owned = liveScope
+      liveScope = undefined
+      livePort = undefined
+      appliedLiveSettings = undefined
+      return owned ? Scope.close(owned, Exit.void) : Effect.void
+    })
+    yield* Effect.addFinalizer(() => discardLivePort)
 
-  async function start(): Promise<void> {
-    try {
-      // Reabertura instantânea: instala o resultado antes de qualquer await —
-      // a tela não espera a engine subir. Sem variações exploratórias, não há
-      // refino ao vivo — engine não precisa subir para initialResult.
-      if (config.initialResult) {
-        store.setResult(config.initialResult)
-        notify({ status: 'done', error: null })
-        return
-      }
-
-      partialWinPcts.length = 0
-      opts.onProgress({
-        stage: 'preparing',
-        completed: 0,
-        total: config.meta.plies + 1,
-        currentPly: 0,
-        phase: null,
-        winPcts: partialWinPcts,
-        cachedPositions: 0,
-        enginePositions: 0,
-      })
-
-      port = await backend.createEnginePort(() => cancelled)
-      if (!port) return
-      if (cancelled) {
-        await port.dispose().catch(() => {})
-        port = null
-        return
-      }
-
-      // Dimensiona Threads/Hash (best-effort: falha → defaults do Stockfish).
-      let sizing: { threads?: number; hashMb?: number } = {}
-      try {
-        const r = await backend.getSystemResources()
-        sizing = { threads: r.threads, hashMb: recommendedHashMb(r.memory_mb) }
-      } catch {
-        /* fallback: defaults */
-      }
-
-      const analysisOpts = {
-        ...sizing,
-        cache,
-        keepAlive: false,
-        onDetailedProgress: (
-          progress: AnalysisProgress,
-          update: WinPctUpdate | undefined,
-        ) => {
-          if (update) partialWinPcts[update.index] = update.winPct
-          if (!cancelled) {
-            opts.onProgress({ ...progress, winPcts: partialWinPcts })
-          }
-        },
-      }
-      const profile = adaptiveProfileForKind(config.analysisKind)
-      let review: ReviewResult
-      if (profile) {
-        review = await analyzeGameAdaptive(
-          config.pgn,
-          profile.id,
-          port,
-          analysisOpts,
+    const start = yield* Effect.once(
+      Effect.gen(function* () {
+        if (restoreInitialReview(opts)) return
+        opts.onProgress({
+          stage: 'preparing',
+          completed: 0,
+          total: config.meta.plies + 1,
+          currentPly: 0,
+          phase: null,
+          winPcts: partialWinPcts,
+          cachedPositions: 0,
+          enginePositions: 0,
+        })
+        const review = yield* Effect.scoped(
+          Effect.gen(function* () {
+            const port = yield* engineService.acquire
+            const sizing = yield* resources.get.pipe(
+              Effect.map((r) => ({
+                threads: r.threads,
+                hashMb: recommendedHashMb(r.memory_mb),
+              })),
+              Effect.catchAll(() => Effect.succeed({})),
+            )
+            const analysisOpts = {
+              ...sizing,
+              cache,
+              keepAlive: false,
+              onDetailedProgress(
+                progress: AnalysisProgress,
+                update?: WinPctUpdate,
+              ) {
+                if (update) partialWinPcts[update.index] = update.winPct
+                opts.onProgress({ ...progress, winPcts: partialWinPcts })
+              },
+            }
+            const profile = adaptiveProfileForKind(config.analysisKind)
+            const analysis = profile
+              ? analyzeGameAdaptive(config.pgn, profile.id, port, analysisOpts)
+              : analyzeGame(
+                  config.pgn,
+                  manualAnalysisControl(config),
+                  port,
+                  config.lines,
+                  analysisOpts,
+                )
+            return yield* analysis
+          }),
         )
-      } else {
-        review = await analyzeGame(
-          config.pgn,
-          manualAnalysisControl(config),
-          port,
-          config.lines,
-          analysisOpts,
+        store.setResult(review)
+        opts.onStateChange({ status: 'done', error: null })
+        yield* games.saveReview(config, review).pipe(
+          Effect.tapError(() => Metric.increment(metrics.persistenceFailures)),
+          Effect.catchAll((error) => warn('games.save', error)),
+          Effect.forkIn(scope),
         )
-      }
-      if (cancelled) return
-      store.setResult(review)
-      notify({ status: 'done', error: null })
-      void backend
-        .saveReview(config, review)
-        .catch((e) => console.warn('Falha ao salvar a partida no store:', e))
-    } catch (e) {
-      notify({
-        status: 'error',
-        error: e instanceof Error ? e.message : String(e),
-      })
-    } finally {
-      // Engine já recebeu `quit` via analyzeGame (keepAlive=false). Dispõe o
-      // handle para não vazar processo/file descriptor até o unmount.
-      if (port) {
-        const p = port
-        port = null
-        void p.dispose().catch(() => {})
-      }
-    }
-  }
+      }).pipe(
+        Effect.onInterrupt(() => Metric.increment(metrics.interruptions)),
+        Effect.catchAllCause((cause) =>
+          Effect.sync(() => {
+            if (!Cause.isInterrupted(cause)) {
+              const failure = Cause.failureOption(cause)
+              opts.onStateChange({
+                status: 'error',
+                error: Option.isSome(failure)
+                  ? errorMessage(failure.value)
+                  : Cause.pretty(cause),
+              })
+            }
+          }),
+        ),
+        Effect.ensuring(Deferred.succeed(initialized, undefined)),
+      ),
+    )
 
-  async function ensureLivePort(
-    settings: ResolvedLiveAnalysisSettings,
-    plan: LiveSearchPlan,
-    generation: number,
-  ): Promise<NonNullable<typeof livePort>> {
-    if (!livePort) {
-      livePort = await backend.createEnginePort(
-        () => cancelled || generation !== liveGeneration,
-      )
-      if (!livePort) throw new Error('A inicialização da engine foi cancelada.')
-      await configureEngine(livePort, {
-        threads: settings.threads,
-        hashMb: settings.memoryMb,
-        multipv: plan.multipv,
-      })
-      appliedLiveSettings = settings
-      return livePort
-    }
-    if (
-      appliedLiveSettings?.threads === settings.threads &&
-      appliedLiveSettings.memoryMb === settings.memoryMb &&
-      appliedLiveSettings.lines === settings.lines &&
-      appliedLiveSettings.fastPass === settings.fastPass
+    function ensureLivePort(
+      settings: ResolvedLiveAnalysisSettings,
+      plan: LiveSearchPlan,
     ) {
-      return livePort
+      return Effect.gen(function* () {
+        if (!livePort) {
+          liveScope = yield* Scope.make()
+          livePort = yield* engineService.acquire.pipe(
+            Effect.provideService(Scope.Scope, liveScope),
+          )
+          yield* configureEngine(livePort, {
+            threads: settings.threads,
+            hashMb: settings.memoryMb,
+            multipv: plan.multipv,
+          })
+          appliedLiveSettings = settings
+          return livePort
+        }
+        if (
+          appliedLiveSettings?.threads !== settings.threads ||
+          appliedLiveSettings.memoryMb !== settings.memoryMb ||
+          appliedLiveSettings.lines !== settings.lines ||
+          appliedLiveSettings.fastPass !== settings.fastPass
+        ) {
+          yield* livePort.send(
+            `setoption name Threads value ${settings.threads}`,
+          )
+          yield* livePort.send(`setoption name Hash value ${settings.memoryMb}`)
+          yield* livePort.send(`setoption name MultiPV value ${plan.multipv}`)
+          yield* ask(livePort, 'isready', isReadyOk)
+          appliedLiveSettings = settings
+        }
+        return livePort
+      }).pipe(Effect.onError(() => discardLivePort))
     }
-    await livePort.send(`setoption name Threads value ${settings.threads}`)
-    await livePort.send(`setoption name Hash value ${settings.memoryMb}`)
-    await livePort.send(`setoption name MultiPV value ${plan.multipv}`)
-    await ask(livePort, 'isready', isReadyOk)
-    appliedLiveSettings = settings
-    return livePort
-  }
 
-  async function discardLivePort(): Promise<void> {
-    const failed = livePort
-    livePort = null
-    appliedLiveSettings = null
-    await failed?.dispose()
-  }
-
-  async function analyzeFen(
-    fen: string,
-    settings: ResolvedLiveAnalysisSettings,
-    generation: number,
-  ): Promise<PositionAnalysis> {
-    const plan = liveSearchPlan(settings)
-    const cached = await cache.get(fen, 'time', plan.movetimeMs, plan.multipv)
-    if (cancelled || generation !== liveGeneration) {
-      throw new Error('A análise da posição foi cancelada.')
-    }
-    let raw = cached
-    if (!raw) {
-      const terminal = terminalCp(fen)
-      if (terminal !== null) {
-        raw = {
-          fen,
-          cp: terminal,
-          depth: 0,
-          pv: [],
-          lines: [{ multipv: 1, cp: terminal, pv: [] }],
-        }
-      } else {
-        let engine: NonNullable<typeof livePort>
-        try {
-          engine = await ensureLivePort(settings, plan, generation)
-        } catch (error) {
-          await discardLivePort()
-          throw error
-        }
-        if (cancelled || generation !== liveGeneration) {
-          throw new Error('A análise da posição foi cancelada.')
-        }
-        try {
-          for (let attempt = 0; attempt < 2; attempt++) {
-            try {
-              raw = await evalPosition(
-                engine,
+    function analyzeFen(
+      fen: string,
+      settings: ResolvedLiveAnalysisSettings,
+    ): Effect.Effect<PositionAnalysis, AnalysisError> {
+      return Effect.gen(function* () {
+        const plan = liveSearchPlan(settings)
+        let raw = yield* cache.get(fen, 'time', plan.movetimeMs, plan.multipv)
+        if (!raw) {
+          const terminal = terminalCp(fen)
+          if (terminal !== null) {
+            raw = {
+              fen,
+              cp: terminal,
+              depth: 0,
+              pv: [],
+              lines: [{ multipv: 1, cp: terminal, pv: [] }],
+            }
+          } else {
+            const port = yield* ensureLivePort(settings, plan)
+            let attempt = 0
+            raw = yield* Effect.gen(function* () {
+              if (attempt++ > 0) {
+                yield* Metric.increment(metrics.retries)
+                yield* ask(port, 'isready', isReadyOk)
+              }
+              return yield* evalPosition(
+                port,
                 fen,
                 { mode: 'time', movetimeMs: plan.movetimeMs },
                 plan.movetimeMs + 10_000,
               )
-              break
-            } catch (error) {
-              if (
-                !(error instanceof MissingEvaluationError) ||
-                attempt > 0 ||
-                cancelled ||
-                generation !== liveGeneration
-              ) {
-                throw error
-              }
-              await ask(engine, 'isready', isReadyOk)
-              if (cancelled || generation !== liveGeneration) throw error
-            }
+            }).pipe(
+              Effect.retry({
+                times: 1,
+                while: (error) => error instanceof MissingEvaluationError,
+              }),
+              // Never reuse a process with an unconsumed bestmove after interruption.
+              Effect.onError(() => discardLivePort),
+            )
+            addSanToLines(raw)
+            yield* cache.put(raw, 'time', plan.movetimeMs, plan.multipv)
           }
-        } catch (error) {
-          await discardLivePort()
-          throw error
         }
-        if (cancelled || generation !== liveGeneration) {
-          throw new Error('A análise da posição foi cancelada.')
+        return {
+          ...positionAnalysis(raw),
+          search: {
+            purpose: settings.fastPass ? 'playback' : 'refinement',
+            movetimeMs: plan.movetimeMs,
+            multipv: plan.multipv,
+          },
         }
-        if (!raw) throw new MissingEvaluationError()
-        addSanToLines(raw)
-        await cache.put(raw, 'time', plan.movetimeMs, plan.multipv)
-      }
+      })
     }
-    return {
-      ...positionAnalysis(raw),
-      search: {
-        purpose: settings.fastPass ? 'playback' : 'refinement',
-        movetimeMs: plan.movetimeMs,
-        multipv: plan.multipv,
-      },
-    }
-  }
 
-  function runLiveAnalysis(
-    generation: number,
-    request: LiveAnalysisRequest,
-    settings: LiveAnalysisSettings,
-  ): Promise<void> {
-    return (async () => {
-      if (cancelled || generation !== liveGeneration) return
-      store.startLiveAnalysis(request.fen)
-      try {
-        const resolvedSettings = await resolveLiveSettings(settings)
-        if (cancelled || generation !== liveGeneration) return
-        const analysis = await analyzeFen(
-          request.fen,
-          resolvedSettings,
-          generation,
-        )
-        if (cancelled || generation !== liveGeneration) return
+    function resolveLiveSettings(settings: LiveAnalysisSettings) {
+      return Effect.gen(function* () {
+        const manual = manualLiveSettings(settings)
+        if (!settings.threadsAuto) return manual
+        if (!detectedLiveResources) {
+          const detected = yield* Effect.option(resources.get)
+          if (Option.isNone(detected)) return manual
+          detectedLiveResources = {
+            threads: recommendedReviewThreads(detected.value.threads),
+            memoryMb: recommendedHashMb(detected.value.memory_mb),
+          }
+        }
+        return { ...manual, ...detectedLiveResources }
+      })
+    }
+
+    function runLiveAnalysis(
+      request: LiveAnalysisRequest,
+      settings: LiveAnalysisSettings,
+    ) {
+      return Effect.gen(function* () {
+        yield* Deferred.await(initialized)
+        store.startLiveAnalysis(request.fen)
+        const resolved = yield* resolveLiveSettings(settings)
+        const analysis = yield* analyzeFen(request.fen, resolved)
         store.setLiveAnalysis(request.fen, analysis)
         if (
           !settings.moveFeedbackEnabled ||
           !request.variationNodeId ||
           !request.sourceFen
-        ) {
+        )
           return
-        }
         let source =
           request.sourceAnalysis?.fen === request.sourceFen
             ? request.sourceAnalysis
             : undefined
-        if (!source && request.sourceFen === request.fen) {
-          source = analysis
-        }
-        if (!source && !settings.fastPass) {
-          source = await analyzeFen(
-            request.sourceFen,
-            resolvedSettings,
-            generation,
+        if (!source && request.sourceFen === request.fen) source = analysis
+        if (!source && !settings.fastPass)
+          source = yield* analyzeFen(request.sourceFen, resolved)
+        if (source)
+          store.setVariationClassification(
+            request.variationNodeId,
+            classifyLiveMove(source, analysis),
           )
-        }
-        if (!source || cancelled || generation !== liveGeneration) return
-        store.setVariationClassification(
-          request.variationNodeId,
-          classifyLiveMove(source, analysis),
-        )
-      } catch (error) {
-        if (cancelled || generation !== liveGeneration) return
-        store.failLiveAnalysis(
-          request.fen,
-          error instanceof Error ? error.message : String(error),
-        )
-      }
-    })()
-  }
-
-  async function resolveLiveSettings(
-    settings: LiveAnalysisSettings,
-  ): Promise<ResolvedLiveAnalysisSettings> {
-    if (!settings.threadsAuto) return manualLiveSettings(settings)
-    if (!detectedLiveResources) {
-      try {
-        const resources = await backend.getSystemResources()
-        detectedLiveResources = {
-          threads: recommendedReviewThreads(resources.threads),
-          memoryMb: recommendedHashMb(resources.memory_mb),
-        }
-      } catch {
-        return manualLiveSettings(settings)
-      }
+      }).pipe(
+        Effect.onInterrupt(() => Metric.increment(metrics.interruptions)),
+        Effect.catchAllCause((cause) =>
+          Effect.sync(() => {
+            if (Cause.isInterrupted(cause)) return
+            const failure = Cause.failureOption(cause)
+            store.failLiveAnalysis(
+              request.fen,
+              Option.isSome(failure)
+                ? errorMessage(failure.value)
+                : Cause.pretty(cause),
+            )
+          }),
+        ),
+      )
     }
+
+    yield* Effect.gen(function* () {
+      let current: Fiber.RuntimeFiber<void, never> | undefined
+      while (true) {
+        let next = yield* Queue.take(requests)
+        if (current) yield* Fiber.interrupt(current)
+        // While finalizers were running, keep only the most recent intent.
+        const queued = yield* Queue.takeAll(requests)
+        const latest = Chunk.last(queued)
+        if (Option.isSome(latest)) next = latest.value
+        current = next
+          ? yield* runLiveAnalysis(next.request, next.settings).pipe(
+              Effect.forkScoped,
+            )
+          : undefined
+      }
+    }).pipe(Effect.forkScoped)
+
     return {
-      ...manualLiveSettings(settings),
-      threads: detectedLiveResources.threads,
-      memoryMb: detectedLiveResources.memoryMb,
-    }
-  }
-
-  return {
-    start,
-    analyzePosition(request, settings) {
-      const generation = ++liveGeneration
-      void livePort?.send('stop')
-      liveTask = liveTask
-        .catch(() => {})
-        .then(() => runLiveAnalysis(generation, request, settings))
-    },
-    cancelLiveAnalysis() {
-      liveGeneration++
-      store.cancelLiveAnalysis()
-      void livePort?.send('stop')
-    },
-    dispose() {
-      cancelled = true
-      liveGeneration++
-      const p = port
-      port = null
-      void p?.dispose().catch(() => {})
-      const live = livePort
-      livePort = null
-      appliedLiveSettings = null
-      void live?.dispose().catch(() => {})
-    },
-  }
+      start: () => start,
+      analyzePosition: (request, settings) =>
+        Queue.offer(requests, { request, settings }).pipe(Effect.asVoid),
+      cancelLiveAnalysis: () =>
+        Effect.gen(function* () {
+          store.cancelLiveAnalysis()
+          yield* Queue.offer(requests, null)
+        }),
+    } satisfies ReviewSession
+  })
 }
 
 function manualLiveSettings(

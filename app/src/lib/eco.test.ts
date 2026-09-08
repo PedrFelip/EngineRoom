@@ -33,7 +33,7 @@ describe('lookupEco', () => {
   })
 
   it('ignora linhas mais longas que o jogo jogado', () => {
-    expect(lookupEco(['e4', 'e5', 'Nf3'], DS).code).toBe('C20')
+    expect(lookupEco(['e4', 'e5', 'Nf3'], DS)?.code).toBe('C20')
   })
 })
 

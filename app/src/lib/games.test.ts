@@ -1,7 +1,11 @@
+import { Effect } from 'effect'
 import { describe, expect, it } from 'vitest'
 import type { ReviewResult, StoredGame } from '../types'
-import { storedToConfig } from './games'
+import { storedToConfig as decodeStoredConfig } from './games'
 import { ACCURACY_MODEL_VERSION } from './scoring'
+
+const storedToConfig = (game: StoredGame) =>
+  Effect.runSync(decodeStoredConfig(game))
 
 const REVIEW: ReviewResult = {
   positions: [],
@@ -103,6 +107,7 @@ describe('storedToConfig', () => {
 
     const config = storedToConfig(stored({ reviewJson: oldJson }))
     const result = config.initialResult
+    if (!result) throw new Error('Revisão esperada')
 
     // material cheio → todas as posições viram Abertura; accuracyByPhase preenchido
     expect(result.positions.every((p) => p.phase === 'opening')).toBe(true)
@@ -164,6 +169,7 @@ describe('storedToConfig', () => {
       stored({ reviewJson: JSON.stringify(legacy) }),
     )
     const result = config.initialResult
+    if (!result) throw new Error('Revisão esperada')
 
     expect(result.moves[0].cpLoss).toBe(500)
     expect(result.accuracy.white).toBeCloseTo(17.8, 1)
@@ -211,6 +217,7 @@ describe('storedToConfig', () => {
     const result = storedToConfig(
       stored({ reviewJson: JSON.stringify(legacyReview) }),
     ).initialResult
+    if (!result) throw new Error('Revisão esperada')
 
     expect(result.moves.map((item) => item.classification)).toEqual([
       'melhor',

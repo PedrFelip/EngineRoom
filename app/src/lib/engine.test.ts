@@ -1,99 +1,180 @@
+import { Deferred, Effect, Fiber } from 'effect'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { runUi } from './effect/ui-runtime'
 
-// hoisted so the mocked modules can reference them without TDZ issues.
-const mocks = vi.hoisted(() => ({
-  invoke: vi.fn(),
-  listen: vi.fn(),
-}))
-
+const mocks = vi.hoisted(() => ({ invoke: vi.fn(), listen: vi.fn() }))
 vi.mock('@tauri-apps/api/core', () => ({ invoke: mocks.invoke }))
 vi.mock('@tauri-apps/api/event', () => ({ listen: mocks.listen }))
 
-import { engineSend, engineStart, engineStop, probeEngine } from './engine'
-
-type LineHandler = (event: { payload: string }) => void
+import { probeEngine } from './engine'
+import { createTauriEnginePort, ENGINE_LINE_EVENT } from './engine-port'
 
 beforeEach(() => {
-  mocks.invoke.mockReset()
-  mocks.listen.mockReset()
+  mocks.invoke.mockReset().mockResolvedValue(undefined)
+  mocks.listen.mockReset().mockResolvedValue(() => {})
 })
 
-describe('engine thin wrappers', () => {
-  it('engineStart invokes the embedded sidecar command without arguments', async () => {
-    mocks.invoke.mockResolvedValue(undefined)
-    await engineStart()
-    expect(mocks.invoke).toHaveBeenCalledWith('engine_spawn')
+describe('scoped engine and probe', () => {
+  it('acquires, sends commands and stops exactly once', async () => {
+    const off = vi.fn()
+    mocks.listen.mockResolvedValue(off)
+    await runUi(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const port = yield* createTauriEnginePort
+          yield* port.send('go depth 20')
+        }),
+      ),
+    )
+    expect(mocks.invoke.mock.calls).toEqual([
+      ['engine_spawn', undefined],
+      ['engine_send', { line: 'go depth 20' }],
+      ['engine_stop', undefined],
+    ])
+    expect(off).toHaveBeenCalledTimes(2)
   })
 
-  it('engineSend / engineStop forward their commands', async () => {
-    mocks.invoke.mockResolvedValue(undefined)
-    await engineSend('go depth 20')
-    await engineStop()
-    expect(mocks.invoke).toHaveBeenCalledWith('engine_send', {
-      line: 'go depth 20',
+  it('envia um lote UCI em uma única chamada IPC', async () => {
+    await runUi(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const port = yield* createTauriEnginePort
+          if (!port.sendBatch) throw new Error('batch UCI indisponível')
+          yield* port.sendBatch(['position fen test', 'go depth 20'])
+        }),
+      ),
+    )
+
+    expect(mocks.invoke).toHaveBeenCalledWith('engine_send_batch', {
+      lines: ['position fen test', 'go depth 20'],
     })
-    expect(mocks.invoke).toHaveBeenCalledWith('engine_stop')
   })
-})
 
-describe('probeEngine', () => {
-  /** Wires listen/invoke so a `uci` send replies with id name + uciok. */
-  function wireHappyReply() {
-    let lineCb: LineHandler | undefined
-    mocks.listen.mockImplementation(async (_event, cb) => {
-      lineCb = cb as LineHandler
+  it('sends uci and obtains the name even with a synchronous reply', async () => {
+    let line: (event: { payload: unknown }) => void = () => {}
+    mocks.listen.mockImplementation(async (event, cb) => {
+      if (event === ENGINE_LINE_EVENT) line = cb
       return () => {}
     })
-    mocks.invoke.mockImplementation(
-      async (cmd: string, args?: { line?: string }) => {
-        if (cmd === 'engine_send' && args?.line === 'uci') {
-          setTimeout(() => {
-            lineCb?.({ payload: 'id name Stockfish 18' })
-            lineCb?.({ payload: 'uciok' })
-          }, 0)
-        }
-        return undefined
-      },
-    )
-  }
-
-  it('sends `uci`, resolves ok with the engine name on uciok', async () => {
-    wireHappyReply()
-    const res = await probeEngine({ timeoutMs: 2000 })
-
-    expect(res.ok).toBe(true)
-    expect(res.name).toBe('Stockfish 18')
-
-    // Regression guard: the probe MUST actually issue the `uci` command,
-    // otherwise the engine never answers and the probe times out.
-    expect(mocks.invoke).toHaveBeenCalledWith('engine_send', { line: 'uci' })
-    expect(mocks.invoke).toHaveBeenCalledWith('engine_spawn')
-    // cleanup: engine is stopped at the end.
-    expect(mocks.invoke).toHaveBeenCalledWith('engine_stop')
-  })
-
-  it('reports failure when uciok never arrives (timeout)', async () => {
-    mocks.invoke.mockResolvedValue(undefined)
-    mocks.listen.mockResolvedValue(() => {})
-
-    const res = await probeEngine({ timeoutMs: 25 })
-
-    expect(res.ok).toBe(false)
-    expect(res.error).toMatch(/Tempo esgotado/i)
-    // it still tried to talk to the engine
-    expect(mocks.invoke).toHaveBeenCalledWith('engine_send', { line: 'uci' })
-  })
-
-  it('reports failure when the engine fails to spawn', async () => {
-    mocks.listen.mockResolvedValue(() => {})
-    mocks.invoke.mockImplementation(async (cmd: string) => {
-      if (cmd === 'engine_spawn') throw new Error('spawn boom')
-      return undefined
+    mocks.invoke.mockImplementation(async (command, args) => {
+      if (command === 'engine_send' && args.line === 'uci') {
+        line({ payload: 'id name Stockfish 18' })
+        line({ payload: 'uciok' })
+      }
     })
+    expect(await runUi(probeEngine())).toEqual({
+      ok: true,
+      name: 'Stockfish 18',
+    })
+    expect(mocks.invoke).toHaveBeenCalledWith('engine_send', { line: 'uci' })
+    expect(mocks.invoke).toHaveBeenCalledWith('engine_stop', undefined)
+  })
 
-    const res = await probeEngine({ timeoutMs: 500 })
+  it('times out and releases both listeners and process', async () => {
+    const off = vi.fn()
+    mocks.listen.mockResolvedValue(off)
+    const result = await runUi(probeEngine({ timeoutMs: 10 }))
+    expect(result.ok).toBe(false)
+    expect(result.error).toContain('não respondeu')
+    expect(off).toHaveBeenCalledTimes(2)
+    expect(mocks.invoke).toHaveBeenCalledWith('engine_stop', undefined)
+  })
 
-    expect(res.ok).toBe(false)
-    expect(res.error).toBe('spawn boom')
+  it('reports a spawn failure without stopping another process', async () => {
+    mocks.invoke.mockRejectedValueOnce(new Error('spawn boom'))
+    expect(await runUi(probeEngine())).toMatchObject({
+      ok: false,
+      error: 'spawn boom',
+    })
+    expect(mocks.listen).toHaveBeenCalledTimes(2)
+    expect(mocks.invoke).not.toHaveBeenCalledWith('engine_stop', undefined)
+  })
+
+  it.each([1, 2])(
+    'releases partial acquisition when listener %i fails',
+    async (which) => {
+      const off = vi.fn()
+      if (which === 2) mocks.listen.mockResolvedValueOnce(off)
+      mocks.listen.mockRejectedValueOnce(new Error('listen boom'))
+      await expect(runUi(Effect.scoped(createTauriEnginePort))).rejects.toThrow(
+        'listen boom',
+      )
+      expect(off).toHaveBeenCalledTimes(which - 1)
+      expect(mocks.invoke).not.toHaveBeenCalled()
+    },
+  )
+
+  it('waits for an in-flight spawn before completing interruption and cleanup', async () => {
+    const off = vi.fn()
+    mocks.listen.mockResolvedValue(off)
+    let finish = () => {}
+    const spawning = new Promise<void>((resolve) => {
+      finish = resolve
+    })
+    mocks.invoke.mockImplementation((command) =>
+      command === 'engine_spawn' ? spawning : Promise.resolve(),
+    )
+    const fiber = Effect.runFork(Effect.scoped(createTauriEnginePort))
+    await vi.waitFor(() =>
+      expect(mocks.invoke).toHaveBeenCalledWith('engine_spawn', undefined),
+    )
+    const interrupted = runUi(Fiber.interrupt(fiber))
+    finish()
+    await interrupted
+    expect(off).toHaveBeenCalledTimes(2)
+    expect(
+      mocks.invoke.mock.calls.filter(([c]) => c === 'engine_stop'),
+    ).toHaveLength(1)
+  })
+
+  it('serializes owners and does not spawn an interrupted waiter', async () => {
+    const ready = Effect.runSync(Deferred.make<void>())
+    const owner = Effect.runFork(
+      Effect.scoped(
+        Effect.gen(function* () {
+          yield* createTauriEnginePort
+          yield* Deferred.succeed(ready, undefined)
+          yield* Effect.never
+        }),
+      ),
+    )
+    await runUi(Deferred.await(ready))
+    const waiter = Effect.runFork(Effect.scoped(createTauriEnginePort))
+    try {
+      await runUi(Effect.yieldNow())
+      await runUi(Fiber.interrupt(waiter))
+      expect(
+        mocks.invoke.mock.calls.filter(([c]) => c === 'engine_spawn'),
+      ).toHaveLength(1)
+      expect(mocks.invoke).not.toHaveBeenCalledWith('engine_stop', undefined)
+    } finally {
+      await runUi(Fiber.interrupt(owner))
+    }
+    await runUi(Effect.scoped(createTauriEnginePort))
+    expect(
+      mocks.invoke.mock.calls.filter(([c]) => c === 'engine_spawn'),
+    ).toHaveLength(2)
+    expect(
+      mocks.invoke.mock.calls.filter(([c]) => c === 'engine_stop'),
+    ).toHaveLength(2)
+  })
+
+  it('retains an exit received during spawn, before the handshake subscribes', async () => {
+    let exit: (event: { payload: unknown }) => void = () => {}
+    mocks.listen.mockImplementation(async (event, cb) => {
+      if (event === 'engine://exit') exit = cb
+      return () => {}
+    })
+    mocks.invoke.mockImplementation(async (command) => {
+      if (command === 'engine_spawn') {
+        exit({ payload: { code: null, signal: 11, error: null } })
+      }
+    })
+    const result = await runUi(probeEngine())
+    expect(result).toMatchObject({ ok: false })
+    expect(result.error).toContain('sinal 11')
+    expect(mocks.invoke).not.toHaveBeenCalledWith('engine_send', {
+      line: 'uci',
+    })
   })
 })

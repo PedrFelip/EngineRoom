@@ -1,8 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import {
-  createReviewSession,
-  type ReviewSessionState,
-} from '../../review-session'
+import type { ReviewSessionState } from '../../review-session'
 import { createReviewStore } from '../../review-store'
 import {
   depthConfig,
@@ -11,6 +8,7 @@ import {
   fakeEnginePort,
   startSession,
 } from './review-session-test-helpers'
+import { createReviewSession } from './review-test-runtime'
 
 describe('createReviewSession — reabertura do store', () => {
   function reopenBackend() {

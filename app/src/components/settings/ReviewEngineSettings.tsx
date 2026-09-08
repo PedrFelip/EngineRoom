@@ -1,6 +1,7 @@
 import { Cpu, MemoryStick, Split, Timer } from 'lucide-react'
 import type { CSSProperties, ReactNode } from 'react'
 import { useEffect, useState } from 'react'
+import { runUi } from '../../lib/effect/ui-runtime'
 import { recommendedReviewThreads } from '../../lib/settings'
 import { useSettings } from '../../lib/settings-context'
 import { selectReviewEngineSettings } from '../../lib/settings-store'
@@ -22,10 +23,10 @@ export default function ReviewEngineSettings() {
   )
 
   useEffect(() => {
-    let cancelled = false
-    getSystemResources()
+    const controller = new AbortController()
+    runUi(getSystemResources(), controller.signal)
       .then(({ threads }) => {
-        if (cancelled) return
+        if (controller.signal.aborted) return
         const available = Math.max(1, threads)
         setMaxThreads(available)
         if (settings.reviewThreadsAuto) {
@@ -34,7 +35,7 @@ export default function ReviewEngineSettings() {
       })
       .catch(() => {})
     return () => {
-      cancelled = true
+      controller.abort()
     }
   }, [settings.reviewThreadsAuto, updateSettings])
 

@@ -1,15 +1,17 @@
-import { describe, expect, it, vi } from 'vitest'
-import {
-  analyzeGame,
-  type EngineExitReason,
-  type EnginePort,
-} from '../../analyze'
+import { describe, expect, it } from 'vitest'
 import {
   fakeCache,
   fakePort,
   portDyingOnSecondGo,
   START_FEN,
 } from './analyze-test-helpers'
+import {
+  analyzeGame,
+  type EngineExitReason,
+  type EnginePort,
+  type RawPosition,
+  testWarnings,
+} from './analyze-test-runtime'
 
 describe('analyzeGame — cache em lote e falhas', () => {
   it('prefetcha todos os hits numa única chamada getBulk e só aciona a engine nos misses', async () => {
@@ -139,7 +141,7 @@ describe('analyzeGame — cache em lote e falhas', () => {
 
   it('rejeita a análise quando um flush incremental falha (retry do catch vira warning)', async () => {
     const port = fakePort(() => ({ cp: 0, pv: ['e2e4'] }))
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const warn = testWarnings.mockClear()
     let putManyCalls = 0
     const cache = fakeCache({
       async putMany() {
@@ -161,7 +163,7 @@ describe('analyzeGame — cache em lote e falhas', () => {
     // Flush incremental na 8ª posição + retry best-effort no catch.
     expect(putManyCalls).toBe(2)
     expect(warn).toHaveBeenCalled()
-    warn.mockRestore()
+    warn.mockClear()
   })
 
   it('descarrega o buffer mesmo quando a análise aborta no meio (finally)', async () => {
@@ -187,7 +189,7 @@ describe('analyzeGame — cache em lote e falhas', () => {
 
   it('propaga a causa raiz da análise quando o descarrego do cache também falha', async () => {
     const port = portDyingOnSecondGo()
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const warn = testWarnings.mockClear()
     let putManyCalls = 0
     const cache = fakeCache({
       async putMany() {
@@ -206,7 +208,7 @@ describe('analyzeGame — cache em lote e falhas', () => {
     // causa raiz (o erro da engine).
     expect(putManyCalls).toBe(1)
     expect(warn).toHaveBeenCalled()
-    warn.mockRestore()
+    warn.mockClear()
   })
 
   it('rejeita com o erro do descarrego quando a análise teve sucesso', async () => {

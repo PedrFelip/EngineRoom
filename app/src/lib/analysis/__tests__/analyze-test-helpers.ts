@@ -1,4 +1,4 @@
-import type { EnginePort, PositionCache } from '../../analyze'
+import type { EnginePort, PositionCache } from './analyze-test-runtime'
 
 export const START_FEN =
   'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1'

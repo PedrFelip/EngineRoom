@@ -1,17 +1,19 @@
 import { describe, expect, it } from 'vitest'
 import {
-  analyzeGame,
-  analyzeGameAdaptive,
-  configureEngine,
-  defaultGoTimeout,
-  type EnginePort,
-} from '../../analyze'
-import {
   allHitsCache,
   fakeCache,
   fakePort,
   START_FEN,
 } from './analyze-test-helpers'
+import {
+  type AnalysisProgress,
+  analyzeGame,
+  analyzeGameAdaptive,
+  configureEngine,
+  defaultGoTimeout,
+  type EnginePort,
+  type WinPctUpdate,
+} from './analyze-test-runtime'
 
 describe('analyzeGame — onDetailedProgress', () => {
   it('emite uma atualização indexada por posição', async () => {
@@ -126,6 +128,55 @@ describe('defaultGoTimeout', () => {
 })
 
 describe('analyzeGameAdaptive', () => {
+  it.each([false, true])(
+    'flushes completed refinement on engine failure, preserving its cause (flush fails: %s)',
+    async (flushFails) => {
+      let callback: (line: string) => void = () => {}
+      let triage = 0
+      let refinement = 0
+      const writes: Array<{ value: number; count: number }> = []
+      const port: EnginePort = {
+        send(command) {
+          if (command === 'uci') callback('uciok')
+          else if (command === 'isready') callback('readyok')
+          else if (command.startsWith('go ')) {
+            if (command === 'go movetime 120') triage++
+            else if (++refinement === 2)
+              throw new Error('refinement engine failed')
+            const cp = triage === 11 ? 500 : 0
+            callback(`info depth 12 multipv 1 score cp ${cp} pv e2e4`)
+            callback('info depth 12 multipv 2 score cp -20 pv d2d4')
+            callback('bestmove e2e4')
+          }
+        },
+        onLine(handler) {
+          callback = handler
+          return () => {
+            callback = () => {}
+          }
+        },
+      }
+      const cache = fakeCache({
+        async putMany(entries, _mode, value) {
+          writes.push({ value, count: entries.length })
+          if (value === 1500 && flushFails) throw new Error('flush failed')
+        },
+      })
+      await expect(
+        analyzeGameAdaptive(
+          '1. a3 a6 2. h3 h6 3. f3 f6 4. g3 g6 5. Kf2 Kf7',
+          'fast',
+          port,
+          { cache },
+        ),
+      ).rejects.toThrow('refinement engine failed')
+      expect(refinement).toBe(2)
+      expect(writes.filter((write) => write.value === 1500)).toEqual([
+        { value: 1500, count: 1 },
+      ])
+    },
+  )
+
   it('aprofunda só a posição decisiva, sem repetir a partida inteira', async () => {
     const sent: string[] = []
     let lineCb: ((line: string) => void) | null = null

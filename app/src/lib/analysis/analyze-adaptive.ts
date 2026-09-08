@@ -1,3 +1,4 @@
+import { Effect, Exit } from 'effect'
 import type { ReviewResult } from '../../types'
 import {
   ADAPTIVE_PROFILES,
@@ -6,6 +7,8 @@ import {
   selectRefinementTargets,
 } from '../adaptive-analysis'
 import { lookupOpening } from '../eco'
+import { bestEffort } from '../effect/diagnostics'
+import type { AnalysisError } from '../effect/errors'
 import { computePhases } from '../phase'
 import { sideToMoveAtPly, whiteWinPct } from '../scoring'
 import { isReadyOk } from '../uci'
@@ -24,7 +27,7 @@ import {
   ask,
   configureEngine,
   evalPosition,
-  extractGame,
+  extractGameEffect,
   terminalCp,
   terminalCps,
   terminalPosition,
@@ -36,7 +39,7 @@ import { buildReview } from './review-builder'
  * MultiPV > 1; apenas pares antes/depois de lances críticos recebem uma busca
  * maior. O resultado final mistura posições de profundidades diferentes.
  */
-export async function analyzeGameAdaptive(
+export function analyzeGameAdaptive(
   pgn: string,
   profileId: AdaptiveProfileId,
   port: EnginePort,
@@ -51,231 +54,265 @@ export async function analyzeGameAdaptive(
       update?: WinPctUpdate,
     ) => void
   } = {},
-): Promise<ReviewResult> {
-  const profile = ADAPTIVE_PROFILES[profileId]
-  const { positionFens, moves } = extractGame(pgn)
-  const game = { startFen: positionFens[0], moves }
-  const triageControl: AnalyzeControl = {
-    mode: 'time',
-    movetimeMs: profile.triageMs,
-  }
+): Effect.Effect<ReviewResult, AnalysisError> {
+  return Effect.gen(function* () {
+    const profile = ADAPTIVE_PROFILES[profileId]
+    const { positionFens, moves } = yield* extractGameEffect(pgn)
+    const game = { startFen: positionFens[0], moves }
+    const triageControl: AnalyzeControl = {
+      mode: 'time',
+      movetimeMs: profile.triageMs,
+    }
 
-  await configureEngine(port, {
-    threads: opts.threads,
-    hashMb: opts.hashMb,
-    multipv: profile.triageMultipv,
-  })
+    yield* configureEngine(port, {
+      threads: opts.threads,
+      hashMb: opts.hashMb,
+      multipv: profile.triageMultipv,
+    })
 
-  const triageHits = opts.cache
-    ? await opts.cache.getBulk(
-        positionFens,
-        'time',
-        profile.triageMs,
-        profile.triageMultipv,
-      )
-    : positionFens.map(() => null)
-  const raw: RawPosition[] = []
-  const triagePuts: RawPosition[] = []
-  const terminals = terminalCps(positionFens)
-  const phases = computePhases(positionFens.map((fen) => ({ fen })))
-  let cachedPositions = 0
-  let enginePositions = 0
-  let remainingTriagePositions = terminals.filter(
-    (term, index) => term === null && !triageHits[index],
-  ).length
-
-  async function flushTriagePuts(): Promise<void> {
-    if (!opts.cache || !triagePuts.length) return
-    await opts.cache.putMany(
-      triagePuts,
-      'time',
-      profile.triageMs,
-      profile.triageMultipv,
-    )
-    triagePuts.length = 0
-  }
-
-  try {
-    for (let index = 0; index < positionFens.length; index++) {
-      const fen = positionFens[index]
-      const term = terminals[index]
-      const cached = triageHits[index]
-      if (term === null && !cached) remainingTriagePositions--
-      let pos: RawPosition
-      if (term !== null) {
-        pos = terminalPosition(fen, term)
-      } else if (cached) {
-        pos = cached
-        cachedPositions++
-      } else {
-        pos = await evalPosition(
-          port,
-          fen,
-          triageControl,
-          opts.goTimeoutMs ?? defaultGoTimeout(triageControl),
+    const triageHits = opts.cache
+      ? yield* opts.cache.getBulk(
+          positionFens,
+          'time',
+          profile.triageMs,
+          profile.triageMultipv,
         )
-        addSanToLines(pos)
-        enginePositions++
-        triagePuts.push(pos)
-        if (triagePuts.length >= 8) await flushTriagePuts()
+      : positionFens.map(() => null)
+    const raw: RawPosition[] = []
+    const triagePuts: RawPosition[] = []
+    const refinementBuffers = new Map<number, RawPosition[]>()
+    const terminals = terminalCps(positionFens)
+    const phases = computePhases(positionFens.map((fen) => ({ fen })))
+    let cachedPositions = 0
+    let enginePositions = 0
+    let remainingTriagePositions = terminals.filter(
+      (term, index) => term === null && !triageHits[index],
+    ).length
+
+    function flushTriagePuts() {
+      return Effect.gen(function* () {
+        if (!opts.cache || !triagePuts.length) return
+        yield* opts.cache.putMany(
+          triagePuts,
+          'time',
+          profile.triageMs,
+          profile.triageMultipv,
+        )
+        triagePuts.length = 0
+      })
+    }
+
+    return yield* Effect.gen(function* () {
+      for (let index = 0; index < positionFens.length; index++) {
+        const fen = positionFens[index]
+        const term = terminals[index]
+        const cached = triageHits[index]
+        if (term === null && !cached) remainingTriagePositions--
+        let pos: RawPosition
+        if (term !== null) {
+          pos = terminalPosition(fen, term)
+        } else if (cached) {
+          pos = cached
+          cachedPositions++
+        } else {
+          pos = yield* evalPosition(
+            port,
+            fen,
+            triageControl,
+            opts.goTimeoutMs ?? defaultGoTimeout(triageControl),
+          )
+          addSanToLines(pos)
+          enginePositions++
+          triagePuts.push(pos)
+          if (triagePuts.length >= 8) yield* flushTriagePuts()
+        }
+        raw.push(pos)
+        const winPct = whiteWinPct(pos.cp, sideToMoveAtPly(moves, index))
+        opts.onDetailedProgress?.(
+          {
+            stage: 'triage',
+            completed: index + 1,
+            total: positionFens.length,
+            currentPly: index,
+            phase: phases[index],
+            cachedPositions,
+            enginePositions,
+            remainingBudgetMs: remainingTriagePositions * profile.triageMs,
+          },
+          { index, winPct },
+        )
       }
-      raw.push(pos)
-      const winPct = whiteWinPct(pos.cp, sideToMoveAtPly(moves, index))
-      opts.onDetailedProgress?.(
-        {
-          stage: 'triage',
-          completed: index + 1,
-          total: positionFens.length,
-          currentPly: index,
-          phase: phases[index],
+
+      yield* flushTriagePuts()
+
+      const opening = yield* Effect.promise(() =>
+        lookupOpening(moves.map((move) => move.san)),
+      )
+      const book: BookInfo | undefined = opening
+        ? { maxPly: opening.moves.length, eco: opening }
+        : undefined
+      const criticalMoves = rankCriticalMoves(moves, raw, book?.maxPly ?? 0)
+      const targets = selectRefinementTargets(
+        criticalMoves,
+        positionFens.length,
+        profile,
+      )
+      const refinementTargets = targets.filter(
+        (target) => terminalCp(positionFens[target.positionIndex]) === null,
+      )
+
+      if (refinementTargets.length > 0) {
+        if (profile.refinementMultipv !== profile.triageMultipv) {
+          yield* port.send(
+            `setoption name Multipv value ${profile.refinementMultipv}`,
+          )
+          yield* ask(port, 'isready', isReadyOk)
+        }
+
+        let refined = 0
+        const refinementBudget = (
+          target: (typeof refinementTargets)[number],
+        ) => (target.budget === 'high' ? profile.highMs : profile.mediumMs)
+        let remainingRefinementBudgetMs = refinementTargets.reduce(
+          (sum, target) => sum + refinementBudget(target),
+          0,
+        )
+        opts.onDetailedProgress?.({
+          stage: 'refinement',
+          completed: 0,
+          total: refinementTargets.length,
+          currentPly: refinementTargets[0].positionIndex,
+          phase: phases[refinementTargets[0].positionIndex],
           cachedPositions,
           enginePositions,
-          remainingBudgetMs: remainingTriagePositions * profile.triageMs,
-        },
-        { index, winPct },
-      )
-    }
+          remainingBudgetMs: remainingRefinementBudgetMs,
+        })
 
-    await flushTriagePuts()
+        for (const budget of ['high', 'medium'] as const) {
+          const movetimeMs =
+            budget === 'high' ? profile.highMs : profile.mediumMs
+          const control: AnalyzeControl = { mode: 'time', movetimeMs }
+          const group = refinementTargets.filter(
+            (target) => target.budget === budget,
+          )
+          const refinementPuts: RawPosition[] = []
+          refinementBuffers.set(movetimeMs, refinementPuts)
+          const activeTargets = group.filter(
+            (target) => terminals[target.positionIndex] === null,
+          )
+          const refinementHits =
+            opts.cache && activeTargets.length > 0
+              ? yield* opts.cache.getBulk(
+                  activeTargets.map(
+                    (target) => positionFens[target.positionIndex],
+                  ),
+                  'time',
+                  movetimeMs,
+                  profile.refinementMultipv,
+                )
+              : activeTargets.map(() => null)
+          const hitByPosition = new Map(
+            activeTargets.map((target, index) => [
+              target.positionIndex,
+              refinementHits[index],
+            ]),
+          )
 
-    const opening = await lookupOpening(moves.map((move) => move.san))
-    const book: BookInfo | undefined = opening
-      ? { maxPly: opening.moves.length, eco: opening }
-      : undefined
-    const criticalMoves = rankCriticalMoves(moves, raw, book?.maxPly ?? 0)
-    const targets = selectRefinementTargets(
-      criticalMoves,
-      positionFens.length,
-      profile,
-    )
-    const refinementTargets = targets.filter(
-      (target) => terminalCp(positionFens[target.positionIndex]) === null,
-    )
+          for (const target of group) {
+            const index = target.positionIndex
+            const fen = positionFens[index]
+            if (terminals[index] !== null) continue
+            let pos = hitByPosition.get(index) ?? null
+            if (pos) {
+              cachedPositions++
+            } else {
+              pos = yield* evalPosition(
+                port,
+                fen,
+                control,
+                opts.goTimeoutMs ?? defaultGoTimeout(control),
+              )
+              addSanToLines(pos)
+              enginePositions++
+              refinementPuts.push(pos)
+              if (opts.cache && refinementPuts.length >= 8) {
+                yield* opts.cache.putMany(
+                  refinementPuts,
+                  'time',
+                  movetimeMs,
+                  profile.refinementMultipv,
+                )
+                refinementPuts.length = 0
+              }
+            }
+            raw[index] = pos
+            const winPct = whiteWinPct(pos.cp, sideToMoveAtPly(moves, index))
+            refined++
+            remainingRefinementBudgetMs -= movetimeMs
+            opts.onDetailedProgress?.(
+              {
+                stage: 'refinement',
+                completed: refined,
+                total: refinementTargets.length,
+                currentPly: index,
+                phase: phases[index],
+                cachedPositions,
+                enginePositions,
+                remainingBudgetMs: remainingRefinementBudgetMs,
+              },
+              { index, winPct },
+            )
+          }
 
-    if (refinementTargets.length > 0) {
-      if (profile.refinementMultipv !== profile.triageMultipv) {
-        await port.send(
-          `setoption name Multipv value ${profile.refinementMultipv}`,
-        )
-        await ask(port, 'isready', isReadyOk)
+          if (opts.cache && refinementPuts.length) {
+            yield* opts.cache.putMany(
+              refinementPuts,
+              'time',
+              movetimeMs,
+              profile.refinementMultipv,
+            )
+          }
+          refinementBuffers.delete(movetimeMs)
+        }
       }
 
-      let refined = 0
-      const refinementBudget = (target: (typeof refinementTargets)[number]) =>
-        target.budget === 'high' ? profile.highMs : profile.mediumMs
-      let remainingRefinementBudgetMs = refinementTargets.reduce(
-        (sum, target) => sum + refinementBudget(target),
-        0,
-      )
       opts.onDetailedProgress?.({
-        stage: 'refinement',
-        completed: 0,
-        total: refinementTargets.length,
-        currentPly: refinementTargets[0].positionIndex,
-        phase: phases[refinementTargets[0].positionIndex],
+        stage: 'finalizing',
+        completed: positionFens.length,
+        total: positionFens.length,
+        currentPly: positionFens.length - 1,
+        phase: phases[phases.length - 1] ?? 'opening',
         cachedPositions,
         enginePositions,
-        remainingBudgetMs: remainingRefinementBudgetMs,
       })
-
-      for (const budget of ['high', 'medium'] as const) {
-        const movetimeMs = budget === 'high' ? profile.highMs : profile.mediumMs
-        const control: AnalyzeControl = { mode: 'time', movetimeMs }
-        const group = refinementTargets.filter(
-          (target) => target.budget === budget,
-        )
-        const refinementPuts: RawPosition[] = []
-        const activeTargets = group.filter(
-          (target) => terminals[target.positionIndex] === null,
-        )
-        const refinementHits =
-          opts.cache && activeTargets.length > 0
-            ? await opts.cache.getBulk(
-                activeTargets.map(
-                  (target) => positionFens[target.positionIndex],
+      if (!opts.keepAlive) yield* port.send('quit')
+      return buildReview(game, raw, book)
+    }).pipe(
+      Effect.onError(() =>
+        Effect.gen(function* () {
+          yield* bestEffort(flushTriagePuts(), 'cache.flush_triage_after_abort')
+          for (const [movetimeMs, entries] of refinementBuffers) {
+            if (opts.cache && entries.length) {
+              yield* bestEffort(
+                opts.cache.putMany(
+                  entries,
+                  'time',
+                  movetimeMs,
+                  profile.refinementMultipv,
                 ),
-                'time',
-                movetimeMs,
-                profile.refinementMultipv,
+                'cache.flush_refinement_after_abort',
               )
-            : activeTargets.map(() => null)
-        const hitByPosition = new Map(
-          activeTargets.map((target, index) => [
-            target.positionIndex,
-            refinementHits[index],
-          ]),
-        )
-
-        for (const target of group) {
-          const index = target.positionIndex
-          const fen = positionFens[index]
-          if (terminals[index] !== null) continue
-          let pos = hitByPosition.get(index) ?? null
-          if (pos) {
-            cachedPositions++
-          } else {
-            pos = await evalPosition(
-              port,
-              fen,
-              control,
-              opts.goTimeoutMs ?? defaultGoTimeout(control),
-            )
-            addSanToLines(pos)
-            enginePositions++
-            refinementPuts.push(pos)
+            }
           }
-          raw[index] = pos
-          const winPct = whiteWinPct(pos.cp, sideToMoveAtPly(moves, index))
-          refined++
-          remainingRefinementBudgetMs -= movetimeMs
-          opts.onDetailedProgress?.(
-            {
-              stage: 'refinement',
-              completed: refined,
-              total: refinementTargets.length,
-              currentPly: index,
-              phase: phases[index],
-              cachedPositions,
-              enginePositions,
-              remainingBudgetMs: remainingRefinementBudgetMs,
-            },
-            { index, winPct },
-          )
-        }
-
-        if (opts.cache && refinementPuts.length) {
-          await opts.cache.putMany(
-            refinementPuts,
-            'time',
-            movetimeMs,
-            profile.refinementMultipv,
-          )
-        }
-      }
-    }
-
-    opts.onDetailedProgress?.({
-      stage: 'finalizing',
-      completed: positionFens.length,
-      total: positionFens.length,
-      currentPly: positionFens.length - 1,
-      phase: phases[phases.length - 1] ?? 'opening',
-      cachedPositions,
-      enginePositions,
-    })
-    if (!opts.keepAlive) await port.send('quit')
-    return buildReview(game, raw, book)
-  } catch (err) {
-    if (triagePuts.length) {
-      try {
-        await flushTriagePuts()
-      } catch (flushErr) {
-        console.warn(
-          'Falha ao descarregar a triagem adaptativa após aborto:',
-          flushErr,
-        )
-      }
-    }
-    throw err
-  }
+        }),
+      ),
+    )
+  }).pipe(
+    Effect.annotateLogs({ analysis: 'adaptive', profile: profileId }),
+    Effect.onExit((exit) =>
+      Exit.isFailure(exit) && !opts.keepAlive
+        ? bestEffort(port.send('quit'), 'engine.quit_after_abort')
+        : Effect.void,
+    ),
+  )
 }

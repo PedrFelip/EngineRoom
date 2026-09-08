@@ -1,10 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildReview } from '../../analyze'
-
-const _START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1'
-const _AFTER_E4 = 'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1'
-const _AFTER_E5 =
-  'rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq e6 0 2'
+import { buildReview } from './analyze-test-runtime'
 
 describe('buildReview — classificação objetiva', () => {
   // Bispo em c4 captura o peão de f7; rei recaptura: -2 peões (sacrifício).

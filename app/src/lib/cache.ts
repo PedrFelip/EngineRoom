@@ -1,5 +1,9 @@
-import { invoke } from '@tauri-apps/api/core'
-import type { PositionCache, RawLine, RawPosition } from './analyze'
+import { Effect, Either, Metric, Schema } from 'effect'
+import type { PositionCache, RawPosition } from './analyze'
+import { metrics } from './effect/diagnostics'
+import { CacheError, errorMessage } from './effect/errors'
+import { ipc } from './effect/ipc'
+import { CachedPositionSchema, CacheLinesSchema } from './effect/schemas'
 
 export interface CachedPositionDto {
   cp: number
@@ -7,48 +11,58 @@ export interface CachedPositionDto {
   reachedDepth: number
 }
 
-/**
- * Reconstrói um `RawPosition` a partir do DTO do Rust, fatiando as linhas ao
- * multipv pedido e usando o **depth real atingido** (da pv-1 ou `reachedDepth`),
- * nunca o escalar do pedido. Isso corrige o bug onde um hit em modo tempo
- * reportava `depth = movetimeMs` (ex.: 5000) em vez da profundidade real.
- */
+/** Validate once on entry. Corrupt/legacy-incompatible rows are cache misses. */
 export function shapeCachedPosition(
-  hit: CachedPositionDto,
+  hit: unknown,
   fen: string,
   requestedMultipv: number,
-): RawPosition {
-  const allLines = JSON.parse(hit.linesJson) as RawLine[]
-  const lines = allLines.slice(0, requestedMultipv)
+): RawPosition | null {
+  const dto = Schema.decodeUnknownEither(CachedPositionSchema)(hit)
+  if (Either.isLeft(dto)) return null
+  const decoded = Schema.decodeUnknownEither(CacheLinesSchema)(
+    dto.right.linesJson,
+  )
+  if (Either.isLeft(decoded) || decoded.right.length === 0) return null
+  const lines = decoded.right.slice(0, requestedMultipv)
   const principal = lines.find((l) => l.multipv === 1) ?? lines[0]
   return {
     fen,
-    cp: hit.cp,
-    depth: principal?.depth ?? hit.reachedDepth ?? 0,
+    cp: dto.right.cp,
+    depth: principal?.depth ?? dto.right.reachedDepth,
     pv: principal?.pv ?? [],
     lines,
   }
 }
+function cacheIpc(operation: string, args: Record<string, unknown>) {
+  return ipc(
+    operation,
+    args,
+    (cause) =>
+      new CacheError({
+        operation,
+        cause,
+        message: errorMessage(cause),
+      }),
+  )
+}
+function recordHit(pos: RawPosition | null) {
+  return Metric.increment(pos ? metrics.cacheHits : metrics.cacheMisses)
+}
 
-/**
- * PositionCache persistido no SQLite do lado Rust (comandos cache_get/cache_put
- * e suas variantes em lote cache_get_bulk/cache_put_many). Falhas de I/O
- * propagam como erro de análise — o cache é caminho crítico, não best-effort.
- */
 export function createTauriPositionCache(): PositionCache {
   return {
-    async get(fen, mode, value, multipv) {
-      const hit = await invoke<CachedPositionDto | null>('cache_get', {
+    get: (fen, mode, value, multipv) =>
+      cacheIpc('cache_get', {
         fen,
         mode,
         depth: value,
         multipv,
-      })
-      if (!hit) return null
-      return shapeCachedPosition(hit, fen, multipv)
-    },
-    async put(pos, mode, value, multipv) {
-      await invoke('cache_put', {
+      }).pipe(
+        Effect.map((hit) => shapeCachedPosition(hit, fen, multipv)),
+        Effect.tap(recordHit),
+      ),
+    put: (pos, mode, value, multipv) =>
+      cacheIpc('cache_put', {
         fen: pos.fen,
         mode,
         depth: value,
@@ -56,19 +70,27 @@ export function createTauriPositionCache(): PositionCache {
         reachedDepth: pos.depth,
         cp: pos.cp,
         linesJson: JSON.stringify(pos.lines ?? []),
-      })
-    },
-    async getBulk(fens, mode, value, multipv) {
-      const hits = await invoke<(CachedPositionDto | null)[]>(
-        'cache_get_bulk',
-        { fens, mode, depth: value, multipv },
-      )
-      return hits.map((hit, i) =>
-        hit ? shapeCachedPosition(hit, fens[i], multipv) : null,
-      )
-    },
-    async putMany(entries, mode, value, multipv) {
-      await invoke('cache_put_many', {
+      }).pipe(Effect.asVoid),
+    getBulk: (fens, mode, value, multipv) =>
+      cacheIpc('cache_get_bulk', {
+        fens,
+        mode,
+        depth: value,
+        multipv,
+      }).pipe(
+        Effect.map((hits) =>
+          fens.map((fen, i) =>
+            Array.isArray(hits) && hits.length === fens.length
+              ? shapeCachedPosition(hits[i], fen, multipv)
+              : null,
+          ),
+        ),
+        Effect.tap((hits) =>
+          Effect.forEach(hits, recordHit, { discard: true }),
+        ),
+      ),
+    putMany: (entries, mode, value, multipv) =>
+      cacheIpc('cache_put_many', {
         entries: entries.map((e) => ({
           fen: e.fen,
           reachedDepth: e.depth,
@@ -78,7 +100,6 @@ export function createTauriPositionCache(): PositionCache {
         mode,
         depth: value,
         multipv,
-      })
-    },
+      }).pipe(Effect.asVoid),
   }
 }

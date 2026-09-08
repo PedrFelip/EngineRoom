@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildReview } from '../../analyze'
+import { buildReview } from './analyze-test-runtime'
 
 const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1'
 const AFTER_E4 = 'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1'

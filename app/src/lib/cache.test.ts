@@ -17,10 +17,10 @@ describe('shapeCachedPosition', () => {
 
     const pos = shapeCachedPosition(dto, FEN, 2)
 
-    expect(pos.lines).toHaveLength(2)
-    expect(pos.depth).toBe(28)
-    expect(pos.pv).toEqual(['e2e4'])
-    expect(pos.cp).toBe(35)
+    expect(pos?.lines).toHaveLength(2)
+    expect(pos?.depth).toBe(28)
+    expect(pos?.pv).toEqual(['e2e4'])
+    expect(pos?.cp).toBe(35)
   })
 
   it('usa reachedDepth real, não o escalar do pedido (fix bug cache.ts:26)', () => {
@@ -36,7 +36,7 @@ describe('shapeCachedPosition', () => {
 
     const pos = shapeCachedPosition(dto, FEN, 1)
 
-    expect(pos.depth).toBe(28)
+    expect(pos?.depth).toBe(28)
   })
 
   it('cai para reachedDepth quando as linhas não trazem depth (legado)', () => {
@@ -48,7 +48,7 @@ describe('shapeCachedPosition', () => {
 
     const pos = shapeCachedPosition(dto, FEN, 1)
 
-    expect(pos.depth).toBe(20)
+    expect(pos?.depth).toBe(20)
   })
 
   it('preserva o pv principal mesmo quando multipv pedido é 1', () => {
@@ -63,7 +63,7 @@ describe('shapeCachedPosition', () => {
 
     const pos = shapeCachedPosition(dto, FEN, 1)
 
-    expect(pos.lines).toHaveLength(1)
-    expect(pos.pv).toEqual(['e2e4'])
+    expect(pos?.lines).toHaveLength(1)
+    expect(pos?.pv).toEqual(['e2e4'])
   })
 })

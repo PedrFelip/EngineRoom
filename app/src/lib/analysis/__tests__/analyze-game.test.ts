@@ -1,11 +1,15 @@
 import { describe, expect, it } from 'vitest'
-import { analyzeGame, type EnginePort, type RawLine } from '../../analyze'
 import {
   allHitsCache,
   fakeCache,
   fakePort,
   START_FEN,
 } from './analyze-test-helpers'
+import {
+  analyzeGame,
+  type EnginePort,
+  type RawLine,
+} from './analyze-test-runtime'
 
 describe('analyzeGame', () => {
   it('aciona o engine por ply e devolve a revisão', async () => {
@@ -186,20 +190,20 @@ describe('analyzeGame', () => {
         }
       },
     }
-    let captured: { lines: RawLine[]; depth: number } | null = null
+    const captured: { lines: RawLine[]; depth: number }[] = []
     const cache = fakeCache({
       async putMany(entries) {
         const last = entries[entries.length - 1]
-        if (last) captured = { lines: last.lines ?? [], depth: last.depth }
+        if (last) captured.push({ lines: last.lines ?? [], depth: last.depth })
       },
     })
 
     await analyzeGame('1. e4', { mode: 'depth', depth: 20 }, port, 2, { cache })
 
-    expect(captured).not.toBeNull()
-    expect(captured?.lines[0].depth).toBe(28)
-    expect(captured?.lines[1].depth).toBe(27)
-    expect(captured?.depth).toBe(28)
+    expect(captured).toHaveLength(1)
+    expect(captured[0].lines[0].depth).toBe(28)
+    expect(captured[0].lines[1].depth).toBe(27)
+    expect(captured[0].depth).toBe(28)
   })
 
   it('em modo tempo envia `go movetime N` para a engine (nunca `go depth`)', async () => {

@@ -1,13 +1,10 @@
 import { vi } from 'vitest'
 import type { ReviewConfig } from '../../../types'
-import type { PositionCache } from '../../analyze'
-import type { Backend, EnginePortHandle } from '../../backend'
-import {
-  createReviewSession,
-  type ReviewProgress,
-  type ReviewSessionState,
-} from '../../review-session'
+import type { PositionCache } from '../../analysis/__tests__/analyze-test-runtime'
+import type { ReviewProgress, ReviewSessionState } from '../../review-session'
 import { createReviewStore } from '../../review-store'
+import type { Backend, EnginePortHandle } from './review-test-runtime'
+import { createReviewSession } from './review-test-runtime'
 
 /** Port que responde o handshake UCI e cada `go` com info + bestmove.
  * `emit` injeta uma linha UCI como se viesse do stdout da engine. */

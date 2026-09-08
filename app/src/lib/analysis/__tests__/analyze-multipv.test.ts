@@ -1,10 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { buildReview } from '../../analyze'
+import { buildReview } from './analyze-test-runtime'
 
 const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1'
 const AFTER_E4 = 'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1'
-const _AFTER_E5 =
-  'rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq e6 0 2'
 
 describe('buildReview — alternativas MultiPV', () => {
   const game = {

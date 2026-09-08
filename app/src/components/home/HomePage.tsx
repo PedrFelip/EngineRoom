@@ -4,8 +4,14 @@ import {
   ADAPTIVE_PROFILES,
   adaptiveProfileForKind,
 } from '../../lib/adaptive-analysis'
+import { runUi } from '../../lib/effect/ui-runtime'
 import { resolveEngineTier } from '../../lib/engine-tier'
-import { deleteGame, getGame, listGames, storedToConfig } from '../../lib/games'
+import {
+  deleteGame,
+  getGame,
+  getReviewConfig,
+  listGames,
+} from '../../lib/games'
 import { type PgnParseResult, parsePgn, resultLabel } from '../../lib/pgn'
 import type {
   AnalysisKind,
@@ -52,6 +58,7 @@ export default function HomePage({ onStart }: Props) {
     null,
   )
   const [loadingMoreGames, setLoadingMoreGames] = useState(false)
+  const [historyError, setHistoryError] = useState<string | null>(null)
   const [validation, setValidation] =
     useState<PgnValidation>(initialPgnValidation)
 
@@ -71,17 +78,21 @@ export default function HomePage({ onStart }: Props) {
   const adaptiveProfile = adaptiveProfileForKind(analysisKind)
 
   useEffect(() => {
-    let cancelled = false
-    listGames(HISTORY_PAGE_SIZE)
+    const controller = new AbortController()
+    runUi(listGames(HISTORY_PAGE_SIZE), controller.signal)
       .then((page) => {
-        if (cancelled) return
+        if (controller.signal.aborted) return
         setGames(page.games)
         setGamesTotal(page.total)
         setNextGamesCursor(page.nextCursor)
       })
-      .catch((e) => console.warn('Falha ao listar partidas analisadas:', e))
+      .catch((e) => {
+        if (controller.signal.aborted) return
+        console.warn('Falha ao listar partidas analisadas:', e)
+        setHistoryError('Não foi possível carregar o histórico.')
+      })
     return () => {
-      cancelled = true
+      controller.abort()
     }
   }, [])
 
@@ -92,17 +103,23 @@ export default function HomePage({ onStart }: Props) {
 
   const openStored = useCallback(
     function openStored(id: number): void {
-      void getGame(id)
-        .then((game) => {
-          if (game) onStart(storedToConfig(game))
+      setHistoryError(null)
+      void runUi(getReviewConfig(id))
+        .then((config) => {
+          if (config) onStart(config)
         })
-        .catch((error) => console.warn('Falha ao abrir partida:', error))
+        .catch((error) => {
+          console.warn('Falha ao abrir partida:', error)
+          setHistoryError(
+            'Não foi possível abrir a revisão salva. Você pode reanalisar o PGN.',
+          )
+        })
     },
     [onStart],
   )
 
   const removeStored = useCallback(function removeStored(id: number): void {
-    void deleteGame(id)
+    void runUi(deleteGame(id))
       .then(() => {
         setGames((previous) => previous.filter((game) => game.id !== id))
         setGamesTotal((total) => Math.max(0, total - 1))
@@ -112,7 +129,7 @@ export default function HomePage({ onStart }: Props) {
 
   const reanalyzeStored = useCallback(
     function reanalyzeStored(id: number): void {
-      void getGame(id)
+      void runUi(getGame(id))
         .then((game) => {
           if (!game) return
           importPgn(game.pgn)
@@ -129,7 +146,7 @@ export default function HomePage({ onStart }: Props) {
     function loadMoreGames(): void {
       if (!nextGamesCursor || loadingMoreGames) return
       setLoadingMoreGames(true)
-      void listGames(HISTORY_PAGE_SIZE, nextGamesCursor)
+      void runUi(listGames(HISTORY_PAGE_SIZE, nextGamesCursor))
         .then((page) => {
           setGames((previous) => [...previous, ...page.games])
           setGamesTotal(page.total)
@@ -159,6 +176,12 @@ export default function HomePage({ onStart }: Props) {
   return (
     <div className='flex min-h-full flex-col items-center overflow-x-hidden px-4 py-8 md:px-6 md:py-10 lg:px-8'>
       <HomeHeader onOpenSettings={() => setSettingsOpen(true)} />
+
+      {historyError && (
+        <p role='alert' className='mb-4 text-sm text-ink-dim'>
+          {historyError}
+        </p>
+      )}
 
       <div className='flex w-full max-w-xl flex-col gap-8 md:max-w-6xl md:flex-row md:gap-10'>
         <div className='w-full max-w-xl shrink-0 md:max-w-md lg:max-w-xl'>

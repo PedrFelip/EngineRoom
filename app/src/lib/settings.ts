@@ -1,3 +1,6 @@
+import { Schema } from 'effect'
+import { SettingsInputSchema } from './effect/schemas'
+
 export type Theme = 'dark' | 'light'
 
 export interface Settings {
@@ -52,7 +55,7 @@ export function loadSettings(): Settings {
   try {
     const raw = localStorage.getItem(SETTINGS_KEY)
     if (!raw) return { ...DEFAULT_SETTINGS }
-    const parsed = JSON.parse(raw) as Partial<Settings>
+    const parsed = Schema.decodeUnknownSync(SettingsInputSchema)(raw)
     return {
       theme: parsed.theme === 'light' ? 'light' : 'dark',
       soundEnabled: parsed.soundEnabled !== false,

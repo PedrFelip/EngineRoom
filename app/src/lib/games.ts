@@ -1,7 +1,6 @@
-import { invoke } from '@tauri-apps/api/core'
+import { Effect, Schema } from 'effect'
 import type {
   GameCursor,
-  GamePage,
   PgnMeta,
   ReviewConfig,
   ReviewResult,
@@ -9,6 +8,15 @@ import type {
 } from '../types'
 import { adaptiveProfileForKind } from './adaptive-analysis'
 import { accuracyByPhaseOf } from './analyze'
+import { errorMessage, PersistenceError } from './effect/errors'
+import { decode, ipc } from './effect/ipc'
+import {
+  GamePageSchema,
+  type LegacyReview,
+  LegacyReviewSchema,
+  SavedIdSchema,
+  StoredGameSchema,
+} from './effect/schemas'
 import { resolveEngineTier } from './engine-tier'
 import { parsePgn } from './pgn'
 import { computePhases } from './phase'
@@ -20,25 +28,36 @@ import {
 } from './scoring'
 
 /** Página do histórico, da partida mais recente para a mais antiga. */
-export function listGames(
-  limit: number,
-  cursor: GameCursor | null = null,
-): Promise<GamePage> {
-  return invoke('games_list', { limit, cursor })
+export function listGames(limit: number, cursor: GameCursor | null = null) {
+  return gamesIpc('games_list', { limit, cursor }).pipe(
+    Effect.flatMap((data) => decode(GamePageSchema, data, 'games_list')),
+  )
 }
 
 /** Busca a partida completa (pgn + revisão) para reabertura instantânea. */
-export function getGame(id: number): Promise<StoredGame | null> {
-  return invoke('games_get', { id })
+export function getGame(id: number) {
+  return gamesIpc('games_get', { id }).pipe(
+    Effect.flatMap((data) =>
+      decode(Schema.NullOr(StoredGameSchema), data, 'games_get'),
+    ),
+  )
 }
 
-export function deleteGame(id: number): Promise<void> {
-  return invoke('games_delete', { id })
+export function getReviewConfig(id: number) {
+  return getGame(id).pipe(
+    Effect.flatMap((game) =>
+      game ? storedToConfig(game) : Effect.succeed(null),
+    ),
+  )
+}
+
+export function deleteGame(id: number) {
+  return gamesIpc('games_delete', { id }).pipe(Effect.asVoid)
 }
 
 /** Esvazia todo o histórico de partidas revisadas (não toca no cache). */
-export function clearGames(): Promise<void> {
-  return invoke('games_clear')
+export function clearGames() {
+  return gamesIpc('games_clear').pipe(Effect.asVoid)
 }
 
 /**
@@ -46,16 +65,13 @@ export function clearGames(): Promise<void> {
  * mesmos parâmetros (pgn, mode, depth/movetimeMs, multipv) substitui a
  * entrada anterior.
  */
-export function saveReview(
-  config: ReviewConfig,
-  result: ReviewResult,
-): Promise<number> {
+export function saveReview(config: ReviewConfig, result: ReviewResult) {
   const analysisKind = config.analysisKind ?? 'manual'
   const adaptiveProfile = adaptiveProfileForKind(analysisKind)
   let controlValue = config.engine.depth
   if (adaptiveProfile) controlValue = adaptiveProfile.highMs
   else if (config.mode === 'time') controlValue = config.movetimeMs ?? 0
-  return invoke('games_save', {
+  return gamesIpc('games_save', {
     game: {
       pgn: config.pgn,
       white: config.meta.white,
@@ -71,7 +87,7 @@ export function saveReview(
       accuracyBlack: result.accuracy.black,
       reviewJson: JSON.stringify(result),
     },
-  })
+  }).pipe(Effect.flatMap((data) => decode(SavedIdSchema, data, 'games_save')))
 }
 
 /**
@@ -79,52 +95,47 @@ export function saveReview(
  * classificações atuais, `phase`, `cpLoss` e accuracy no modelo atual.
  * Recomputa a partir das avaliações já persistidas — puro e barato.
  */
-function normalizeReview(result: ReviewResult): ReviewResult {
-  const hasPhases = result.positions.every((p) => p.phase)
-  const hasCpLoss = result.moves.every((m) => Number.isFinite(m.cpLoss))
-  const hasCurrentClassifications = result.moves.every((move) => {
-    const classification = move.classification as string
-    return classification !== 'brilhante' && classification !== 'otimo'
-  })
-  const hasCurrentAccuracy = result.accuracyModel === ACCURACY_MODEL_VERSION
-  if (
-    hasPhases &&
-    result.accuracyByPhase &&
-    hasCpLoss &&
-    hasCurrentClassifications &&
-    hasCurrentAccuracy
-  ) {
-    return result
-  }
+function normalizeReview(result: LegacyReview): ReviewResult {
   const phases = computePhases(result.positions)
   const positions = result.positions.map((p, i) => ({
     ...p,
     phase: p.phase ?? phases[i],
   }))
   const moves = result.moves.map((move) => {
-    const legacyClassification = move.classification as string
     const classification =
-      legacyClassification === 'brilhante' || legacyClassification === 'otimo'
+      move.classification === 'brilhante' || move.classification === 'otimo'
         ? classifyMove(move.winPctLoss, move.isBook)
         : move.classification
-    if (Number.isFinite(move.cpLoss)) return { ...move, classification }
     const before = result.positions[move.ply - 1]
     const after = result.positions[move.ply]
     return {
       ...move,
       classification,
-      cpLoss: before && after ? centipawnLoss(before.cp, after.cp) : 0,
+      cpLoss:
+        move.cpLoss ??
+        (before && after ? centipawnLoss(before.cp, after.cp) : 0),
     }
   })
-  const positionWinPcts = positions.map((position) => position.winPct)
-  const accuracy = gameAccuracy(moves, positionWinPcts)
+  const current =
+    result.accuracyModel === ACCURACY_MODEL_VERSION &&
+    result.positions.every((p) => p.phase) &&
+    result.moves.every(
+      (m) =>
+        m.cpLoss !== undefined &&
+        m.classification !== 'brilhante' &&
+        m.classification !== 'otimo',
+    ) &&
+    result.accuracyByPhase !== undefined
+  const winPcts = positions.map((p) => p.winPct)
   return {
-    ...result,
     positions,
     moves,
     accuracyModel: ACCURACY_MODEL_VERSION,
-    accuracy,
-    accuracyByPhase: accuracyByPhaseOf(moves, phases, positionWinPcts),
+    accuracy: current ? result.accuracy : gameAccuracy(moves, winPcts),
+    accuracyByPhase:
+      current && result.accuracyByPhase
+        ? result.accuracyByPhase
+        : accuracyByPhaseOf(moves, phases, winPcts),
   }
 }
 
@@ -134,35 +145,52 @@ function normalizeReview(result: ReviewResult): ReviewResult {
  * Os metadados são reparseados do PGN — fonte única de verdade para
  * elo/evento, que o store não duplica.
  */
-export function storedToConfig(game: StoredGame): ReviewConfig {
-  const mode = game.mode ?? 'depth'
-  const analysisKind = game.analysisKind ?? 'manual'
-  const movetimeMs =
-    analysisKind === 'manual' && mode === 'time' ? game.depth : undefined
-  const engine =
-    mode === 'depth' ? resolveEngineTier(game.depth) : resolveEngineTier(20)
+export function storedToConfig(game: StoredGame) {
+  return decode(LegacyReviewSchema, game.reviewJson, 'revisão salva').pipe(
+    Effect.map((review): ReviewConfig => {
+      const mode = game.mode ?? 'depth'
+      const analysisKind = game.analysisKind ?? 'manual'
+      const movetimeMs =
+        analysisKind === 'manual' && mode === 'time' ? game.depth : undefined
+      const engine =
+        mode === 'depth' ? resolveEngineTier(game.depth) : resolveEngineTier(20)
 
-  const parsed = parsePgn(game.pgn)
-  const meta: PgnMeta = parsed.ok
-    ? parsed.meta
-    : {
-        white: game.white,
-        black: game.black,
-        whiteElo: null,
-        blackElo: null,
-        result: game.result,
-        event: null,
-        plies: game.plies,
+      const parsed = parsePgn(game.pgn)
+      const meta: PgnMeta = parsed.ok
+        ? parsed.meta
+        : {
+            white: game.white,
+            black: game.black,
+            whiteElo: null,
+            blackElo: null,
+            result: game.result,
+            event: null,
+            plies: game.plies,
+          }
+
+      return {
+        pgn: game.pgn,
+        meta,
+        engine,
+        mode,
+        analysisKind,
+        ...(movetimeMs !== undefined ? { movetimeMs } : {}),
+        lines: game.multipv,
+        initialResult: normalizeReview(review),
       }
+    }),
+  )
+}
 
-  return {
-    pgn: game.pgn,
-    meta,
-    engine,
-    mode,
-    analysisKind,
-    ...(movetimeMs !== undefined ? { movetimeMs } : {}),
-    lines: game.multipv,
-    initialResult: normalizeReview(JSON.parse(game.reviewJson) as ReviewResult),
-  }
+function gamesIpc(operation: string, args?: Record<string, unknown>) {
+  return ipc(
+    operation,
+    args,
+    (cause) =>
+      new PersistenceError({
+        operation,
+        cause,
+        message: errorMessage(cause),
+      }),
+  )
 }
