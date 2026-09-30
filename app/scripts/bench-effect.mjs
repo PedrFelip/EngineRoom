@@ -2,8 +2,8 @@
 // Run in a quiet machine. Fake UCI only: these numbers exclude Stockfish CPU.
 import { Effect, Fiber } from 'effect'
 import { pathToFileURL } from 'node:url'
-import { analyzeGame } from '../src/lib/analyze.ts'
-import { evalPosition } from '../src/lib/analysis/engine-analysis.ts'
+import { analyzeGame } from '../src/lib/__tests__/reference/analyze.ts'
+import { evalPosition } from '../src/lib/__tests__/reference/analysis/engine-analysis.ts'
 
 const fen = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1'
 const pgn = '1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6 5. O-O Be7'

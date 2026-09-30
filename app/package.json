@@ -2,7 +2,7 @@
   "name": "app",
   "private": true,
   "version": "0.9.0",
-  "license": "MIT",
+  "license": "GPL-3.0-or-later",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -12,6 +12,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "bench:effect": "bun scripts/bench-effect.mjs",
+    "bench:rust": "cd src-tauri && cargo test --release --lib benchmark_analysis_overhead -- --ignored --nocapture",
+    "bench:compare": "python3 scripts/bench-compare.py",
     "bench:uci-ipc": "tauri dev -- -- --bench-uci-ipc",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.tests.json",
     "lint": "biome check src",
