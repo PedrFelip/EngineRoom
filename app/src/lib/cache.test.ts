@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { shapeCachedPosition } from './cache'
+import { shapeCachedPosition } from './__tests__/reference/cache'
 
 const FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1'
 

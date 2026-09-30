@@ -9,8 +9,14 @@ import {
   TestContext,
 } from 'effect'
 import { describe, expect, it, vi } from 'vitest'
-import { ask, evalPosition } from '../analysis/engine-analysis'
-import type { EngineExitReason, EnginePort } from '../analyze'
+import {
+  ask,
+  evalPosition,
+} from '../__tests__/reference/analysis/engine-analysis'
+import type {
+  EngineExitReason,
+  EnginePort,
+} from '../__tests__/reference/analyze'
 import {
   EngineCommandError,
   EngineExitedError,

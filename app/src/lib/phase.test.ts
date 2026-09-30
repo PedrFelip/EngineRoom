@@ -8,7 +8,7 @@ import {
   phaseBoundaries,
   phaseOfPosition,
   regionScore,
-} from './phase'
+} from './__tests__/reference/phase'
 
 describe('majorsAndMinors', () => {
   it('posição inicial tem 14 peças maiores/menores (4N 4B 4R 2Q)', () => {

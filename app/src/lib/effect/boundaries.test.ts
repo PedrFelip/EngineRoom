@@ -5,13 +5,16 @@ const mocks = vi.hoisted(() => ({ invoke: vi.fn() }))
 vi.mock('@tauri-apps/api/core', () => ({ invoke: mocks.invoke }))
 
 import type { StoredGame } from '../../types'
-import { createTauriPositionCache, shapeCachedPosition } from '../cache'
-import { listGames, storedToConfig } from '../games'
+import {
+  createTauriPositionCache,
+  shapeCachedPosition,
+} from '../__tests__/reference/cache'
+import { runUi } from '../__tests__/reference/effect/ui-runtime'
+import { listGames, storedToConfig } from '../__tests__/reference/games'
 import { getStorageStats } from '../storage'
 import { getSystemResources } from '../system'
 import { decode } from './ipc'
 import { EngineExitSchema, LegacyReviewSchema } from './schemas'
-import { runUi } from './ui-runtime'
 
 beforeEach(() => {
   mocks.invoke.mockReset()

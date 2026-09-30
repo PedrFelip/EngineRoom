@@ -1,13 +1,13 @@
 import { Chess } from 'chess.js'
 import { Deferred, Effect, Exit, Metric } from 'effect'
-import { bestEffort, metrics } from '../effect/diagnostics'
+import { bestEffort, metrics } from '../../../effect/diagnostics'
 import {
   type EngineError,
   EngineExitedError,
   EngineTimeoutError,
   InvalidPayloadError,
   MissingEvaluationError,
-} from '../effect/errors'
+} from '../../../effect/errors'
 
 import type { InfoScore } from '../uci'
 import { isReadyOk, isUciOk, parseInfo, scoreToCp } from '../uci'
@@ -20,7 +20,7 @@ import type {
   RawPosition,
 } from './analysis-types'
 
-export { MissingEvaluationError } from '../effect/errors'
+export { MissingEvaluationError } from '../../../effect/errors'
 
 interface ExtractedGame {
   positionFens: string[]

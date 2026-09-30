@@ -1,10 +1,9 @@
-import { Effect } from 'effect'
-import { ask } from './analysis/engine-analysis'
-import { errorMessage } from './effect/errors'
-import { createTauriEnginePort } from './engine-port'
-import { isUciOk, parseIdName } from './uci'
+import { Channel } from '@tauri-apps/api/core'
+import { Deferred, Effect, Either, Schema } from 'effect'
+import { bestEffort } from './effect/diagnostics'
+import { ProbeResultSchema } from './review-protocol'
+import { sessionCommand } from './tauri-backend'
 
-export { ENGINE_EXIT_EVENT, ENGINE_LINE_EVENT } from './engine-port'
 export interface ProbeResult {
   ok: boolean
   name: string | null
@@ -14,32 +13,46 @@ export interface ProbeOptions {
   timeoutMs?: number
 }
 
-/** Uses the same exclusive scoped engine as reviews. */
 export function probeEngine({
   timeoutMs = 8000,
 }: ProbeOptions = {}): Effect.Effect<ProbeResult> {
   return Effect.scoped(
     Effect.gen(function* () {
-      const port = yield* createTauriEnginePort
-      let name: string | null = null
-      yield* ask(
-        port,
-        'uci',
-        (line) => {
-          name = parseIdName(line) ?? name
-          return isUciOk(line)
-        },
-        timeoutMs,
+      const sessionId = crypto.randomUUID()
+      const result = yield* Deferred.make<ProbeResult>()
+      const channel = new Channel<unknown>()
+      channel.onmessage = (payload) => {
+        const parsed = Schema.decodeUnknownEither(ProbeResultSchema)(payload)
+        Deferred.unsafeDone(
+          result,
+          Effect.succeed(
+            Either.isRight(parsed)
+              ? parsed.right
+              : {
+                  ok: false,
+                  name: null,
+                  error: 'Resposta inválida da engine.',
+                },
+          ),
+        )
+      }
+      yield* Effect.acquireRelease(
+        sessionCommand('engine_probe', {
+          sessionId,
+          onEvent: channel,
+          timeoutMs,
+        }),
+        () =>
+          bestEffort(
+            sessionCommand('review_session_close', { sessionId }),
+            'probe.close',
+          ),
       )
-      return { ok: true, name }
+      return yield* Deferred.await(result)
     }),
   ).pipe(
     Effect.catchAll((error) =>
-      Effect.succeed({
-        ok: false,
-        name: null,
-        error: errorMessage(error),
-      }),
+      Effect.succeed({ ok: false, name: null, error: error.message }),
     ),
   )
 }

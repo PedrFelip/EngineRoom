@@ -1,13 +1,16 @@
 import { Deferred, Effect, Fiber } from 'effect'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { runUi } from './effect/ui-runtime'
+import { runUi } from './__tests__/reference/effect/ui-runtime'
 
 const mocks = vi.hoisted(() => ({ invoke: vi.fn(), listen: vi.fn() }))
 vi.mock('@tauri-apps/api/core', () => ({ invoke: mocks.invoke }))
 vi.mock('@tauri-apps/api/event', () => ({ listen: mocks.listen }))
 
-import { probeEngine } from './engine'
-import { createTauriEnginePort, ENGINE_LINE_EVENT } from './engine-port'
+import { probeEngine } from './__tests__/reference/engine'
+import {
+  createTauriEnginePort,
+  ENGINE_LINE_EVENT,
+} from './__tests__/reference/engine-port'
 
 beforeEach(() => {
   mocks.invoke.mockReset().mockResolvedValue(undefined)

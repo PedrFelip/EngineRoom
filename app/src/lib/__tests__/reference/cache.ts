@@ -1,9 +1,9 @@
 import { Effect, Either, Metric, Schema } from 'effect'
+import { metrics } from '../../effect/diagnostics'
+import { CacheError, errorMessage } from '../../effect/errors'
+import { ipc } from '../../effect/ipc'
+import { CachedPositionSchema, CacheLinesSchema } from '../../effect/schemas'
 import type { PositionCache, RawPosition } from './analyze'
-import { metrics } from './effect/diagnostics'
-import { CacheError, errorMessage } from './effect/errors'
-import { ipc } from './effect/ipc'
-import { CachedPositionSchema, CacheLinesSchema } from './effect/schemas'
 
 export interface CachedPositionDto {
   cp: number

@@ -5,7 +5,7 @@ import type {
   PositionAnalysis,
   PvLine,
   ReviewResult,
-} from '../../types'
+} from '../../../../types'
 import { computePhases } from '../phase'
 import {
   ACCURACY_MODEL_VERSION,

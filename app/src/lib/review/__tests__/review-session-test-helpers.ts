@@ -1,7 +1,10 @@
 import { vi } from 'vitest'
 import type { ReviewConfig } from '../../../types'
+import type {
+  ReviewProgress,
+  ReviewSessionState,
+} from '../../__tests__/reference/review-session'
 import type { PositionCache } from '../../analysis/__tests__/analyze-test-runtime'
-import type { ReviewProgress, ReviewSessionState } from '../../review-session'
 import { createReviewStore } from '../../review-store'
 import type { Backend, EnginePortHandle } from './review-test-runtime'
 import { createReviewSession } from './review-test-runtime'

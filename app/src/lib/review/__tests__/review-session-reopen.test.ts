@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { ReviewSessionState } from '../../review-session'
+import type { ReviewSessionState } from '../../__tests__/reference/review-session'
 import { createReviewStore } from '../../review-store'
 import {
   depthConfig,

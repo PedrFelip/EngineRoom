@@ -1,14 +1,14 @@
 import { listen } from '@tauri-apps/api/event'
 import { Effect, Either, Schema } from 'effect'
-import type { EngineExitReason, EnginePort } from './analyze'
-import { bestEffort } from './effect/diagnostics'
+import { bestEffort } from '../../effect/diagnostics'
 import {
   EngineCommandError,
   EngineSpawnError,
   errorMessage,
-} from './effect/errors'
-import { ipc } from './effect/ipc'
-import { EngineExitSchema } from './effect/schemas'
+} from '../../effect/errors'
+import { ipc } from '../../effect/ipc'
+import { EngineExitSchema } from '../../effect/schemas'
+import type { EngineExitReason, EnginePort } from './analyze'
 
 export const ENGINE_LINE_EVENT = 'engine://line'
 export const ENGINE_EXIT_EVENT = 'engine://exit'

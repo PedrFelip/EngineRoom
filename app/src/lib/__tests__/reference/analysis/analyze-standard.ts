@@ -1,8 +1,8 @@
 import { Effect, Exit } from 'effect'
-import type { ReviewResult } from '../../types'
+import type { ReviewResult } from '../../../../types'
+import { bestEffort } from '../../../effect/diagnostics'
+import type { AnalysisError } from '../../../effect/errors'
 import { lookupOpening } from '../eco'
-import { bestEffort } from '../effect/diagnostics'
-import type { AnalysisError } from '../effect/errors'
 import { computePhases } from '../phase'
 import { sideToMoveAtPly, whiteWinPct } from '../scoring'
 import {

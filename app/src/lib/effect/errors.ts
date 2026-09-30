@@ -48,6 +48,13 @@ export class SystemResourcesError extends Data.TaggedError(
   cause?: unknown
 }> {}
 
+export class SessionError extends Data.TaggedError('SessionError')<{
+  code: string
+  operation: string
+  message: string
+  cause?: unknown
+}> {}
+
 export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }

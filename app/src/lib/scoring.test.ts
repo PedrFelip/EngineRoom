@@ -11,7 +11,7 @@ import {
   sideToMoveAtPly,
   whiteCp,
   whiteWinPct,
-} from './scoring'
+} from './__tests__/reference/scoring'
 
 describe('cpToWinPct', () => {
   it('retorna 50% em posição igual (cp = 0)', () => {

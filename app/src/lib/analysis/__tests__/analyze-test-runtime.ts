@@ -2,14 +2,14 @@
  * retaining these fixtures lets the same inputs/assertions verify the new core. */
 import { Effect, Logger } from 'effect'
 import { vi } from 'vitest'
-import * as Analysis from '../../analyze'
+import { evalPosition as evaluate } from '../../__tests__/reference/analysis/engine-analysis'
+import * as Analysis from '../../__tests__/reference/analyze'
+import { runUi } from '../../__tests__/reference/effect/ui-runtime'
 import {
   CacheError,
   EngineCommandError,
   errorMessage,
 } from '../../effect/errors'
-import { runUi } from '../../effect/ui-runtime'
-import { evalPosition as evaluate } from '../engine-analysis'
 
 export const testWarnings = vi.fn()
 const testLogger = Logger.replace(
@@ -19,7 +19,7 @@ const testLogger = Logger.replace(
   }),
 )
 
-export * from '../../analyze'
+export * from '../../__tests__/reference/analyze'
 export type EnginePort = Omit<Analysis.EnginePort, 'send' | 'sendBatch'> & {
   send(command: string): void | Promise<void>
   sendBatch?(commands: readonly string[]): void | Promise<void>

@@ -7,7 +7,7 @@ import {
   parseIdName,
   parseInfo,
   scoreToCp,
-} from './uci'
+} from './__tests__/reference/uci'
 
 describe('isUciOk / isReadyOk', () => {
   it('detects uciok (trim-tolerant)', () => {

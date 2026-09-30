@@ -1,25 +1,28 @@
 import { Deferred, Effect, Layer, Logger, TestClock, TestContext } from 'effect'
 import { describe, expect, it, vi } from 'vitest'
-import type { PositionCache as CachePort, EnginePort } from '../analyze'
+import type {
+  PositionCache as CachePort,
+  EnginePort,
+} from '../__tests__/reference/analyze'
 import {
   Engine,
   GamesRepository,
   PositionCache,
   SystemResources,
-} from '../backend'
-import {
-  depthConfig,
-  existingResult,
-} from '../review/__tests__/review-session-test-helpers'
+} from '../__tests__/reference/backend'
+import { mountReviewSession } from '../__tests__/reference/effect/ui-runtime'
 import {
   createReviewSession,
   type LiveAnalysisSettings,
   type ReviewSessionState,
-} from '../review-session'
+} from '../__tests__/reference/review-session'
+import {
+  depthConfig,
+  existingResult,
+} from '../review/__tests__/review-session-test-helpers'
 import { createReviewStore } from '../review-store'
 import { diagnosticsSnapshot } from './diagnostics'
 import { PersistenceError } from './errors'
-import { mountReviewSession } from './ui-runtime'
 
 const settings: LiveAnalysisSettings = {
   searchSeconds: 2,

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
+import type { LiveAnalysisSettings } from '../../__tests__/reference/review-session'
 import type { PositionCache } from '../../analysis/__tests__/analyze-test-runtime'
 import { selectDisplayedPosition } from '../../review-selectors'
-import type { LiveAnalysisSettings } from '../../review-session'
 import {
   depthConfig,
   existingResult,

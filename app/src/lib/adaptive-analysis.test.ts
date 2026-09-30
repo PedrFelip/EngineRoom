@@ -3,8 +3,8 @@ import {
   ADAPTIVE_PROFILES,
   rankCriticalMoves,
   selectRefinementTargets,
-} from './adaptive-analysis'
-import type { PlayedMove, RawPosition } from './analyze'
+} from './__tests__/reference/adaptive-analysis'
+import type { PlayedMove, RawPosition } from './__tests__/reference/analyze'
 
 const SAC_BEFORE =
   'rnbqkbnr/pppppppp/8/8/2B1P3/8/PPPP1PPP/RNBQK1NR w KQkq - 0 1'

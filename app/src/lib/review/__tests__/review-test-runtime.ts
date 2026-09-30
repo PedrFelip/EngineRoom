@@ -2,17 +2,22 @@ import { Effect, Layer } from 'effect'
 import { afterEach } from 'vitest'
 import type { ReviewConfig, ReviewResult } from '../../../types'
 import {
+  PositionCache as CacheService,
+  Engine,
+  GamesRepository,
+  SystemResources,
+} from '../../__tests__/reference/backend'
+import {
+  type MountedReviewSession,
+  mountReviewSession,
+} from '../../__tests__/reference/effect/ui-runtime'
+import type { ReviewSessionOpts } from '../../__tests__/reference/review-session'
+import {
   type EnginePort,
   effectCache,
   effectPort,
   type PositionCache,
 } from '../../analysis/__tests__/analyze-test-runtime'
-import {
-  PositionCache as CacheService,
-  Engine,
-  GamesRepository,
-  SystemResources,
-} from '../../backend'
 import { bestEffort } from '../../effect/diagnostics'
 import {
   EngineSpawnError,
@@ -20,11 +25,6 @@ import {
   PersistenceError,
   SystemResourcesError,
 } from '../../effect/errors'
-import {
-  type MountedReviewSession,
-  mountReviewSession,
-} from '../../effect/ui-runtime'
-import type { ReviewSessionOpts } from '../../review-session'
 import type { SystemResources as Resources } from '../../system'
 
 export type EnginePortHandle = EnginePort & { dispose(): Promise<void> }

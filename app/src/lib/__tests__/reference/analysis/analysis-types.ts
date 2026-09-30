@@ -1,7 +1,7 @@
 import type { Effect } from 'effect'
-import type { Phase } from '../../types'
+import type { Phase } from '../../../../types'
+import type { CacheError, EngineCommandError } from '../../../effect/errors'
 import type { EcoEntry } from '../eco'
-import type { CacheError, EngineCommandError } from '../effect/errors'
 
 export interface BookInfo {
   maxPly: number

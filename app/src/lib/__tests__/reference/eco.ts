@@ -43,7 +43,7 @@ export async function lookupOpening(
 ): Promise<EcoEntry | null> {
   if (!cachedEntries) {
     try {
-      const mod = await import('../data/eco.json')
+      const mod = await import('../../../data/eco.json')
       cachedEntries = (mod.default as EcoEntry[]).slice()
     } catch {
       return null

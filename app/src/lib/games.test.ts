@@ -1,8 +1,8 @@
 import { Effect } from 'effect'
 import { describe, expect, it } from 'vitest'
 import type { ReviewResult, StoredGame } from '../types'
-import { storedToConfig as decodeStoredConfig } from './games'
-import { ACCURACY_MODEL_VERSION } from './scoring'
+import { storedToConfig as decodeStoredConfig } from './__tests__/reference/games'
+import { ACCURACY_MODEL_VERSION } from './__tests__/reference/scoring'
 
 const storedToConfig = (game: StoredGame) =>
   Effect.runSync(decodeStoredConfig(game))

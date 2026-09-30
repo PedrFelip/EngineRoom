@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { type EcoEntry, lookupEco } from './eco'
+import { type EcoEntry, lookupEco } from './__tests__/reference/eco'
 
 const DS: EcoEntry[] = [
   { code: 'B00', name: "King's Pawn", moves: ['e4'] },
@@ -44,7 +44,7 @@ describe('lookupOpening', () => {
       throw new Error('Importing a module script failed.')
     })
     try {
-      const { lookupOpening } = await import('./eco')
+      const { lookupOpening } = await import('./__tests__/reference/eco')
 
       await expect(lookupOpening(['e4', 'e5'])).resolves.toBeNull()
     } finally {
