@@ -1,41 +1,7 @@
+//! Shared stdout framing and retained IPC benchmark transport.
 use std::collections::BTreeMap;
-use std::sync::{Arc, Mutex};
-use tauri::{AppHandle, Emitter};
-use tauri_plugin_shell::process::CommandEvent;
-use tauri_plugin_shell::ShellExt;
-use tokio::sync::{mpsc, oneshot};
-
-/// The sidecar identifier passed to `Shell::sidecar`. Must be the **basename only**
-/// (e.g. "stockfish"), NOT the full `externalBin` path ("binaries/stockfish").
-/// tauri-build copies `src-tauri/binaries/stockfish-<triple>` to
-/// `<target_dir>/stockfish`, and the resolver looks it up next to the main exe.
-const SIDECAR: &str = "stockfish";
-
-/// Event name emitted to the frontend for UCI lines relevantes à revisão.
-/// Linhas `info` intermediárias são compactadas antes de cruzar o IPC.
-pub const LINE_EVENT: &str = "engine://line";
-
-/// Event name emitted to the frontend when the engine process exits — cleanly
-/// or crashing. Without this, a swallowed crash (SIGSEGV/OOM) looks identical
-/// to "still thinking" from the frontend, which hangs `ask()` to its timeout.
-pub const EXIT_EVENT: &str = "engine://exit";
-
-/// Payload of [`EXIT_EVENT`]: why/how the engine process ended.
-#[derive(Clone, serde::Serialize)]
-struct EngineExit {
-    /// Exit code, when known (clean exit or code-bearing termination).
-    code: Option<i32>,
-    /// Signal number that killed the process, if any (e.g. 11 = SIGSEGV).
-    signal: Option<i32>,
-    /// Plugin error string (UTF-8/IO failure), when that's the cause.
-    error: Option<String>,
-}
-
-/// Holds the currently running engine process (if any).
-#[derive(Default)]
-pub struct EngineState {
-    inner: Mutex<Option<EngineHandle>>,
-}
+use tauri::AppHandle;
+use tokio::sync::mpsc;
 
 /// Transporte sem sidecar usado exclusivamente pelo benchmark de IPC. Mantém
 /// o mesmo enfileiramento e filtro de comandos do writer real, sem deixar uma
@@ -59,35 +25,18 @@ impl Default for BenchmarkUciState {
 
 pub struct BenchmarkMode(pub bool);
 
-struct EngineHandle {
-    /// Channel used to send UCI commands to the engine's stdin.
-    tx: mpsc::UnboundedSender<String>,
-    /// Signalling this stops the writer task and kills the child.
-    shutdown: oneshot::Sender<()>,
-    reader: tauri::async_runtime::JoinHandle<()>,
-    writer: tauri::async_runtime::JoinHandle<()>,
-}
-
-impl EngineHandle {
-    async fn stop(self) {
-        // Interrompa e aguarde o emissor antes de permitir outra engine.
-        self.reader.abort();
-        let _ = self.reader.await;
-        let _ = self.shutdown.send(());
-        let _ = self.writer.await;
-    }
-}
-
 /// Reduz o volume de eventos durante uma busca sem mudar o contrato UCI visto
 /// pelo frontend. Stockfish produz muitas linhas `info`; para o resultado da
 /// posição, só importam as linhas da maior profundidade, uma por MultiPV,
 /// imediatamente antes de `bestmove`.
+#[allow(dead_code)]
 #[derive(Default)]
 struct UciOutputFilter {
     searching: bool,
     latest_lines: BTreeMap<u32, (u32, String)>,
 }
 
+#[allow(dead_code)]
 impl UciOutputFilter {
     fn on_command(&mut self, command: &str) {
         if command.trim().starts_with("go ") {
@@ -156,13 +105,6 @@ impl UciOutputFilter {
     }
 }
 
-fn forward_line(app: &AppHandle, filter: &Arc<Mutex<UciOutputFilter>>, line: String) {
-    let output = filter.lock().expect("filtro UCI envenenado").on_line(line);
-    for line in output {
-        let _ = app.emit(LINE_EVENT, line);
-    }
-}
-
 /// Consome as linhas UCI completas acumuladas em `stdout`.
 ///
 /// Um evento do shell pode conter várias linhas. Guardamos o sufixo sem `\n`
@@ -191,147 +133,7 @@ pub(super) fn consume_stdout_lines(stdout: &mut Vec<u8>, mut on_line: impl FnMut
     }
 }
 
-fn spawn_engine(app: &AppHandle) -> Result<EngineHandle, String> {
-    let command = app
-        .shell()
-        .sidecar(SIDECAR)
-        .map_err(|e| format!("Não foi possível localizar o Stockfish embarcado: {e}"))?;
-
-    let (mut rx, child) = command
-        .spawn()
-        .map_err(|e| format!("Falha ao iniciar o Stockfish embarcado: {e}"))?;
-
-    let filter = Arc::new(Mutex::new(UciOutputFilter::default()));
-    // Divide chunks em linhas antes de filtrá-las. O shell plugin pode
-    // agrupar mais de uma linha UCI no mesmo evento stdout.
-    let app_reader = app.clone();
-    let reader_filter = Arc::clone(&filter);
-    let reader = tauri::async_runtime::spawn(async move {
-        let mut reported_exit = false;
-        let mut stdout = Vec::new();
-        while let Some(event) = rx.recv().await {
-            match event {
-                CommandEvent::Stdout(bytes) => {
-                    stdout.extend_from_slice(&bytes);
-                    consume_stdout_lines(&mut stdout, |line| {
-                        forward_line(&app_reader, &reader_filter, line);
-                    });
-                }
-                CommandEvent::Terminated(p) => {
-                    if !reported_exit {
-                        reported_exit = true;
-                        let _ = app_reader.emit(
-                            EXIT_EVENT,
-                            EngineExit {
-                                code: p.code,
-                                signal: p.signal,
-                                error: None,
-                            },
-                        );
-                    }
-                }
-                CommandEvent::Error(err) => {
-                    if !reported_exit {
-                        reported_exit = true;
-                        let _ = app_reader.emit(
-                            EXIT_EVENT,
-                            EngineExit {
-                                code: None,
-                                signal: None,
-                                error: Some(err),
-                            },
-                        );
-                    }
-                }
-                _ => {}
-            }
-        }
-        let line = String::from_utf8_lossy(&stdout).trim().to_string();
-        if !line.is_empty() {
-            forward_line(&app_reader, &reader_filter, line);
-        }
-        // Channel closed = the process is gone but no Terminated/Error event
-        // was surfaced. Emit a generic exit so the frontend still fails fast
-        // instead of hanging to its ask() timeout.
-        if !reported_exit {
-            let _ = app_reader.emit(
-                EXIT_EVENT,
-                EngineExit {
-                    code: None,
-                    signal: None,
-                    error: Some("stdout fechado sem evento de término".into()),
-                },
-            );
-        }
-    });
-
-    // Writer task: pumps frontend commands into stdin; kills on shutdown.
-    let (tx, mut incoming) = mpsc::unbounded_channel::<String>();
-    let (shutdown, mut shutdown_rx) = oneshot::channel::<()>();
-    let writer_filter = Arc::clone(&filter);
-    let writer = tauri::async_runtime::spawn(async move {
-        let mut child = child;
-        loop {
-            tokio::select! {
-                Some(message) = incoming.recv() => {
-                    writer_filter
-                        .lock()
-                        .expect("filtro UCI envenenado")
-                        .on_command(&message);
-                    let payload = format!("{}\n", message);
-                    let _ = child.write(payload.as_bytes());
-                }
-                _ = &mut shutdown_rx => {
-                    let _ = child.kill();
-                    break;
-                }
-            }
-        }
-    });
-
-    Ok(EngineHandle {
-        tx,
-        shutdown,
-        reader,
-        writer,
-    })
-}
-
-#[tauri::command]
-pub fn engine_spawn(app: AppHandle, state: tauri::State<'_, EngineState>) -> Result<(), String> {
-    let mut guard = state.inner.lock().map_err(|e| e.to_string())?;
-    if guard.is_some() {
-        return Err("A engine já está em execução.".into());
-    }
-
-    *guard = Some(spawn_engine(&app)?);
-    Ok(())
-}
-
-#[tauri::command]
-pub fn engine_send(state: tauri::State<'_, EngineState>, line: String) -> Result<(), String> {
-    let guard = state.inner.lock().map_err(|e| e.to_string())?;
-    match guard.as_ref() {
-        Some(handle) => enqueue_uci_lines(&handle.tx, [line]),
-        None => Err("A engine não está em execução.".into()),
-    }
-}
-
-#[tauri::command]
-pub fn engine_send_batch(
-    state: tauri::State<'_, EngineState>,
-    lines: Vec<String>,
-) -> Result<(), String> {
-    if lines.is_empty() {
-        return Err("O batch UCI não pode estar vazio.".into());
-    }
-    let guard = state.inner.lock().map_err(|e| e.to_string())?;
-    match guard.as_ref() {
-        Some(handle) => enqueue_uci_lines(&handle.tx, lines),
-        None => Err("A engine não está em execução.".into()),
-    }
-}
-
+#[cfg(test)]
 fn enqueue_uci_lines(
     tx: &mpsc::UnboundedSender<String>,
     lines: impl IntoIterator<Item = String>,
@@ -401,15 +203,6 @@ pub fn benchmark_uci_report(
     ensure_benchmark_mode(&mode)?;
     println!("UCI_IPC_BENCHMARK_JSON={report}");
     app.exit(0);
-    Ok(())
-}
-
-#[tauri::command]
-pub async fn engine_stop(state: tauri::State<'_, EngineState>) -> Result<(), String> {
-    let handle = state.inner.lock().map_err(|e| e.to_string())?.take();
-    if let Some(handle) = handle {
-        handle.stop().await;
-    }
     Ok(())
 }
 
