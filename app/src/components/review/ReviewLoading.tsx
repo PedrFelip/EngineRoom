@@ -1,5 +1,6 @@
-import { Bot, Clock3 } from 'lucide-react'
+import { Clock3 } from 'lucide-react'
 import type { ReactNode } from 'react'
+import { ThinkingOrb } from 'thinking-orbs'
 import { formatEngineTag } from '../../lib/engine-tag'
 import type { ReviewProgress } from '../../lib/review-session'
 import type { ReviewConfig } from '../../types'
@@ -44,8 +45,13 @@ export default function ReviewLoading({
   return (
     <div className='flex min-h-full items-center justify-center px-4 py-10'>
       <div className='w-full max-w-3xl'>
-        <div className='mb-2 flex items-center justify-center gap-2 text-xs font-semibold tracking-[0.14em] text-brand uppercase'>
-          <span className='engine-loading-orb h-2 w-2 animate-pulse rounded-full bg-brand' />
+        <div
+          className='mb-4 hidden justify-center motion-safe:flex'
+          aria-hidden='true'
+        >
+          <ThinkingOrb state='solving' size={64} />
+        </div>
+        <div className='mb-2 text-center text-xs font-semibold tracking-[0.14em] text-brand uppercase'>
           Engine em análise
         </div>
         <h1 className='mb-1 text-center text-xl font-bold text-ink'>
@@ -120,15 +126,7 @@ export default function ReviewLoading({
             />
           </div>
         ) : (
-          <p className='flex items-center justify-center gap-2 text-sm text-ink-dim'>
-            <Bot
-              size={16}
-              strokeWidth={2}
-              className='animate-pulse'
-              aria-hidden='true'
-            />
-            {stageLabel}…
-          </p>
+          <p className='text-center text-sm text-ink-dim'>{stageLabel}…</p>
         )}
       </div>
     </div>
