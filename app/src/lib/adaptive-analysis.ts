@@ -1,3 +1,4 @@
+import profiles from '../../src-tauri/src/review/profiles.json'
 import type { AnalysisKind } from '../types'
 
 export type AdaptiveProfileId = 'fast' | 'deep'
@@ -15,33 +16,13 @@ export interface AdaptiveProfile {
   /** Limite das posições refinadas; gatilhos duros não são descartados. */
   maxRefineFraction: number
   minRefinePositions: number
+  contextPlies: number
 }
 
+// Profile budgets come from the same JSON embedded in the Rust analysis core.
 export const ADAPTIVE_PROFILES: Record<AdaptiveProfileId, AdaptiveProfile> = {
-  fast: {
-    id: 'fast',
-    label: 'Automático rápido',
-    triageMs: 180,
-    triageMultipv: 3,
-    mediumMs: 500,
-    highMs: 2_000,
-    refinementMultipv: 2,
-    mediumMultipv: 1,
-    maxRefineFraction: 0.15,
-    minRefinePositions: 4,
-  },
-  deep: {
-    id: 'deep',
-    label: 'Automático profundo',
-    triageMs: 450,
-    triageMultipv: 5,
-    mediumMs: 1_800,
-    highMs: 6_000,
-    refinementMultipv: 2,
-    mediumMultipv: 1,
-    maxRefineFraction: 0.25,
-    minRefinePositions: 6,
-  },
+  fast: { id: 'fast', label: 'Automático rápido', ...profiles.fast },
+  deep: { id: 'deep', label: 'Automático profundo', ...profiles.deep },
 }
 
 export function adaptiveProfileForKind(

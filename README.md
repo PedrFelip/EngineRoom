@@ -17,6 +17,8 @@ Aplicativo desktop para **revisão de partidas de xadrez** com o motor **Stockfi
 - **Engine embarcada**: usa exclusivamente o Stockfish 18 distribuído como sidecar, com botão de teste nas configurações.
 - **Tema claro/escuro** aplicado antes da pintura para evitar _flash_.
 
+Os parâmetros dos perfis automáticos ficam em `app/src-tauri/src/review/profiles.json`, compartilhado pelo núcleo Rust e pela interface. Tempos, MultiPV e limites de refinamento são definidos apenas nesse arquivo.
+
 ## Stack
 
 | Camada            | Tecnologias                                                                    |

@@ -4,8 +4,9 @@ use super::{
     types::*,
 };
 use shakmaty::{Chess, Color, Position, Role};
-use std::collections::BTreeMap;
-#[derive(Debug, Clone, Copy)]
+use std::{collections::BTreeMap, sync::LazyLock};
+#[derive(Debug, Clone, Copy, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Profile {
     pub triage_ms: u32,
     pub triage_multipv: u32,
@@ -13,35 +14,30 @@ pub struct Profile {
     pub high_ms: u32,
     pub refinement_multipv: u32,
     pub medium_multipv: u32,
+    #[serde(rename = "maxRefineFraction")]
     pub fraction: f64,
+    #[serde(rename = "minRefinePositions")]
     pub minimum: usize,
     pub context_plies: usize,
 }
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Profiles {
+    fast: Profile,
+    deep: Profile,
+}
+
+// Embedded in the binary and also imported by the frontend.
+static PROFILES: LazyLock<Profiles> = LazyLock::new(|| {
+    serde_json::from_str(include_str!("profiles.json"))
+        .expect("bundled adaptive profiles must match the Rust schema")
+});
+
 pub fn profile(kind: AnalysisKind) -> Option<Profile> {
     match kind {
         AnalysisKind::Manual => None,
-        AnalysisKind::Fast => Some(Profile {
-            triage_ms: 180,
-            triage_multipv: 3,
-            medium_ms: 500,
-            high_ms: 2000,
-            refinement_multipv: 2,
-            medium_multipv: 1,
-            fraction: 0.15,
-            minimum: 4,
-            context_plies: 2,
-        }),
-        AnalysisKind::Deep => Some(Profile {
-            triage_ms: 450,
-            triage_multipv: 5,
-            medium_ms: 1800,
-            high_ms: 6000,
-            refinement_multipv: 2,
-            medium_multipv: 1,
-            fraction: 0.25,
-            minimum: 6,
-            context_plies: 4,
-        }),
+        AnalysisKind::Fast => Some(PROFILES.fast),
+        AnalysisKind::Deep => Some(PROFILES.deep),
     }
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
