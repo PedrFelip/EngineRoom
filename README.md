@@ -100,7 +100,17 @@ análise ao vivo e teardown; seus dados não são gravados no histórico do usu�
 
 - `app/src-tauri/src/review/`: núcleo puro de xadrez/acurácia/fases/ECO,
   seleção adaptativa, transporte UCI, pipeline injetável, repository e sessão.
+- `app/src-tauri/src/review/core/`: leitura de PGN, operações de posição,
+  detecção de fases/aberturas e montagem da revisão em módulos separados;
+  `core.rs` mantém a interface usada pelo pipeline.
+- `app/src-tauri/src/review/session/`: execução da sessão (`task.rs`),
+  validação de payloads (`validation.rs`) e testes (`tests.rs`);
+  `session.rs` contém o registro de sessões e os comandos IPC.
 - `app/src-tauri/src/db/`: cache, histórico, migrações e estatísticas SQLite.
+- Testes unitários ficam em arquivos `tests.rs` junto ao módulo correspondente
+  ou em `review/tests/`, com engines e repository falsos compartilhados.
+  `app/src-tauri/tests/` contém o teste de integração externo. Os módulos de
+  testes são compilados somente com `#[cfg(test)]`.
 - `app/src/lib/review-session.ts`: aquisição scoped da sessão e aplicação de
   eventos ao store; `backend.ts` define o serviço `AnalysisSessions` e
   `tauri-backend.ts` fornece o adapter IPC.
