@@ -1,6 +1,5 @@
 import { readFileSync, writeFileSync } from 'node:fs'
 import { Chess } from 'chess.js'
-import { addSanToLines } from '../src/lib/__tests__/reference/analysis/engine-analysis'
 
 let seed = 42
 const chess = new Chess()
@@ -33,7 +32,6 @@ const games = Object.fromEntries(Object.entries(pgns).map(([id, pgn]) => {
       pv: [m.from + m.to + (m.promotion ?? '')],
     }))
     const pos = { fen, cp, depth: 32, pv: lines[0]?.pv ?? [], lines }
-    addSanToLines(pos)
     return pos
   })
   return [id, { pgn, raw, metadata: board.header(), plies: history.length }]

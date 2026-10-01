@@ -1,54 +1,6 @@
 use super::*;
 
 #[tokio::test]
-async fn pipeline_cache_and_engine_paths_match_frozen_reviews() {
-    for case in cases() {
-        let pgn = case["pgn"].as_str().unwrap();
-        let raw: Vec<RawPosition> = serde_json::from_value(case["raw"].clone()).unwrap();
-        for cached in [true, false] {
-            let scores: HashMap<_, _> = raw.iter().map(|r| (r.fen.clone(), r.clone())).collect();
-            let f = factory(FakeState {
-                scores: scores.clone(),
-                ..Default::default()
-            });
-            let repo = Arc::new(MemoryRepo::default());
-            if cached {
-                *repo.hits.lock().unwrap() = scores;
-            }
-            let mut pipeline = Pipeline::new(f.clone(), repo);
-            let (_tx, cancel) = cancel();
-            let mut progress = Vec::new();
-            let review = pipeline
-                .review(
-                    &config(pgn, AnalysisKind::Manual),
-                    None,
-                    &cancel,
-                    &mut |event| progress.push(event),
-                )
-                .await
-                .unwrap();
-            assert_parity(&case["expected"], &serde_json::to_value(review).unwrap());
-            assert_eq!(f.state.lock().unwrap().stopped, usize::from(!cached));
-            assert_eq!(f.acquired.load(Ordering::SeqCst), usize::from(!cached));
-            let evaluated = raw
-                .iter()
-                .filter(|r| core::terminal(&r.fen).unwrap().is_none())
-                .count();
-            assert_eq!(
-                f.state.lock().unwrap().searches,
-                if cached { 0 } else { evaluated }
-            );
-            assert_eq!(
-                progress
-                    .iter()
-                    .filter(|e| matches!(e,Event::Progress { progress:p } if p.update.is_some()))
-                    .count(),
-                raw.len()
-            );
-        }
-    }
-}
-#[tokio::test]
 async fn quiet_critical_move_refines_only_pair_and_flushes_before_failure() {
     let pgn = "1. a3 a6 2. h3 h6 3. f3 f6 4. g3 g6 5. Kf2 Kf7";
     for failure in [None, Some(13)] {

@@ -1,0 +1,648 @@
+{
+  "pgn": "1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6 5. O-O Be7",
+  "result": {
+    "positions": [
+      {
+        "ply": 0,
+        "fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+        "phase": "opening",
+        "depth": 14,
+        "cp": 15,
+        "winPct": 51.380429102931544,
+        "pv": [
+          "a2a3"
+        ],
+        "lines": [
+          {
+            "multipv": 1,
+            "san": "a3",
+            "cp": 15,
+            "winPct": 51.380429102931544,
+            "pv": [
+              "a2a3"
+            ]
+          },
+          {
+            "multipv": 2,
+            "san": "a4",
+            "cp": -80,
+            "winPct": 42.68863060981179,
+            "pv": [
+              "a2a4"
+            ]
+          },
+          {
+            "multipv": 3,
+            "san": "b3",
+            "cp": -175,
+            "winPct": 34.42607185634,
+            "pv": [
+              "b2b3"
+            ]
+          }
+        ]
+      },
+      {
+        "ply": 1,
+        "fen": "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1",
+        "phase": "opening",
+        "depth": 14,
+        "cp": -50,
+        "winPct": 54.5896437602999,
+        "pv": [
+          "b8c6"
+        ],
+        "lines": [
+          {
+            "multipv": 1,
+            "san": "Nc6",
+            "cp": 50,
+            "winPct": 54.5896437602999,
+            "pv": [
+              "b8c6"
+            ]
+          },
+          {
+            "multipv": 2,
+            "san": "Na6",
+            "cp": 145,
+            "winPct": 63.03926375862741,
+            "pv": [
+              "b8a6"
+            ]
+          },
+          {
+            "multipv": 3,
+            "san": "Nh6",
+            "cp": 240,
+            "winPct": 70.75881993130915,
+            "pv": [
+              "g8h6"
+            ]
+          }
+        ]
+      },
+      {
+        "ply": 2,
+        "fen": "rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2",
+        "phase": "opening",
+        "depth": 14,
+        "cp": 150,
+        "winPct": 63.46718261450347,
+        "pv": [
+          "a2a3"
+        ],
+        "lines": [
+          {
+            "multipv": 1,
+            "san": "a3",
+            "cp": 150,
+            "winPct": 63.46718261450347,
+            "pv": [
+              "a2a3"
+            ]
+          },
+          {
+            "multipv": 2,
+            "san": "a4",
+            "cp": 55,
+            "winPct": 55.04562746820834,
+            "pv": [
+              "a2a4"
+            ]
+          },
+          {
+            "multipv": 3,
+            "san": "b3",
+            "cp": -40,
+            "winPct": 46.324561670946,
+            "pv": [
+              "b2b3"
+            ]
+          }
+        ]
+      },
+      {
+        "ply": 3,
+        "fen": "rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 1 2",
+        "phase": "opening",
+        "depth": 14,
+        "cp": -400,
+        "winPct": 81.34874545019301,
+        "pv": [
+          "b8c6"
+        ],
+        "lines": [
+          {
+            "multipv": 1,
+            "san": "Nc6",
+            "cp": 400,
+            "winPct": 81.34874545019301,
+            "pv": [
+              "b8c6"
+            ]
+          },
+          {
+            "multipv": 2,
+            "san": "Na6",
+            "cp": 495,
+            "winPct": 86.0881359113184,
+            "pv": [
+              "b8a6"
+            ]
+          },
+          {
+            "multipv": 3,
+            "san": "Qe7",
+            "cp": 590,
+            "winPct": 89.77459941661641,
+            "pv": [
+              "d8e7"
+            ]
+          }
+        ]
+      },
+      {
+        "ply": 4,
+        "fen": "r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3",
+        "phase": "opening",
+        "depth": 14,
+        "cp": 200,
+        "winPct": 67.6211637485054,
+        "pv": [
+          "f3d4"
+        ],
+        "lines": [
+          {
+            "multipv": 1,
+            "san": "Nd4",
+            "cp": 200,
+            "winPct": 67.6211637485054,
+            "pv": [
+              "f3d4"
+            ]
+          },
+          {
+            "multipv": 2,
+            "san": "Nxe5",
+            "cp": 105,
+            "winPct": 59.54683835833042,
+            "pv": [
+              "f3e5"
+            ]
+          },
+          {
+            "multipv": 3,
+            "san": "Ng5",
+            "cp": 10,
+            "winPct": 50.920416012880864,
+            "pv": [
+              "f3g5"
+            ]
+          }
+        ]
+      },
+      {
+        "ply": 5,
+        "fen": "r1bqkbnr/pppp1ppp/2n5/1B2p3/4P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 3 3",
+        "phase": "opening",
+        "depth": 14,
+        "cp": -900,
+        "winPct": 96.49016480280658,
+        "pv": [
+          "a8b8"
+        ],
+        "lines": [
+          {
+            "multipv": 1,
+            "san": "Rb8",
+            "cp": 900,
+            "winPct": 96.49016480280658,
+            "pv": [
+              "a8b8"
+            ]
+          },
+          {
+            "multipv": 2,
+            "san": "Qe7",
+            "cp": 995,
+            "winPct": 97.50026312406624,
+            "pv": [
+              "d8e7"
+            ]
+          },
+          {
+            "multipv": 3,
+            "san": "Qf6",
+            "cp": 1090,
+            "winPct": 97.54474363414323,
+            "pv": [
+              "d8f6"
+            ]
+          }
+        ]
+      },
+      {
+        "ply": 6,
+        "fen": "r1bqkbnr/1ppp1ppp/p1n5/1B2p3/4P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 0 4",
+        "phase": "opening",
+        "depth": 14,
+        "cp": 0,
+        "winPct": 50,
+        "pv": [
+          "b5a6"
+        ],
+        "lines": [
+          {
+            "multipv": 1,
+            "san": "Bxa6",
+            "cp": 0,
+            "winPct": 50,
+            "pv": [
+              "b5a6"
+            ]
+          },
+          {
+            "multipv": 2,
+            "san": "Bxc6",
+            "cp": -95,
+            "winPct": 41.34315034157369,
+            "pv": [
+              "b5c6"
+            ]
+          },
+          {
+            "multipv": 3,
+            "san": "Bc4",
+            "cp": -190,
+            "winPct": 33.19019833124868,
+            "pv": [
+              "b5c4"
+            ]
+          }
+        ]
+      },
+      {
+        "ply": 7,
+        "fen": "r1bqkbnr/1ppp1ppp/p1n5/4p3/B3P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 1 4",
+        "phase": "opening",
+        "depth": 14,
+        "cp": 1200,
+        "winPct": 2.455256365856769,
+        "pv": [
+          "a8b8"
+        ],
+        "lines": [
+          {
+            "multipv": 1,
+            "san": "Rb8",
+            "cp": -1200,
+            "winPct": 2.455256365856769,
+            "pv": [
+              "a8b8"
+            ]
+          },
+          {
+            "multipv": 2,
+            "san": "Ra7",
+            "cp": -1105,
+            "winPct": 2.455256365856769,
+            "pv": [
+              "a8a7"
+            ]
+          },
+          {
+            "multipv": 3,
+            "san": "Qe7",
+            "cp": -1010,
+            "winPct": 2.455256365856769,
+            "pv": [
+              "d8e7"
+            ]
+          }
+        ]
+      },
+      {
+        "ply": 8,
+        "fen": "r1bqkb1r/1ppp1ppp/p1n2n2/4p3/B3P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 2 5",
+        "phase": "opening",
+        "depth": 14,
+        "cp": -300,
+        "winPct": 24.88744990616516,
+        "pv": [
+          "a4b5"
+        ],
+        "lines": [
+          {
+            "multipv": 1,
+            "san": "Bb5",
+            "cp": -300,
+            "winPct": 24.88744990616516,
+            "pv": [
+              "a4b5"
+            ]
+          },
+          {
+            "multipv": 2,
+            "san": "Bxc6",
+            "cp": -395,
+            "winPct": 18.93220100493414,
+            "pv": [
+              "a4c6"
+            ]
+          },
+          {
+            "multipv": 3,
+            "san": "Bb3",
+            "cp": -490,
+            "winPct": 14.13382401591943,
+            "pv": [
+              "a4b3"
+            ]
+          }
+        ]
+      },
+      {
+        "ply": 9,
+        "fen": "r1bqkb1r/1ppp1ppp/p1n2n2/4p3/B3P3/5N2/PPPP1PPP/RNBQ1RK1 b kq - 3 5",
+        "phase": "opening",
+        "depth": 14,
+        "cp": 100000,
+        "winPct": 2.455256365856769,
+        "pv": [
+          "a8b8"
+        ],
+        "lines": [
+          {
+            "multipv": 1,
+            "san": "Rb8",
+            "cp": -100000,
+            "winPct": 2.455256365856769,
+            "pv": [
+              "a8b8"
+            ]
+          },
+          {
+            "multipv": 2,
+            "san": "Ra7",
+            "cp": -99905,
+            "winPct": 2.455256365856769,
+            "pv": [
+              "a8a7"
+            ]
+          },
+          {
+            "multipv": 3,
+            "san": "Qe7",
+            "cp": -99810,
+            "winPct": 2.455256365856769,
+            "pv": [
+              "d8e7"
+            ]
+          }
+        ]
+      },
+      {
+        "ply": 10,
+        "fen": "r1bqk2r/1pppbppp/p1n2n2/4p3/B3P3/5N2/PPPP1PPP/RNBQ1RK1 w kq - 4 6",
+        "phase": "opening",
+        "depth": 14,
+        "cp": -99997,
+        "winPct": 2.4552563658567763,
+        "pv": [
+          "a4b5"
+        ],
+        "lines": [
+          {
+            "multipv": 1,
+            "san": "Bb5",
+            "cp": -99997,
+            "winPct": 2.4552563658567763,
+            "pv": [
+              "a4b5"
+            ]
+          },
+          {
+            "multipv": 2,
+            "san": "Bxc6",
+            "cp": -100092,
+            "winPct": 2.4552563658567763,
+            "pv": [
+              "a4c6"
+            ]
+          },
+          {
+            "multipv": 3,
+            "san": "Bb3",
+            "cp": -100187,
+            "winPct": 2.4552563658567763,
+            "pv": [
+              "a4b3"
+            ]
+          }
+        ]
+      }
+    ],
+    "moves": [
+      {
+        "ply": 1,
+        "color": "w",
+        "san": "e4",
+        "uci": "e2e4",
+        "fenBefore": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+        "classification": "livro",
+        "winPctBefore": 51.380429102931544,
+        "winPctAfter": 54.5896437602999,
+        "winPctLoss": 0,
+        "cpLoss": 0,
+        "bestUci": "a2a3",
+        "isBook": true,
+        "eco": {
+          "code": "C84",
+          "name": "Ruy Lopez: Closed"
+        }
+      },
+      {
+        "ply": 2,
+        "color": "b",
+        "san": "e5",
+        "uci": "e7e5",
+        "fenBefore": "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1",
+        "classification": "livro",
+        "winPctBefore": 45.4103562397001,
+        "winPctAfter": 36.53281738549653,
+        "winPctLoss": 8.877538854203571,
+        "cpLoss": 100,
+        "bestUci": "b8c6",
+        "isBook": true,
+        "eco": {
+          "code": "C84",
+          "name": "Ruy Lopez: Closed"
+        }
+      },
+      {
+        "ply": 3,
+        "color": "w",
+        "san": "Nf3",
+        "uci": "g1f3",
+        "fenBefore": "rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2",
+        "classification": "livro",
+        "winPctBefore": 63.46718261450347,
+        "winPctAfter": 81.34874545019301,
+        "winPctLoss": 0,
+        "cpLoss": 0,
+        "bestUci": "a2a3",
+        "isBook": true,
+        "eco": {
+          "code": "C84",
+          "name": "Ruy Lopez: Closed"
+        }
+      },
+      {
+        "ply": 4,
+        "color": "b",
+        "san": "Nc6",
+        "uci": "b8c6",
+        "fenBefore": "rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 1 2",
+        "classification": "livro",
+        "winPctBefore": 18.651254549806996,
+        "winPctAfter": 32.378836251494604,
+        "winPctLoss": 0,
+        "cpLoss": 0,
+        "bestUci": "b8c6",
+        "isBook": true,
+        "eco": {
+          "code": "C84",
+          "name": "Ruy Lopez: Closed"
+        }
+      },
+      {
+        "ply": 5,
+        "color": "w",
+        "san": "Bb5",
+        "uci": "f1b5",
+        "fenBefore": "r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3",
+        "classification": "livro",
+        "winPctBefore": 67.6211637485054,
+        "winPctAfter": 96.49016480280658,
+        "winPctLoss": 0,
+        "cpLoss": 0,
+        "bestUci": "f3d4",
+        "isBook": true,
+        "eco": {
+          "code": "C84",
+          "name": "Ruy Lopez: Closed"
+        }
+      },
+      {
+        "ply": 6,
+        "color": "b",
+        "san": "a6",
+        "uci": "a7a6",
+        "fenBefore": "r1bqkbnr/pppp1ppp/2n5/1B2p3/4P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 3 3",
+        "classification": "livro",
+        "winPctBefore": 3.509835197193425,
+        "winPctAfter": 50,
+        "winPctLoss": 0,
+        "cpLoss": 0,
+        "bestUci": "a8b8",
+        "isBook": true,
+        "eco": {
+          "code": "C84",
+          "name": "Ruy Lopez: Closed"
+        }
+      },
+      {
+        "ply": 7,
+        "color": "w",
+        "san": "Ba4",
+        "uci": "b5a4",
+        "fenBefore": "r1bqkbnr/1ppp1ppp/p1n5/1B2p3/4P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 0 4",
+        "classification": "livro",
+        "winPctBefore": 50,
+        "winPctAfter": 2.455256365856769,
+        "winPctLoss": 47.54474363414323,
+        "cpLoss": 1200,
+        "bestUci": "b5a6",
+        "isBook": true,
+        "eco": {
+          "code": "C84",
+          "name": "Ruy Lopez: Closed"
+        }
+      },
+      {
+        "ply": 8,
+        "color": "b",
+        "san": "Nf6",
+        "uci": "g8f6",
+        "fenBefore": "r1bqkbnr/1ppp1ppp/p1n5/4p3/B3P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 1 4",
+        "classification": "livro",
+        "winPctBefore": 97.54474363414323,
+        "winPctAfter": 75.11255009383484,
+        "winPctLoss": 22.43219354030839,
+        "cpLoss": 900,
+        "bestUci": "a8b8",
+        "isBook": true,
+        "eco": {
+          "code": "C84",
+          "name": "Ruy Lopez: Closed"
+        }
+      },
+      {
+        "ply": 9,
+        "color": "w",
+        "san": "O-O",
+        "uci": "e1g1",
+        "fenBefore": "r1bqkb1r/1ppp1ppp/p1n2n2/4p3/B3P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 2 5",
+        "classification": "livro",
+        "winPctBefore": 24.88744990616516,
+        "winPctAfter": 2.455256365856769,
+        "winPctLoss": 22.43219354030839,
+        "cpLoss": 99700,
+        "bestUci": "a4b5",
+        "isBook": true,
+        "eco": {
+          "code": "C84",
+          "name": "Ruy Lopez: Closed"
+        }
+      },
+      {
+        "ply": 10,
+        "color": "b",
+        "san": "Be7",
+        "uci": "f8e7",
+        "fenBefore": "r1bqkb1r/1ppp1ppp/p1n2n2/4p3/B3P3/5N2/PPPP1PPP/RNBQ1RK1 b kq - 3 5",
+        "classification": "livro",
+        "winPctBefore": 97.54474363414323,
+        "winPctAfter": 97.54474363414323,
+        "winPctLoss": 0,
+        "cpLoss": 3,
+        "bestUci": "a8b8",
+        "isBook": true,
+        "eco": {
+          "code": "C84",
+          "name": "Ruy Lopez: Closed"
+        }
+      }
+    ],
+    "accuracyModel": "lichess-2026-08",
+    "accuracy": {
+      "white": 47.27829950537094,
+      "black": 72.55454921144076
+    },
+    "accuracyByPhase": {
+      "opening": {
+        "white": 47.27829950537094,
+        "black": 72.55454921144076
+      },
+      "middlegame": {
+        "white": 100,
+        "black": 100
+      },
+      "endgame": {
+        "white": 100,
+        "black": 100
+      }
+    }
+  }
+}

@@ -1,36 +1,6 @@
 use super::*;
 
 #[test]
-fn frozen_typescript_core_and_adaptive_parity() {
-    for case in cases() {
-        let game = core::extract(case["pgn"].as_str().unwrap()).unwrap();
-        assert_parity(&case["moves"], &serde_json::to_value(&game.moves).unwrap());
-        let raw: Vec<RawPosition> = serde_json::from_value(case["raw"].clone()).unwrap();
-        assert_eq!(
-            game.fens,
-            raw.iter().map(|r| r.fen.clone()).collect::<Vec<_>>()
-        );
-        let review = core::build(&game, &raw).unwrap();
-        assert_parity(&case["expected"], &serde_json::to_value(&review).unwrap());
-        let critical = adaptive::rank(&game, &raw);
-        assert_parity(&case["critical"], &serde_json::to_value(&critical).unwrap());
-        assert_parity(
-            &case["targets"],
-            &serde_json::to_value(adaptive::reference_targets(
-                &critical,
-                raw.len(),
-                adaptive::profile(AnalysisKind::Fast).unwrap(),
-            ))
-            .unwrap(),
-        );
-        let mut sans = raw.clone();
-        for p in &mut sans {
-            core::add_san(p);
-        }
-        assert_parity(&case["raw"], &serde_json::to_value(sans).unwrap());
-    }
-}
-#[test]
 fn pgn_comments_variations_fen_promotion_and_invalid_moves() {
     let g = core::extract("[White \"Alice\"]\n1. e4 {hello} e5 (1... c5) 2. Nf3 $1 Nc6 *").unwrap();
     assert_eq!(g.moves.len(), 4);

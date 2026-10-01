@@ -1,6 +1,6 @@
 import { Effect, Fiber, Schema } from 'effect'
 import { describe, expect, it, vi } from 'vitest'
-import parity from '../../src-tauri/src/review/fixtures/parity.json'
+import reviewFixture from './__tests__/fixtures/review.json'
 import { AnalysisSessions } from './backend'
 import { ProbeResultSchema, SessionEventSchema } from './review-protocol'
 import { TauriBackend } from './tauri-backend'
@@ -92,7 +92,7 @@ describe('session IPC acquisition and validation', () => {
           const channel = mocks.channels[0]
           const event = {
             type: 'completed',
-            result: parity[0].expected,
+            result: reviewFixture.result,
             sessionId: id,
             sequence: 1,
           }
@@ -123,7 +123,7 @@ describe('session IPC acquisition and validation', () => {
         sessionId: 'id',
         sequence: 1,
         type: 'completed',
-        result: parity[0].expected,
+        result: reviewFixture.result,
       }).type,
     ).toBe('completed')
     expect(

@@ -1,4 +1,4 @@
-//! Explicit benchmark only: shared deterministic inputs with scripts/bench-pipeline.mjs.
+//! Explicit benchmark only: deterministic inputs for the Rust pipeline.
 use super::*;
 use serde::{Deserialize, Serialize};
 use std::time::Instant;

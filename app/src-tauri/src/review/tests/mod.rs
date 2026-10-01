@@ -28,30 +28,6 @@ mod pool;
 #[path = "repository.rs"]
 mod repository_tests;
 
-fn cases() -> Vec<serde_json::Value> {
-    serde_json::from_str(include_str!("../fixtures/parity.json")).unwrap()
-}
-fn assert_parity(expected: &serde_json::Value, actual: &serde_json::Value) {
-    match (expected, actual) {
-        (serde_json::Value::Number(a), serde_json::Value::Number(b)) => assert!(
-            (a.as_f64().unwrap() - b.as_f64().unwrap()).abs() < 1e-9,
-            "{a} != {b}"
-        ),
-        (serde_json::Value::Array(a), serde_json::Value::Array(b)) => {
-            assert_eq!(a.len(), b.len());
-            for (a, b) in a.iter().zip(b) {
-                assert_parity(a, b);
-            }
-        }
-        (serde_json::Value::Object(a), serde_json::Value::Object(b)) => {
-            assert_eq!(a.len(), b.len(), "{a:?} != {b:?}");
-            for (key, a) in a {
-                assert_parity(a, b.get(key).unwrap_or_else(|| panic!("missing {key}")));
-            }
-        }
-        _ => assert_eq!(expected, actual),
-    }
-}
 #[derive(Default)]
 pub(super) struct FakeState {
     pub(super) sent: Vec<String>,

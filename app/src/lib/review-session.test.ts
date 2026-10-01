@@ -1,7 +1,7 @@
 import { Effect, Layer, Schema } from 'effect'
 import { describe, expect, it, vi } from 'vitest'
-import parity from '../../src-tauri/src/review/fixtures/parity.json'
 import type { ReviewConfig } from '../types'
+import reviewFixture from './__tests__/fixtures/review.json'
 import { AnalysisSessions, type SessionPort } from './backend'
 import { SessionError } from './effect/errors'
 import { mountReviewSession } from './effect/ui-runtime'
@@ -9,9 +9,11 @@ import { ReviewResultSchema, type SessionEvent } from './review-protocol'
 import type { LiveAnalysisSettings } from './review-session'
 import { createReviewStore } from './review-store'
 
-const result = Schema.decodeUnknownSync(ReviewResultSchema)(parity[0].expected)
+const result = Schema.decodeUnknownSync(ReviewResultSchema)(
+  reviewFixture.result,
+)
 const config: ReviewConfig = {
-  pgn: parity[0].pgn,
+  pgn: reviewFixture.pgn,
   meta: {
     white: 'Jogador',
     black: 'Jogador',

@@ -70,9 +70,7 @@ bun run tauri build
 | `test`          | `vitest run`                                          | Roda os testes do frontend uma vez              |
 | `test:watch`    | `vitest`                                              | Testes do frontend em modo _watch_              |
 | `typecheck`     | `tsc --noEmit && tsc --noEmit -p tsconfig.tests.json` | Type-check da aplicação e dos testes            |
-| `bench:effect`  | `bun scripts/bench-effect.mjs`                        | Benchmark da referência TypeScript com engine falsa       |
 | `bench:rust`    | `cargo test --release --lib benchmark_analysis_overhead -- --ignored --nocapture` | Benchmark do pipeline Rust com engine falsa (script muda para `src-tauri/`) |
-| `bench:compare` | `python3 scripts/bench-compare.py`                    | Comparação TS/Rust em partidas reais, cache, adaptativo e Stockfish; detalhes em [`app/benchmarks/README.md`](app/benchmarks/README.md) |
 | `bench:uci-ipc` | `tauri dev -- -- --bench-uci-ipc`                     | Benchmark do transporte UCI histórico (não da sessão Rust) |
 
 ## Testes
@@ -108,8 +106,6 @@ análise ao vivo e teardown; seus dados não são gravados no histórico do usu�
   `tauri-backend.ts` fornece o adapter IPC.
 - `app/src/lib/review-protocol.ts`: schemas dos resultados e eventos estruturados.
 - `app/src/lib/review-store.ts`: navegação e variações; `use-review.ts` faz a ponte React.
-- `app/src/lib/__tests__/reference/`: pipeline TypeScript anterior, conservado
-  exclusivamente como referência de regressão/paridade, fora do bundle.
 - `app/src/data/eco.json`: dataset único, incorporado no backend Rust.
 - `app/src-tauri/src/engine.rs`: framing compartilhado de stdout e benchmark UCI histórico.
 
@@ -163,8 +159,8 @@ análise ao vivo e teardown; seus dados não são gravados no histórico do usu�
   mais recente. Fechar a sessão aguarda processo, persistência e operações de DB;
   sair do aplicativo aguarda o teardown das sessões.
 - **Núcleo puro e I/O injetada**: o pipeline usa `EngineFactory`/`EnginePort` e
-  `Repository`. Fakes e fixtures congeladas verificam paridade com o algoritmo
-  anterior, enquanto o teste real usa o mesmo adapter shell da produção.
+  `Repository`. Testes com engines falsas verificam o comportamento do Rust,
+  enquanto o teste real usa o mesmo adapter shell da produção.
 - **Frontend Effect**: aquisição, IPC e cleanup permanecem scoped, com erros
   tagged e schemas nas fronteiras. `review-store.ts` conserva estado e transições;
   nenhum loop de busca, cálculo de revisão ou salvamento roda em React.

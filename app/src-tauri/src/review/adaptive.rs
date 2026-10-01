@@ -219,29 +219,6 @@ pub fn rank_move(
 }
 
 pub fn targets(critical: &[Critical], count: usize, profile: Profile) -> Vec<Target> {
-    select_targets(critical, count, profile, false)
-}
-
-#[cfg(test)]
-pub fn reference_targets(critical: &[Critical], count: usize, profile: Profile) -> Vec<Target> {
-    select_targets(
-        critical,
-        count,
-        Profile {
-            fraction: 0.2,
-            minimum: 6,
-            ..profile
-        },
-        true,
-    )
-}
-
-fn select_targets(
-    critical: &[Critical],
-    count: usize,
-    profile: Profile,
-    legacy: bool,
-) -> Vec<Target> {
     let mut ranked: Vec<_> = critical
         .iter()
         .filter(|m| m.score >= 32 || m.hard)
@@ -249,19 +226,13 @@ fn select_targets(
     ranked.sort_by(|a, b| {
         b.hard
             .cmp(&a.hard)
-            .then_with(|| {
-                if legacy {
-                    std::cmp::Ordering::Equal
-                } else {
-                    refinement_kind(b).cmp(&refinement_kind(a))
-                }
-            })
+            .then_with(|| refinement_kind(b).cmp(&refinement_kind(a)))
             .then(b.score.cmp(&a.score))
     });
     let limit = profile
         .minimum
         .max((count as f64 * profile.fraction).ceil() as usize);
-    // Insertion order matches JS Map, including stable sorting of ties.
+    // Preserve insertion order, including stable sorting of ties.
     let mut order = Vec::new();
     let mut selected: BTreeMap<usize, Target> = BTreeMap::new();
     for m in ranked {
@@ -281,47 +252,36 @@ fn select_targets(
             if !selected.contains_key(&i) {
                 order.push(i);
             }
-            if selected.get(&i).is_none_or(|p| {
-                p.score < m.score || (p.budget == "medium" && budget == "high") || !legacy
-            }) {
-                selected.insert(
-                    i,
-                    Target {
-                        position_index: i,
-                        score: selected.get(&i).map_or(m.score, |t| t.score.max(m.score)),
-                        budget: if selected.get(&i).is_some_and(|t| t.budget == "high") {
-                            "high"
-                        } else {
-                            budget
-                        }
-                        .into(),
-                        hard: m.hard || selected.get(&i).is_some_and(|t| t.hard),
-                        search: {
-                            let next = profile.budget(refinement_kind(m));
-                            selected.get(&i).map_or(next, |t| SearchBudget {
-                                ms: t.search.ms.max(next.ms),
-                                multipv: t.search.multipv.max(next.multipv),
-                            })
-                        },
-                        kind: refinement_kind(m)
-                            .max(selected.get(&i).map_or(RefinementKind::Context, |t| t.kind)),
+            selected.insert(
+                i,
+                Target {
+                    position_index: i,
+                    score: selected.get(&i).map_or(m.score, |t| t.score.max(m.score)),
+                    budget: if selected.get(&i).is_some_and(|t| t.budget == "high") {
+                        "high"
+                    } else {
+                        budget
+                    }
+                    .into(),
+                    hard: m.hard || selected.get(&i).is_some_and(|t| t.hard),
+                    search: {
+                        let next = profile.budget(refinement_kind(m));
+                        selected.get(&i).map_or(next, |t| SearchBudget {
+                            ms: t.search.ms.max(next.ms),
+                            multipv: t.search.multipv.max(next.multipv),
+                        })
                     },
-                );
-            }
+                    kind: refinement_kind(m)
+                        .max(selected.get(&i).map_or(RefinementKind::Context, |t| t.kind)),
+                },
+            );
         }
     }
     let mut result: Vec<_> = order.iter().filter_map(|i| selected.remove(i)).collect();
     result.sort_by(|a, b| {
         b.hard
             .cmp(&a.hard)
-            .then_with(|| {
-                if legacy {
-                    // Frozen reference profile preserves its original two-tier order.
-                    (b.budget == "high").cmp(&(a.budget == "high"))
-                } else {
-                    b.kind.cmp(&a.kind)
-                }
-            })
+            .then_with(|| b.kind.cmp(&a.kind))
             .then(b.score.cmp(&a.score))
     });
     result
