@@ -43,14 +43,18 @@ impl Pipeline {
         cancel: &Cancellation,
     ) -> Result<()> {
         if let Some(port) = self.port.as_mut() {
-            if self.settings != Some((threads.unwrap_or(1), memory.unwrap_or(16), multipv)) {
-                if let Some(n) = threads {
-                    port.send(&format!("setoption name Threads value {n}"))?;
+            let next = (threads.unwrap_or(1), memory.unwrap_or(16), multipv);
+            let previous = self.settings;
+            if previous != Some(next) {
+                if previous.map(|s| s.0) != Some(next.0) {
+                    port.send(&format!("setoption name Threads value {}", next.0))?;
                 }
-                if let Some(n) = memory {
-                    port.send(&format!("setoption name Hash value {n}"))?;
+                if previous.map(|s| s.1) != Some(next.1) {
+                    port.send(&format!("setoption name Hash value {}", next.1))?;
                 }
-                port.send(&format!("setoption name MultiPV value {multipv}"))?;
+                if previous.map(|s| s.2) != Some(next.2) {
+                    port.send(&format!("setoption name MultiPV value {multipv}"))?;
+                }
                 engine::ask(port.as_mut(), "isready", "readyok", 10000, cancel).await?;
             }
         } else {
@@ -72,35 +76,34 @@ impl Pipeline {
             .await
             .map_err(|e| ReviewError::new("invalidPgn", "pgn", e))??;
         cancel.check()?;
+        if let Some(profile) = adaptive::profile(config.analysis_kind) {
+            self.discard().await;
+            return super::automatic::review(
+                self.factory.as_ref(),
+                self.repository.as_ref(),
+                &game,
+                profile,
+                sizing,
+                cancel,
+                emit,
+            )
+            .await;
+        }
         let phases = core::phases(&game.fens);
-        let terminals: Vec<_> = game
-            .fens
-            .iter()
-            .map(|f| core::terminal(f))
-            .collect::<Result<_>>()?;
-        let profile = adaptive::profile(config.analysis_kind);
-        let (mode, value, multipv, stage) = profile
-            .map(|p| (Mode::Time, p.triage_ms, p.triage_multipv, "triage"))
-            .unwrap_or((
-                config.mode,
-                if config.mode == Mode::Time {
-                    config.movetime_ms.unwrap_or(5000)
-                } else {
-                    config.engine.depth
-                },
-                config.lines,
-                "analyzing",
-            ));
-        let mut pending: Vec<(Mode, u32, u32, Vec<RawPosition>)> = Vec::new();
+        let mode = config.mode;
+        let value = if mode == Mode::Time {
+            config.movetime_ms.unwrap_or(5000)
+        } else {
+            config.engine.depth
+        };
+        let multipv = config.lines;
+        let mut pending = Vec::new();
         let run = async {
-            let (threads, memory) = sizing.map_or((None, None), |(t, m)| (Some(t), Some(m)));
-            self.ensure(threads, memory, multipv, cancel).await?;
             let hits = cancellable(
                 self.repository.lookup(&game.fens, mode, value, multipv),
                 cancel,
             )
             .await?;
-            cancel.check()?;
             if hits.len() != game.fens.len() {
                 return Err(ReviewError::new(
                     "cache",
@@ -108,26 +111,30 @@ impl Pipeline {
                     "Quantidade de avaliações inválida.",
                 ));
             }
-            pending.push((mode, value, multipv, vec![]));
+            let terminals = game
+                .fens
+                .iter()
+                .map(|f| core::terminal(f))
+                .collect::<Result<Vec<_>>>()?;
+            let mut remaining = hits
+                .iter()
+                .zip(&terminals)
+                .filter(|(h, t)| h.is_none() && t.is_none())
+                .count();
             let mut raw = Vec::new();
             let mut cached = 0;
             let mut searched = 0;
-            let mut remaining = terminals
-                .iter()
-                .zip(&hits)
-                .filter(|(t, h)| t.is_none() && h.is_none())
-                .count();
             for (i, fen) in game.fens.iter().enumerate() {
                 cancel.check()?;
-                if terminals[i].is_none() && hits[i].is_none() {
-                    remaining -= 1;
-                }
                 let pos = if let Some(cp) = terminals[i] {
                     core::terminal_raw(fen, cp)
                 } else if let Some(hit) = &hits[i] {
                     cached += 1;
                     hit.clone()
                 } else {
+                    let (threads, memory) = sizing.unwrap_or((1, 16));
+                    self.ensure(Some(threads), Some(memory), multipv, cancel)
+                        .await?;
                     let mut pos = engine::evaluate(
                         self.port.as_mut().unwrap().as_mut(),
                         fen,
@@ -138,30 +145,22 @@ impl Pipeline {
                     )
                     .await?;
                     core::add_san(&mut pos);
+                    pending.push(pos.clone());
                     searched += 1;
-                    pending[0].3.push(pos.clone());
-                    if pending[0].3.len() >= 8 {
-                        self.repository
-                            .put(&pending[0].3, mode, value, multipv)
-                            .await?;
-                        pending[0].3.clear();
-                    }
+                    remaining -= 1;
                     pos
                 };
                 emit(Event::Progress {
                     progress: Progress {
-                        stage: stage.into(),
+                        stage: "analyzing".into(),
                         completed: i + 1,
                         total: game.fens.len(),
                         current_ply: i,
                         phase: Some(phases[i]),
                         cached_positions: cached,
                         engine_positions: searched,
-                        remaining_budget_ms: if mode == Mode::Time {
-                            Some(remaining as u64 * value as u64)
-                        } else {
-                            None
-                        },
+                        remaining_budget_ms: (mode == Mode::Time)
+                            .then_some(remaining as u64 * value as u64),
                         update: Some(WinPctUpdate {
                             index: i,
                             win_pct: scoring::white_win_pct(
@@ -172,129 +171,14 @@ impl Pipeline {
                     },
                 });
                 raw.push(pos);
-            }
-            if !pending[0].3.is_empty() {
-                self.repository
-                    .put(&pending[0].3, mode, value, multipv)
-                    .await?;
-                pending[0].3.clear();
-            }
-            if let Some(profile) = profile {
-                let targets =
-                    adaptive::targets(&adaptive::rank(&game, &raw), game.fens.len(), profile);
-                let targets: Vec<_> = targets
-                    .into_iter()
-                    .filter(|t| terminals[t.position_index].is_none())
-                    .collect();
-                if !targets.is_empty() {
-                    self.ensure(threads, memory, profile.refinement_multipv, cancel)
-                        .await?;
-                    let budget = |t: &adaptive::Target| {
-                        if t.budget == "high" {
-                            profile.high_ms
-                        } else {
-                            profile.medium_ms
-                        }
-                    };
-                    let mut remaining: u64 = targets.iter().map(|t| budget(t) as u64).sum();
-                    let mut refined = 0;
-                    emit(Event::Progress {
-                        progress: Progress {
-                            stage: "refinement".into(),
-                            completed: 0,
-                            total: targets.len(),
-                            current_ply: targets[0].position_index,
-                            phase: Some(phases[targets[0].position_index]),
-                            cached_positions: cached,
-                            engine_positions: searched,
-                            remaining_budget_ms: Some(remaining),
-                            update: None,
-                        },
-                    });
-                    for kind in ["high", "medium"] {
-                        let group: Vec<_> = targets.iter().filter(|t| t.budget == kind).collect();
-                        if group.is_empty() {
-                            continue;
-                        }
-                        let value = budget(group[0]);
-                        let multipv = profile.refinement_multipv;
-                        let fens: Vec<_> = group
-                            .iter()
-                            .map(|t| game.fens[t.position_index].clone())
-                            .collect();
-                        let hits = cancellable(
-                            self.repository.lookup(&fens, Mode::Time, value, multipv),
-                            cancel,
-                        )
-                        .await?;
-                        if hits.len() != fens.len() {
-                            return Err(ReviewError::new(
-                                "cache",
-                                "cache.lookup",
-                                "Quantidade de avaliações inválida.",
-                            ));
-                        }
-                        pending.push((Mode::Time, value, multipv, vec![]));
-                        let buffer = pending.len() - 1;
-                        for (t, hit) in group.iter().zip(hits) {
-                            cancel.check()?;
-                            let i = t.position_index;
-                            let fen = &game.fens[i];
-                            let pos = if let Some(hit) = hit {
-                                cached += 1;
-                                hit
-                            } else {
-                                let mut pos = engine::evaluate(
-                                    self.port.as_mut().unwrap().as_mut(),
-                                    fen,
-                                    Mode::Time,
-                                    value,
-                                    timeout(Mode::Time, value),
-                                    cancel,
-                                )
-                                .await?;
-                                core::add_san(&mut pos);
-                                searched += 1;
-                                pending[buffer].3.push(pos.clone());
-                                if pending[buffer].3.len() >= 8 {
-                                    self.repository
-                                        .put(&pending[buffer].3, Mode::Time, value, multipv)
-                                        .await?;
-                                    pending[buffer].3.clear();
-                                }
-                                pos
-                            };
-                            refined += 1;
-                            remaining -= value as u64;
-                            emit(Event::Progress {
-                                progress: Progress {
-                                    stage: "refinement".into(),
-                                    completed: refined,
-                                    total: targets.len(),
-                                    current_ply: i,
-                                    phase: Some(phases[i]),
-                                    cached_positions: cached,
-                                    engine_positions: searched,
-                                    remaining_budget_ms: Some(remaining),
-                                    update: Some(WinPctUpdate {
-                                        index: i,
-                                        win_pct: scoring::white_win_pct(
-                                            pos.cp,
-                                            fen.split_whitespace().nth(1) != Some("b"),
-                                        ),
-                                    }),
-                                },
-                            });
-                            raw[i] = pos;
-                        }
-                        if !pending[buffer].3.is_empty() {
-                            self.repository
-                                .put(&pending[buffer].3, Mode::Time, value, multipv)
-                                .await?;
-                            pending[buffer].3.clear();
-                        }
-                    }
+                if pending.len() >= 8 {
+                    self.repository.put(&pending, mode, value, multipv).await?;
+                    pending.clear();
                 }
+            }
+            if !pending.is_empty() {
+                self.repository.put(&pending, mode, value, multipv).await?;
+                pending.clear();
             }
             cancel.check()?;
             emit(Event::Progress {
@@ -314,14 +198,9 @@ impl Pipeline {
         }
         .await;
         self.discard().await;
-        if run.is_err() {
-            for (mode, value, multipv, entries) in &pending {
-                if !entries.is_empty() {
-                    if let Err(error) = self.repository.put(entries, *mode, *value, *multipv).await
-                    {
-                        emit(Event::Warning { error });
-                    }
-                }
+        if run.is_err() && !pending.is_empty() {
+            if let Err(error) = self.repository.put(&pending, mode, value, multipv).await {
+                emit(Event::Warning { error });
             }
         }
         run
@@ -462,14 +341,14 @@ impl Pipeline {
 pub fn hash_mb(memory: u32) -> u32 {
     ((memory as f64 * 0.2).floor() as u32).clamp(512, 4096)
 }
-fn timeout(mode: Mode, value: u32) -> u64 {
+pub(super) fn timeout(mode: Mode, value: u32) -> u64 {
     if mode == Mode::Depth {
         180000
     } else {
         value as u64 * 3 + 10000
     }
 }
-async fn cancellable<T>(
+pub(super) async fn cancellable<T>(
     task: super::engine::Task<'_, Result<T>>,
     cancel: &Cancellation,
 ) -> Result<T> {

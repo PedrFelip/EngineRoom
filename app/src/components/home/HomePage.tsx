@@ -327,8 +327,9 @@ export default function HomePage({ onStart }: Props) {
                   })}
                 </div>
                 <p className='mt-3 text-center text-xs text-ink-dim'>
-                  A segunda passagem revisita apenas os pares antes/depois dos
-                  lances prioritários.
+                  Os lances críticos têm prioridade e mais tempo de análise.
+                  Sequências táticas recebem revisão adicional quando
+                  necessário.
                 </p>
               </div>
             )}

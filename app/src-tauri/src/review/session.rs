@@ -812,6 +812,7 @@ mod tests {
             .filter(|c| c.starts_with("go "))
             .count();
         events.clear();
+        let stopped_before_cache = stopped.load(Ordering::SeqCst);
         pipeline
             .review(&manual, None, &root, &mut |e| events.push(e))
             .await
@@ -825,13 +826,14 @@ mod tests {
                 .count()
         );
         assert!(events.iter().any(|e|matches!(e,Event::Progress {progress:p} if p.cached_positions==3 && p.engine_positions==0)));
+        assert_eq!(stopped.load(Ordering::SeqCst), stopped_before_cache);
         let mut adaptive = manual.clone();
         adaptive.analysis_kind = AnalysisKind::Fast;
         pipeline
             .review(&adaptive, None, &root, &mut |_| {})
             .await
             .unwrap();
-        assert!(sent.lock().unwrap().iter().any(|c| c == "go movetime 120"));
+        assert!(sent.lock().unwrap().iter().any(|c| c == "go movetime 180"));
         let fen = core::extract(&manual.pgn).unwrap().fens[1].clone();
         let mut live = settings();
         live.lines = 1;
@@ -902,7 +904,7 @@ mod tests {
         assert!(id.iter().any(|l| l.contains("Stockfish 18")));
         probe.shutdown().await;
         assert_eq!(manager.permit.available_permits(), 1);
-        assert!(stopped.load(Ordering::SeqCst) >= 6);
+        assert!(stopped.load(Ordering::SeqCst) >= 5);
         drop(close);
     }
 }

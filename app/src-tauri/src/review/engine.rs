@@ -54,6 +54,14 @@ pub trait EnginePort: Send {
 }
 pub trait EngineFactory: Send + Sync {
     fn acquire<'a>(&'a self, cancel: &'a Cancellation) -> Task<'a, Result<Box<dyn EnginePort>>>;
+    /// One owner leases the whole group. Adapters without pool support stay serial.
+    fn acquire_pool<'a>(
+        &'a self,
+        _count: usize,
+        cancel: &'a Cancellation,
+    ) -> Task<'a, Result<Vec<Box<dyn EnginePort>>>> {
+        Box::pin(async move { Ok(vec![self.acquire(cancel).await?]) })
+    }
 }
 pub struct SidecarFactory<R: tauri::Runtime = tauri::Wry> {
     pub app: tauri::AppHandle<R>,
@@ -62,7 +70,7 @@ pub struct SidecarFactory<R: tauri::Runtime = tauri::Wry> {
 struct Sidecar {
     child: Option<CommandChild>,
     rx: tauri::async_runtime::Receiver<CommandEvent>,
-    permit: Option<OwnedSemaphorePermit>,
+    permit: Option<Arc<OwnedSemaphorePermit>>,
     stdout: Vec<u8>,
     lines: VecDeque<String>,
     exited: bool,
@@ -70,31 +78,56 @@ struct Sidecar {
 impl<R: tauri::Runtime> EngineFactory for SidecarFactory<R> {
     fn acquire<'a>(&'a self, cancel: &'a Cancellation) -> Task<'a, Result<Box<dyn EnginePort>>> {
         Box::pin(async move {
+            self.acquire_pool(1, cancel)
+                .await?
+                .pop()
+                .ok_or_else(|| ReviewError::new("engineSpawn", "engine.acquire", "Pool vazio."))
+        })
+    }
+    fn acquire_pool<'a>(
+        &'a self,
+        count: usize,
+        cancel: &'a Cancellation,
+    ) -> Task<'a, Result<Vec<Box<dyn EnginePort>>>> {
+        Box::pin(async move {
             let permit = tokio::select! {
                 _ = cancel.cancelled() => return Err(ReviewError::cancelled()),
                 permit = self.permit.clone().acquire_owned() => permit.map_err(|e| ReviewError::new("engineSpawn", "engine.acquire", e))?,
             };
-            cancel.check()?;
-            let (rx, child) = self
-                .app
-                .shell()
-                .sidecar("stockfish")
-                .and_then(|c| c.set_raw_out(true).spawn())
-                .map_err(|e| {
-                    ReviewError::new(
-                        "engineSpawn",
-                        "engine.spawn",
-                        format!("Falha ao iniciar o Stockfish: {e}"),
-                    )
-                })?;
-            Ok(Box::new(Sidecar {
-                child: Some(child),
-                rx,
-                permit: Some(permit),
-                stdout: vec![],
-                lines: VecDeque::new(),
-                exited: false,
-            }) as Box<dyn EnginePort>)
+            let permit = Arc::new(permit);
+            let mut ports: Vec<Box<dyn EnginePort>> = Vec::new();
+            for _ in 0..count.max(1) {
+                let spawned = cancel.check().and_then(|_| {
+                    self.app
+                        .shell()
+                        .sidecar("stockfish")
+                        .and_then(|c| c.set_raw_out(true).spawn())
+                        .map_err(|e| {
+                            ReviewError::new(
+                                "engineSpawn",
+                                "engine.spawn",
+                                format!("Falha ao iniciar o Stockfish: {e}"),
+                            )
+                        })
+                });
+                match spawned {
+                    Ok((rx, child)) => ports.push(Box::new(Sidecar {
+                        child: Some(child),
+                        rx,
+                        permit: Some(permit.clone()),
+                        stdout: vec![],
+                        lines: VecDeque::new(),
+                        exited: false,
+                    })),
+                    Err(error) => {
+                        for port in &mut ports {
+                            port.shutdown().await;
+                        }
+                        return Err(error);
+                    }
+                }
+            }
+            Ok(ports)
         })
     }
 }
@@ -248,6 +281,9 @@ pub fn parse_info(line: &str) -> Option<RawLine> {
                 pv.extend(words.by_ref().map(str::to_owned));
                 break;
             }
+            // Bounds from an unfinished aspiration window are not exact
+            // evaluations and must not overwrite a completed score.
+            "lowerbound" | "upperbound" => return None,
             "string" => break,
             _ => {}
         }
@@ -268,9 +304,22 @@ pub async fn evaluate(
     timeout: u64,
     cancel: &Cancellation,
 ) -> Result<RawPosition> {
+    evaluate_candidates(port, fen, mode, value, timeout, cancel, &[]).await
+}
+
+/// A restricted search is suitable for review, never a general FEN cache entry.
+pub async fn evaluate_candidates(
+    port: &mut dyn EnginePort,
+    fen: &str,
+    mode: crate::db::mode::Mode,
+    value: u32,
+    timeout: u64,
+    cancel: &Cancellation,
+    candidates: &[String],
+) -> Result<RawPosition> {
     cancel.check()?;
     port.send(&format!("position fen {fen}"))?;
-    let go = format!(
+    let mut go = format!(
         "go {} {value}",
         if mode == crate::db::mode::Mode::Depth {
             "depth"
@@ -278,6 +327,10 @@ pub async fn evaluate(
             "movetime"
         }
     );
+    if !candidates.is_empty() {
+        go.push_str(" searchmoves ");
+        go.push_str(&candidates.join(" "));
+    }
     port.send(&go)?;
     let read = async {
         let mut latest: BTreeMap<u32, RawLine> = BTreeMap::new();

@@ -24,6 +24,7 @@ mod benchmark;
 #[path = "core.rs"]
 mod core_tests;
 mod pipeline;
+mod pool;
 #[path = "repository.rs"]
 mod repository_tests;
 

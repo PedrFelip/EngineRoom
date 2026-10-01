@@ -28,7 +28,8 @@ async fn pipeline_cache_and_engine_paths_match_frozen_reviews() {
                 .await
                 .unwrap();
             assert_parity(&case["expected"], &serde_json::to_value(review).unwrap());
-            assert_eq!(f.state.lock().unwrap().stopped, 1);
+            assert_eq!(f.state.lock().unwrap().stopped, usize::from(!cached));
+            assert_eq!(f.acquired.load(Ordering::SeqCst), usize::from(!cached));
             let evaluated = raw
                 .iter()
                 .filter(|r| core::terminal(&r.fen).unwrap().is_none())
@@ -48,7 +49,7 @@ async fn pipeline_cache_and_engine_paths_match_frozen_reviews() {
     }
 }
 #[tokio::test]
-async fn adaptive_refines_only_critical_pair_and_flushes_before_failure() {
+async fn quiet_critical_move_refines_only_pair_and_flushes_before_failure() {
     let pgn = "1. a3 a6 2. h3 h6 3. f3 f6 4. g3 g6 5. Kf2 Kf7";
     for failure in [None, Some(13)] {
         let f = factory(FakeState {
@@ -80,7 +81,7 @@ async fn adaptive_refines_only_critical_pair_and_flushes_before_failure() {
                     }
                 })
                 .collect();
-            assert_eq!(budgets, vec![3000, 1500, 0]);
+            assert_eq!(budgets, vec![4000, 2000, 0]);
             assert_eq!(f.state.lock().unwrap().searches, 13);
             assert!(f
                 .state
@@ -88,10 +89,12 @@ async fn adaptive_refines_only_critical_pair_and_flushes_before_failure() {
                 .unwrap()
                 .sent
                 .iter()
-                .all(|c| c != "go movetime 600"));
+                .all(|c| c != "go movetime 1800"));
         } else {
             assert_eq!(review.unwrap_err().message, "engine failed");
-            assert!(repo.writes.lock().unwrap().contains(&(1500, 1)));
+            let writes = repo.writes.lock().unwrap();
+            assert_eq!(writes.iter().map(|(_, count)| count).sum::<usize>(), 11);
+            assert!(writes.iter().all(|(value, _)| *value == 180));
         }
         assert_eq!(f.state.lock().unwrap().stopped, 1);
     }
@@ -124,7 +127,7 @@ async fn cache_failures_preserve_root_cause_and_discard_engine() {
                 "cache write failed"
             }
         );
-        assert_eq!(f.state.lock().unwrap().stopped, 1);
+        assert_eq!(f.state.lock().unwrap().stopped, usize::from(!read));
     }
 }
 #[tokio::test]
@@ -236,6 +239,8 @@ async fn uci_timeout_mate_scores_and_latest_multipv() {
         -99997
     );
     assert!(parse_info("info string score cp 99").is_none());
+    assert!(parse_info("info depth 12 score cp 90 lowerbound pv e2e4").is_none());
+    assert!(parse_info("info depth 12 score cp 90 upperbound pv e2e4").is_none());
     let f = factory(FakeState {
         stall: true,
         ..Default::default()
@@ -304,4 +309,31 @@ async fn cancellation_interrupts_a_blocked_cache_lookup() {
     assert_eq!(error.code, "cancelled");
     cancel_task.await.unwrap();
     assert_eq!(f.acquired.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn candidate_search_sends_base_roots_to_engine() {
+    let f = factory(FakeState::default());
+    let (_tx, cancel) = cancel();
+    let mut port = f.acquire(&cancel).await.unwrap();
+    let roots = vec!["e2e4".into(), "d2d4".into(), "g1f3".into()];
+    super::super::engine::evaluate_candidates(
+        port.as_mut(),
+        &core::fen(&shakmaty::Chess::default()),
+        Mode::Time,
+        500,
+        1000,
+        &cancel,
+        &roots,
+    )
+    .await
+    .unwrap();
+    assert!(f
+        .state
+        .lock()
+        .unwrap()
+        .sent
+        .iter()
+        .any(|c| c == "go movetime 500 searchmoves e2e4 d2d4 g1f3"));
+    port.shutdown().await;
 }

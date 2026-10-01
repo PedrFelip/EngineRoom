@@ -5,12 +5,13 @@ export type AdaptiveProfileId = 'fast' | 'deep'
 export interface AdaptiveProfile {
   id: AdaptiveProfileId
   label: string
-  /** Busca ampla: curta, mas já com alternativas para estimar a decisão. */
+  /** Linhas candidatas de todas as posições, antes dos refinamentos. */
   triageMs: number
   triageMultipv: number
   mediumMs: number
   highMs: number
   refinementMultipv: number
+  mediumMultipv: number
   /** Limite das posições refinadas; gatilhos duros não são descartados. */
   maxRefineFraction: number
   minRefinePositions: number
@@ -20,24 +21,26 @@ export const ADAPTIVE_PROFILES: Record<AdaptiveProfileId, AdaptiveProfile> = {
   fast: {
     id: 'fast',
     label: 'Automático rápido',
-    triageMs: 120,
-    triageMultipv: 2,
-    mediumMs: 600,
-    highMs: 1_500,
+    triageMs: 180,
+    triageMultipv: 3,
+    mediumMs: 500,
+    highMs: 2_000,
     refinementMultipv: 2,
-    maxRefineFraction: 0.2,
-    minRefinePositions: 6,
+    mediumMultipv: 1,
+    maxRefineFraction: 0.15,
+    minRefinePositions: 4,
   },
   deep: {
     id: 'deep',
     label: 'Automático profundo',
-    triageMs: 300,
-    triageMultipv: 3,
-    mediumMs: 1_500,
-    highMs: 4_000,
-    refinementMultipv: 3,
-    maxRefineFraction: 0.35,
-    minRefinePositions: 10,
+    triageMs: 450,
+    triageMultipv: 5,
+    mediumMs: 1_800,
+    highMs: 6_000,
+    refinementMultipv: 2,
+    mediumMultipv: 1,
+    maxRefineFraction: 0.25,
+    minRefinePositions: 6,
   },
 }
 
