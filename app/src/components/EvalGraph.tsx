@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { graphPaths } from '../lib/eval-graph'
 
 interface EvalGraphProps {
   winPcts: readonly number[]
@@ -24,26 +25,6 @@ type PhaseBand = {
   x1: number
   x2: number
   opacity: number
-}
-
-function smoothedPath(
-  points: ReadonlyArray<readonly [number, number]>,
-): string {
-  if (points.length < 2) return ''
-  if (points.length === 2) {
-    return `M ${points[0][0].toFixed(1)},${points[0][1].toFixed(1)} L ${points[1][0].toFixed(1)},${points[1][1].toFixed(1)}`
-  }
-
-  let path = `M ${points[0][0].toFixed(1)},${points[0][1].toFixed(1)}`
-  for (let i = 1; i < points.length - 1; i++) {
-    const [x0, y0] = points[i]
-    const [x1, y1] = points[i + 1]
-    const mx = (x0 + x1) / 2
-    const my = (y0 + y1) / 2
-    path += ` Q ${x0.toFixed(1)},${y0.toFixed(1)} ${mx.toFixed(1)},${my.toFixed(1)}`
-  }
-  const [lastX, lastY] = points[points.length - 1]
-  return `${path} L ${lastX.toFixed(1)},${lastY.toFixed(1)}`
 }
 
 function graphY(winPct: number): number {
@@ -75,13 +56,9 @@ export default function EvalGraph({
     const n = winPcts.length
     const x = (i: number) => (n <= 1 ? 0 : (i / (n - 1)) * w)
     const ready = w > 0 && n >= 2
-    const points = ready
-      ? winPcts.map((winPct, i) => [x(i), graphY(winPct)] as const)
-      : []
-    const linePath = ready ? smoothedPath(points) : ''
-    const areaPath = ready
-      ? `${linePath} L ${x(n - 1).toFixed(1)},${MIDLINE_Y.toFixed(1)} L ${x(0).toFixed(1)},${MIDLINE_Y.toFixed(1)} Z`
-      : ''
+    const { linePath, areaPath } = ready
+      ? graphPaths(winPcts, w, PLOT_HEIGHT)
+      : { linePath: '', areaPath: '' }
     const bands: PhaseBand[] = phases
       ? [
           {
@@ -124,7 +101,8 @@ export default function EvalGraph({
   }
 
   const cx = x(currentPly)
-  const cy = graphY(winPcts[Math.max(0, Math.min(n - 1, currentPly))] ?? 50)
+  const currentValue = winPcts[Math.max(0, Math.min(n - 1, currentPly))]
+  const cy = graphY(currentValue ?? 50)
 
   return (
     <div ref={ref} className='w-full min-w-0'>
@@ -245,19 +223,21 @@ export default function EvalGraph({
                   stroke='var(--color-ring)'
                   strokeWidth={1}
                 />
-                <circle
-                  cx={cx}
-                  cy={cy}
-                  r={4}
-                  fill='var(--color-background)'
-                  stroke={
-                    cy <= MIDLINE_Y
-                      ? 'var(--evalgraph-white-line)'
-                      : 'var(--evalgraph-black-line)'
-                  }
-                  strokeWidth={1.75}
-                  className={pulse ? 'eval-graph-tip' : undefined}
-                />
+                {Number.isFinite(currentValue) && (
+                  <circle
+                    cx={cx}
+                    cy={cy}
+                    r={4}
+                    fill='var(--color-background)'
+                    stroke={
+                      cy <= MIDLINE_Y
+                        ? 'var(--evalgraph-white-line)'
+                        : 'var(--evalgraph-black-line)'
+                    }
+                    strokeWidth={1.75}
+                    className={pulse ? 'eval-graph-tip' : undefined}
+                  />
+                )}
               </g>
             </svg>
           </button>
