@@ -190,5 +190,4 @@ Persistidas em `localStorage` na chave `engineroom.settings.v1`:
 ## Licença
 
 GPL-3.0-or-later. Veja [LICENSE](LICENSE) e
-[avisos de terceiros](THIRD_PARTY_NOTICES.md). Os avisos MIT anteriores foram
-preservados em [licenses/LEGACY-MIT.txt](licenses/LEGACY-MIT.txt).
+[avisos de terceiros](THIRD_PARTY_NOTICES.md).

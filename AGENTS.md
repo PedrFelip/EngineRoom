@@ -42,7 +42,7 @@ Vitest 4 uses `node`, not jsdom. Use Effect TestContext/TestClock directly; do n
 - Biome: single quotes, no semicolons, trailing commas, two spaces, 80 columns.
 - TypeScript is strict with unused locals/parameters rejected. `bun run build` runs tsc before Vite.
 - Rust edition 2021; release has LTO, opt-level 3 and `panic = "abort"`. Use `cargo fmt`.
-- Distribution is GPL-3.0-or-later, as approved for linked shakmaty/pgn-reader dependencies. Preserve `LICENSE`, third-party notices and original MIT notices in bundled resources.
+- Distribution is GPL-3.0-or-later, as approved for linked shakmaty/pgn-reader dependencies. Preserve `LICENSE` and third-party notices in bundled resources.
 
 ## Tauri IPC
 

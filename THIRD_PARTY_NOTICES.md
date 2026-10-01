@@ -3,8 +3,7 @@
 Copyright (c) 2026 Pedro Felipe.
 
 Esta versão do EngineRoom é distribuída sob **GPL-3.0-or-later**. O texto da
-GPL versão 3 está em `LICENSE`. A versão anterior e seus avisos MIT permanecem
-registrados em `licenses/LEGACY-MIT.txt`.
+GPL versão 3 está em `LICENSE`.
 
 Bibliotecas de xadrez vinculadas ao backend:
 
