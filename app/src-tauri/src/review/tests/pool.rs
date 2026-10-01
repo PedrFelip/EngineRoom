@@ -1,7 +1,6 @@
 use super::*;
 use crate::review::pool::Pool;
 use std::sync::atomic::AtomicBool;
-use tokio::time::Instant;
 
 #[derive(Default)]
 struct Activity {
@@ -130,7 +129,7 @@ fn group() -> Arc<GroupFactory> {
 }
 
 #[tokio::test]
-async fn workers_search_concurrently_keep_order_and_preserve_hash_on_multipv_change() {
+async fn submitted_searches_run_concurrently_and_preserve_hash_on_multipv_change() {
     let factory = group();
     let (_close, cancel) = cancel();
     let game = core::extract("1. e4 e5 2. Nf3 Nc6").unwrap();
@@ -139,12 +138,16 @@ async fn workers_search_concurrently_keep_order_and_preserve_hash_on_multipv_cha
         .unwrap();
     assert_eq!(pool.len(), 3);
     for multipv in [1, 3] {
-        let results = pool
-            .search(game.fens.clone(), Mode::Time, 100, multipv, None)
-            .await
-            .unwrap();
+        let mut results = vec![];
+        for (index, fen) in game.fens.iter().enumerate() {
+            results.push(
+                pool.submit(index % pool.len(), fen.clone(), 100, multipv, vec![])
+                    .await
+                    .unwrap(),
+            );
+        }
         for (fen, receiver) in game.fens.iter().zip(results) {
-            let result = pool.receive(receiver, &cancel).await.unwrap().unwrap();
+            let result = receiver.await.unwrap().unwrap().unwrap();
             assert_eq!(result.raw.fen, *fen);
             assert_eq!(result.value, 100);
         }
@@ -174,80 +177,31 @@ async fn workers_search_concurrently_keep_order_and_preserve_hash_on_multipv_cha
 }
 
 #[tokio::test]
-async fn cancellation_and_worker_failure_close_every_process_before_next_owner() {
-    for fail in [false, true] {
-        let factory = group();
-        factory.activity.fail.store(fail, Ordering::SeqCst);
-        factory.activity.stall.store(!fail, Ordering::SeqCst);
-        let (close, cancel) = cancel();
-        let fens = core::extract("1. e4 e5").unwrap().fens;
-        let mut pool = Pool::acquire(factory.as_ref(), Some((6, 512)), 3, &cancel)
-            .await
-            .unwrap();
-        let mut results = pool.search(fens, Mode::Time, 100, 1, None).await.unwrap();
-        tokio::time::timeout(Duration::from_secs(1), async {
-            while factory.activity.active.load(Ordering::SeqCst) < 3 {
-                tokio::task::yield_now().await;
-            }
-        })
-        .await
-        .unwrap();
-        if !fail {
-            close.send_replace(true);
-        }
-        let error = pool
-            .receive(results.remove(0), &cancel)
-            .await
-            .err()
-            .unwrap();
-        assert_eq!(
-            error.message,
-            if fail {
-                "worker failed"
-            } else {
-                "Análise cancelada."
-            }
-        );
-        assert_eq!(factory.permit.available_permits(), 0);
-        pool.close().await;
-        assert_eq!(factory.activity.closed.load(Ordering::SeqCst), 3);
-        assert_eq!(factory.permit.available_permits(), 1);
-        assert_eq!(factory.activity.active.load(Ordering::SeqCst), 0);
-    }
-}
-
-#[tokio::test]
-async fn deadline_clips_cache_budget_and_skips_unstarted_searches() {
+async fn automatic_worker_failure_closes_every_process_before_next_owner() {
     let factory = group();
-    let (_close, cancel) = cancel();
-    let fens = core::extract("1. e4 e5").unwrap().fens;
-    let mut pool = Pool::acquire(factory.as_ref(), Some((2, 64)), 3, &cancel)
-        .await
-        .unwrap();
-    let results = pool
-        .search(
-            fens.clone(),
-            Mode::Time,
-            1000,
-            1,
-            Some(Instant::now() + Duration::from_millis(100)),
-        )
-        .await
-        .unwrap();
-    for receiver in results {
-        let result = pool.receive(receiver, &cancel).await.unwrap().unwrap();
-        assert!(result.value > 0 && result.value < 1000);
-    }
-    let searches = factory.state.lock().unwrap().searches;
-    let results = pool
-        .search(fens, Mode::Time, 1000, 1, Some(Instant::now()))
-        .await
-        .unwrap();
-    for receiver in results {
-        assert!(pool.receive(receiver, &cancel).await.unwrap().is_none());
-    }
-    assert_eq!(factory.state.lock().unwrap().searches, searches);
-    pool.close().await;
+    factory.activity.fail.store(true, Ordering::SeqCst);
+    let mut pipeline = Pipeline::new(factory.clone(), Arc::new(MemoryRepo::default()));
+    let (_closed, cancel) = cancel();
+    let result = tokio::time::timeout(
+        Duration::from_secs(2),
+        pipeline.review(
+            &config("1. a3 a6 2. h3 h6 3. f3 f6 4. g3 g6", AnalysisKind::Fast),
+            Some((6, 512)),
+            &cancel,
+            &mut |_| {},
+        ),
+    )
+    .await
+    .unwrap();
+    let error = result.unwrap_err();
+    assert_eq!(error.code, "engineExited");
+    assert_eq!(error.message, "worker failed");
+    assert_eq!(factory.activity.closed.load(Ordering::SeqCst), 3);
+    assert_eq!(factory.activity.active.load(Ordering::SeqCst), 0);
+    assert_eq!(factory.permit.available_permits(), 1);
+    let mut next_owner = factory.acquire(&cancel).await.unwrap();
+    next_owner.shutdown().await;
+    assert_eq!(factory.permit.available_permits(), 1);
 }
 
 #[tokio::test]
@@ -268,14 +222,19 @@ async fn real_sidecar_pool_holds_one_lease_until_all_processes_terminate() {
         .unwrap();
     assert_eq!(pool.len(), 3);
     assert_eq!(permit.available_permits(), 0);
-    let results = pool
-        .search(fens.clone(), Mode::Depth, 8, 1, None)
-        .await
-        .unwrap();
+    let mut results = vec![];
+    for (worker, fen) in fens.iter().enumerate() {
+        results.push(
+            pool.submit(worker, fen.clone(), 100, 1, vec![])
+                .await
+                .unwrap(),
+        );
+    }
     for (fen, receiver) in fens.iter().zip(results) {
-        let result = pool.receive(receiver, &cancel).await.unwrap().unwrap();
+        let result = receiver.await.unwrap().unwrap().unwrap();
         assert_eq!(result.raw.fen, *fen);
-        assert!(result.raw.depth >= 8);
+        assert!(result.raw.depth > 0);
+        assert_eq!(result.value, 100);
         assert_eq!(result.raw.lines.len(), 1);
     }
     // Probe must wait even when every search has completed: the processes

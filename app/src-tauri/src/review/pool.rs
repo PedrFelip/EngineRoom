@@ -115,58 +115,6 @@ impl Pool {
             .map_err(|_| self.failure().unwrap_or_else(ReviewError::cancelled))?;
         Ok(receiver)
     }
-    #[cfg(test)]
-    pub async fn search(
-        &self,
-        fens: Vec<String>,
-        mode: Mode,
-        value: u32,
-        multipv: u32,
-        deadline: Option<Instant>,
-    ) -> Result<Vec<Evaluation>> {
-        let mut groups: Vec<Vec<Job>> = (0..self.len()).map(|_| vec![]).collect();
-        let chunk = fens.len().div_ceil(self.len()).max(1);
-        let mut results = Vec::with_capacity(fens.len());
-        for (index, fen) in fens.into_iter().enumerate() {
-            let (result, receiver) = oneshot::channel();
-            results.push(receiver);
-            groups[index / chunk].push(Job {
-                fen,
-                result,
-                candidates: vec![],
-            });
-        }
-        for (worker, jobs) in self.workers.iter().zip(groups) {
-            if !jobs.is_empty() {
-                worker
-                    .send(Batch {
-                        jobs,
-                        mode,
-                        value,
-                        multipv,
-                        deadline,
-                    })
-                    .await
-                    .map_err(|_| self.failure().unwrap_or_else(ReviewError::cancelled))?;
-            }
-        }
-        Ok(results)
-    }
-    #[cfg(test)]
-    pub async fn receive(
-        &self,
-        result: Evaluation,
-        cancel: &Cancellation,
-    ) -> Result<Option<Completed>> {
-        cancel.check()?;
-        let result = tokio::select! {
-            _ = cancel.cancelled() => return Err(ReviewError::cancelled()),
-            result = result => result.unwrap_or_else(|_| Err(self.failure().unwrap_or_else(|| {
-                cancel.check().err().unwrap_or_else(|| ReviewError::new("engineExited", "engine.pool", "Worker encerrou sem resultado."))
-            }))),
-        };
-        result.map_err(|error| self.failure().unwrap_or(error))
-    }
     pub async fn close(&mut self) {
         self.stop.send_replace(true);
         self.workers.clear();
