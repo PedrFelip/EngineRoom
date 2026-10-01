@@ -403,7 +403,7 @@ async fn execute(
         let (job, reply) = result;
         let pool = pool.as_ref().unwrap();
         let completed: Completed = reply
-            .map_err(|_| pool.failure().unwrap_or_else(ReviewError::cancelled))?
+            .map_err(|_| disconnected_worker_error(pool.failure(), cancel))?
             .map_err(|e| pool.failure().unwrap_or(e))?
             .ok_or_else(|| {
                 ReviewError::new("missingEvaluation", "review.queue", "Busca não concluída.")
@@ -477,6 +477,18 @@ async fn flush(
         }
     }
     Ok(())
+}
+
+fn disconnected_worker_error(failure: Option<ReviewError>, cancel: &Cancellation) -> ReviewError {
+    failure.unwrap_or_else(|| {
+        cancel.check().err().unwrap_or_else(|| {
+            ReviewError::new(
+                "engineExited",
+                "review.queue",
+                "Worker encerrou sem resultado.",
+            )
+        })
+    })
 }
 
 /// Keep all baseline roots and the played move, preserving baseline priority.
