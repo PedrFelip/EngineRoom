@@ -13,7 +13,7 @@ Aplicativo desktop para **revisão de partidas de xadrez** com o motor **Stockfi
 - **Tela de revisão** com tabuleiro (Chessground + peças cburnett), seta do melhor lance, barra de avaliação, gráfico SVG navegável, painel de linhas candidatas, lista de lances com badges coloridos e resumo da partida.
 - **Navegação por teclado**: ← → (anterior/próximo), Home/End (primeiro/último).
 - **Persistência local (SQLite)**: cache de posições com cobertura por profundidade alcançada, orçamento de tempo e MultiPV e histórico de partidas revisadas com reabertura instantânea, reanálise e exclusão.
-- **Autoconfiguração do motor**: ajusta `Threads` (núcleos físicos) e `Hash` (~20% da RAM, entre 512 MB e 4 GB) automaticamente.
+- **Autoconfiguração do motor**: ajusta o orçamento total de `Threads` (núcleos físicos) e `Hash` (~20% da RAM, entre 512 MB e 4 GB) automaticamente. A revisão distribui esse orçamento entre até três instâncias persistentes do Stockfish.
 - **Engine embarcada**: usa exclusivamente o Stockfish 18 distribuído como sidecar, com botão de teste nas configurações.
 - **Tema claro/escuro** aplicado antes da pintura para evitar _flash_.
 
@@ -122,9 +122,44 @@ análise ao vivo e teardown; seus dados não são gravados no histórico do usu�
   janela; comandos posteriores solicitam análise ao vivo, cancelamento e fechamento.
   Channels transmitem eventos com ID de sessão, sequência e ID do pedido ao vivo.
   O frontend valida os schemas e descarta respostas antigas.
+- **Análise automática paralela**: até três workers persistentes dividem os
+  recursos de CPU/hash e começam a triagem em blocos de quatro posições
+  consecutivas. Um worker prefere refinamentos críticos disponíveis; os demais
+  avançam na triagem. Sem candidatos, todos ajudam na triagem; ao terminá-la,
+  todos atendem aos refinamentos, priorizando alta criticidade antes da média.
+  A base compara alternativas em todas as posições: MultiPV 3 por 180 ms
+  no rápido e MultiPV 5 por 450 ms no profundo. O refinamento concentra o
+  tempo em menos linhas: contexto usa MultiPV 1 por 500 ms / 1,8 s;
+  classificação incerta e complexidade usam MultiPV 2 por 750 ms / 2,7 s;
+  tática usa MultiPV 2 por 1 s / 3,6 s. Perdas/viradas fortes e promoções
+  usam MultiPV 2 por 2 s / 6 s; mate usa o mesmo tempo com MultiPV 1.
+  Cada refinamento aprofunda os lances candidatos encontrados na base e o
+  lance jogado, via `searchmoves`, recalculando suas continuações. Resultados
+  de buscas restritas ficam na revisão salva, sem entrar no cache geral por
+  FEN. Avaliações irrestritas já presentes no cache podem atender ao pedido.
+  A prioridade é mate, promoção, perda/virada, incerteza, tática,
+  complexidade e contexto; pares obrigatórios precedem os opcionais.
+  Pares críticos têm prioridade sobre todos os opcionais e não são descartados
+  pela cota. Perdas e incerteza refinam o par antes/depois; complexidade
+  isolada não expande vizinhos. O contexto segue a sequência jogada de capturas,
+  xeques, promoções e respostas forçadas, ou a avaliação ainda instável (variação
+  de pelo menos 2 pontos percentuais de chance de vitória). Para ao alcançar
+  um lance calmo e estável, com no máximo 2 passos no rápido e 4 no profundo.
+  Entregar pelo menos uma peça menor na resposta, com perda líquida de pelo
+  menos dois peões e sem queda maior que 5 pontos percentuais na avaliação,
+  sinaliza um possível sacrifício; trocas equilibradas não ativam esse sinal.
+  Esse sinal é uma heurística, sem afirmar que o sacrifício é correto.
+  O contexto tem orçamento simples e está sujeito à cota de 15% (mínimo 4) /
+  25% (mínimo 6), depois das decisões selecionadas.
+  Candidatos obrigatórios podem começar assim que o par antes/depois está pronto;
+  candidatos sujeitos à cota aguardam a classificação completa. Resultados
+  atualizam o gráfico na ordem de conclusão; a base alimenta o buffer de cache. As buscas
+  continuam durante as gravações, feitas a cada oito posições e no final.
+  O modo manual usa uma única engine com os recursos configurados.
 - **Lifecycle estruturado**: um semáforo Rust é compartilhado entre sessões e o
-  probe das configurações. A engine interrompida ou com falha é descartada e sua
-  terminação é aguardada antes de outra aquisição. A navegação mantém o pedido
+  probe das configurações. Um único dono controla todo o pool. As engines
+  interrompidas ou com falha são descartadas e a terminação de todos os processos
+  é aguardada antes de outra aquisição. A navegação mantém o pedido
   mais recente. Fechar a sessão aguarda processo, persistência e operações de DB;
   sair do aplicativo aguarda o teardown das sessões.
 - **Núcleo puro e I/O injetada**: o pipeline usa `EngineFactory`/`EnginePort` e
