@@ -244,6 +244,5 @@ pub fn games_clear(state: tauri::State<'_, DbState>) -> Result<(), String> {
 }
 
 #[cfg(test)]
-#[cfg(test)]
 #[path = "games/tests.rs"]
 mod tests;

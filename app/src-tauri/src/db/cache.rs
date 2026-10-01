@@ -255,6 +255,5 @@ pub fn cache_put_many(
 }
 
 #[cfg(test)]
-#[cfg(test)]
 #[path = "cache/tests.rs"]
 mod tests;
