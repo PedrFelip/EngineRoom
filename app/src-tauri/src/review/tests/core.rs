@@ -1,6 +1,54 @@
 use super::*;
 
 #[test]
+fn accuracy_uses_fen_start_and_actual_phase_entry_evaluation() {
+    let game = core::extract("[FEN \"7k/8/8/8/8/8/8/R6K w - - 0 1\"]\n1. Ra2 Kg7 2. Ra3").unwrap();
+    let raw: Vec<_> = game
+        .fens
+        .iter()
+        .enumerate()
+        .map(|(i, fen)| core::terminal_raw(fen, if i % 2 == 0 { 700 } else { -700 }))
+        .collect();
+    let review = core::build(&game, &raw).unwrap();
+    assert_eq!(review.accuracy.white, 100.0);
+    assert_eq!(review.accuracy.black, 100.0);
+    assert_eq!(review.accuracy_by_phase.endgame.white, 100.0);
+    assert_eq!(review.accuracy_by_phase.endgame.black, 100.0);
+
+    let opening = core::extract("1. a3 a6 2. h3 h6").unwrap();
+    let raw: Vec<_> = opening
+        .fens
+        .iter()
+        .enumerate()
+        .map(|(i, fen)| {
+            core::terminal_raw(
+                fen,
+                if i == 0 {
+                    0
+                } else if i % 2 == 0 {
+                    700
+                } else {
+                    -700
+                },
+            )
+        })
+        .collect();
+    let mut review = core::build(&opening, &raw).unwrap();
+    let phases = [
+        Phase::Opening,
+        Phase::Opening,
+        Phase::Endgame,
+        Phase::Endgame,
+        Phase::Endgame,
+    ];
+    let values: Vec<_> = review.positions.iter().map(|p| p.win_pct).collect();
+    review.accuracy_by_phase =
+        crate::review::scoring::phase_accuracy(&review.moves, &phases, &values);
+    assert_eq!(review.accuracy_by_phase.endgame.white, 100.0);
+    assert_eq!(review.accuracy_by_phase.endgame.black, 100.0);
+}
+
+#[test]
 fn pgn_comments_variations_fen_promotion_and_invalid_moves() {
     let g = core::extract("[White \"Alice\"]\n1. e4 {hello} e5 (1... c5) 2. Nf3 $1 Nc6 *").unwrap();
     assert_eq!(g.moves.len(), 4);

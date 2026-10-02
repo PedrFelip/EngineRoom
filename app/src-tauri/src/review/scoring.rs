@@ -1,5 +1,5 @@
 use super::types::*;
-pub const ACCURACY_MODEL: &str = "lichess-2026-08";
+pub const ACCURACY_MODEL: &str = "lichess-2026-10-initial-position";
 pub fn win_pct(cp: i32) -> f64 {
     50.0 + 50.0 * (2.0 / (1.0 + (-0.00368208 * cp.clamp(-1000, 1000) as f64).exp()) - 1.0)
 }
@@ -53,9 +53,8 @@ pub fn weights(values: &[f64], count: usize) -> Vec<f64> {
     result
 }
 pub fn accuracy(colors: &[&str], position_values: &[f64]) -> Accuracy {
-    let mut values = vec![win_pct(15)];
-    values.extend(position_values.iter().skip(1).take(colors.len()));
-    let weights = weights(&values, colors.len());
+    let values = position_values;
+    let weights = weights(values, colors.len());
     let aggregate = |color: &str| {
         let samples: Vec<_> = colors
             .iter()

@@ -1,6 +1,29 @@
 use super::*;
 
 #[test]
+fn previous_accuracy_model_is_recalculated_from_saved_initial_evaluation() {
+    let game = core::extract("[FEN \"7k/8/8/8/8/8/8/R6K w - - 0 1\"]\n1. Ra2 Kg7").unwrap();
+    let raw: Vec<_> = game
+        .fens
+        .iter()
+        .enumerate()
+        .map(|(i, fen)| core::terminal_raw(fen, if i % 2 == 0 { 700 } else { -700 }))
+        .collect();
+    let expected = core::build(&game, &raw).unwrap();
+    let mut old = serde_json::to_value(&expected).unwrap();
+    old["accuracyModel"] = serde_json::json!("lichess-2026-08");
+    old["accuracy"] = serde_json::json!({"white": 50.0, "black": 50.0});
+    old["accuracyByPhase"]["endgame"] = serde_json::json!({"white": 50.0, "black": 50.0});
+    let normalized = repository::normalize(old).unwrap();
+    assert_eq!(normalized.accuracy.white, 100.0);
+    assert_eq!(normalized.accuracy_by_phase.endgame.white, 100.0);
+    assert_eq!(
+        normalized.accuracy_model,
+        crate::review::scoring::ACCURACY_MODEL
+    );
+}
+
+#[test]
 fn legacy_review_normalization_and_current_data_preservation() {
     let game = core::extract("1. e4 e5 2. Nf3 Nc6").unwrap();
     let raw: Vec<_> = game
