@@ -33,6 +33,7 @@ async fn cache_advertises_only_produced_lines_and_their_common_depth() {
             cp: 10,
             pv: vec![root.into()],
             san: None,
+            unstable: false,
         });
     }
     repo.put(&[raw.clone()], Mode::Time, 1000, 3).await.unwrap();

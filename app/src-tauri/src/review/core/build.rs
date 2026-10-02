@@ -13,10 +13,12 @@ pub fn position_analysis(raw: &RawPosition, ply: usize, phase: Phase) -> Positio
         win_pct: white_win_pct(raw.cp, white),
         pv: raw.pv.clone(),
         search: None,
+        triage_lines: None,
         lines: raw
             .lines
             .iter()
             .map(|l| PvLine {
+                depth: l.depth,
                 multipv: l.multipv,
                 san: l.san.clone(),
                 cp: if white { l.cp } else { -l.cp },

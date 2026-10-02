@@ -44,6 +44,9 @@ pub enum Classification {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RawLine {
+    /// Last completed depth changed the PV root or win chance by at least 2pp.
+    #[serde(default)]
+    pub unstable: bool,
     pub multipv: u32,
     pub cp: i32,
     pub pv: Vec<String>,
@@ -91,6 +94,8 @@ pub struct MoveAnalysis {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PvLine {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub depth: Option<u32>,
     pub multipv: u32,
     pub san: Option<String>,
     pub cp: i32,
@@ -117,6 +122,8 @@ pub struct PositionAnalysis {
     pub lines: Vec<PvLine>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub search: Option<Search>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub triage_lines: Option<Vec<PvLine>>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Accuracy {

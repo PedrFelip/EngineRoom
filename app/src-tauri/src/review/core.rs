@@ -11,7 +11,7 @@ pub use build::{build, position_analysis};
 pub use opening::opening;
 pub use pgn::{extract, Game};
 pub use phase::{phase, phases};
-pub use position::{add_san, fen, position, terminal, terminal_raw};
+pub use position::{add_san, fen, position, terminal, terminal_position, terminal_raw};
 
 fn invalid(message: impl ToString) -> ReviewError {
     ReviewError::new("invalidPgn", "pgn", message)

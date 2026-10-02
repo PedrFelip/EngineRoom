@@ -289,6 +289,7 @@ pub fn parse_info(line: &str) -> Option<RawLine> {
         }
     }
     Some(RawLine {
+        unstable: false,
         depth: Some(depth),
         multipv,
         cp: cp?,
@@ -304,22 +305,9 @@ pub async fn evaluate(
     timeout: u64,
     cancel: &Cancellation,
 ) -> Result<RawPosition> {
-    evaluate_candidates(port, fen, mode, value, timeout, cancel, &[]).await
-}
-
-/// A restricted search is suitable for review, never a general FEN cache entry.
-pub async fn evaluate_candidates(
-    port: &mut dyn EnginePort,
-    fen: &str,
-    mode: crate::db::mode::Mode,
-    value: u32,
-    timeout: u64,
-    cancel: &Cancellation,
-    candidates: &[String],
-) -> Result<RawPosition> {
     cancel.check()?;
     port.send(&format!("position fen {fen}"))?;
-    let mut go = format!(
+    let go = format!(
         "go {} {value}",
         if mode == crate::db::mode::Mode::Depth {
             "depth"
@@ -327,20 +315,27 @@ pub async fn evaluate_candidates(
             "movetime"
         }
     );
-    if !candidates.is_empty() {
-        go.push_str(" searchmoves ");
-        go.push_str(&candidates.join(" "));
-    }
     port.send(&go)?;
     let read = async {
         let mut latest: BTreeMap<u32, RawLine> = BTreeMap::new();
         loop {
             let line = port.next().await?;
-            if let Some(info) = parse_info(&line) {
+            if let Some(mut info) = parse_info(&line) {
                 if latest
                     .get(&info.multipv)
                     .is_none_or(|p| info.depth >= p.depth)
                 {
+                    if let Some(previous) = latest.get(&info.multipv) {
+                        info.unstable = if info.depth > previous.depth {
+                            (super::scoring::win_pct(info.cp)
+                                - super::scoring::win_pct(previous.cp))
+                            .abs()
+                                >= 2.0
+                                || info.pv.first() != previous.pv.first()
+                        } else {
+                            previous.unstable
+                        };
+                    }
                     latest.insert(info.multipv, info);
                 }
             }
@@ -350,17 +345,13 @@ pub async fn evaluate_candidates(
         }
         let depth = latest.get(&1).and_then(|l| l.depth).unwrap_or(0);
         let lines: Vec<_> = latest.into_values().collect();
-        let principal = lines
-            .iter()
-            .find(|l| l.multipv == 1)
-            .or_else(|| lines.first())
-            .ok_or_else(|| {
-                ReviewError::new(
-                    "missingEvaluation",
-                    "engine.evaluate",
-                    "A engine encerrou a busca sem avaliação da posição.",
-                )
-            })?;
+        let principal = lines.iter().find(|l| l.multipv == 1).ok_or_else(|| {
+            ReviewError::new(
+                "missingEvaluation",
+                "engine.evaluate",
+                "A engine encerrou a busca sem avaliação da posição.",
+            )
+        })?;
         Ok(RawPosition {
             fen: fen.into(),
             cp: principal.cp,

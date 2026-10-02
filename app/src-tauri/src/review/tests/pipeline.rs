@@ -1,6 +1,164 @@
 use super::*;
 
 #[tokio::test]
+async fn unrestricted_refinement_discovers_new_root_and_keeps_triage_separate() {
+    for refined_depth in [5, 20] {
+        let pgn = "[FEN \"7k/8/8/8/8/8/8/R6K w - - 0 1\"]\n1. Ra2";
+        let game = core::extract(pgn).unwrap();
+        let mut before = core::terminal_raw(&game.fens[0], 700);
+        before.depth = 10;
+        before.lines[0].depth = Some(10);
+        before.lines[0].pv = vec!["a1a2".into()];
+        before.pv = before.lines[0].pv.clone();
+        let mut refined = before.clone();
+        refined.cp = 800;
+        refined.depth = refined_depth;
+        refined.lines[0].depth = Some(refined_depth);
+        refined.lines[0].cp = 800;
+        refined.lines[0].pv = vec!["a1a8".into()];
+        refined.pv = refined.lines[0].pv.clone();
+        let after = core::terminal_raw(&game.fens[1], 0);
+        let f = factory(FakeState {
+            scores: [
+                (game.fens[0].clone(), before),
+                (game.fens[1].clone(), after),
+            ]
+            .into(),
+            refined_scores: [(game.fens[0].clone(), refined)].into(),
+            ..Default::default()
+        });
+        let repo = Arc::new(MemoryRepo::default());
+        let mut pipeline = Pipeline::new(f.clone(), repo.clone());
+        let (_tx, cancel) = cancel();
+        let review = pipeline
+            .review(&config(pgn, AnalysisKind::Fast), None, &cancel, &mut |_| {})
+            .await
+            .unwrap();
+        if refined_depth < 10 {
+            assert_eq!(review.moves[0].best_uci.as_deref(), Some("a1a2"));
+            assert_eq!(review.positions[0].depth, 10);
+            assert!(review.positions[0].triage_lines.is_none());
+            assert!(review.positions[0].search.is_none());
+        } else {
+            assert_eq!(review.moves[0].best_uci.as_deref(), Some("a1a8"));
+            assert_eq!(review.positions[0].lines[0].pv[0], "a1a8");
+            assert_eq!(
+                review.positions[0].triage_lines.as_ref().unwrap()[0].pv[0],
+                "a1a2"
+            );
+            assert_eq!(
+                review.positions[0].triage_lines.as_ref().unwrap()[0].depth,
+                Some(10)
+            );
+            assert_eq!(
+                review.positions[0].search.as_ref().unwrap().movetime_ms,
+                2000
+            );
+        }
+        assert!(f
+            .state
+            .lock()
+            .unwrap()
+            .sent
+            .iter()
+            .all(|s| !s.contains("searchmoves")));
+        let lookups = repo.lookups.lock().unwrap();
+        assert_eq!(lookups.len(), 2); // Triage + selected critical pair, no other budgets.
+        assert_eq!(lookups[0].1, 180);
+        assert_eq!(lookups[1].1, 2000);
+        assert!(repo
+            .writes
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|(budget, count)| *budget == 2000 && *count == 2));
+    }
+}
+
+#[tokio::test]
+async fn uci_tracks_last_depth_instability_and_requires_principal_line() {
+    for (lines, unstable) in [
+        (
+            vec![
+                "info depth 10 multipv 1 score cp 0 pv e2e4",
+                "info depth 11 multipv 1 score cp 100 pv e2e4",
+            ],
+            true,
+        ),
+        (
+            vec![
+                "info depth 10 multipv 1 score cp 0 pv e2e4",
+                "info depth 11 multipv 1 score cp 0 pv d2d4",
+            ],
+            true,
+        ),
+        (
+            vec![
+                "info depth 10 multipv 1 score cp 100 pv e2e4",
+                "info depth 11 multipv 1 score cp 0 pv e2e4",
+                "info depth 12 multipv 1 score cp 1 pv e2e4",
+            ],
+            false,
+        ),
+    ] {
+        let mut port = FakePort {
+            state: Arc::new(Mutex::new(FakeState {
+                stall: true,
+                ..Default::default()
+            })),
+            queue: lines
+                .into_iter()
+                .chain(["bestmove e2e4"])
+                .map(str::to_owned)
+                .collect(),
+            fen: String::new(),
+            permit: None,
+        };
+        let (_tx, cancel) = cancel();
+        let raw = evaluate(
+            &mut port,
+            &core::fen(&shakmaty::Chess::default()),
+            Mode::Time,
+            100,
+            1000,
+            &cancel,
+        )
+        .await
+        .unwrap();
+        assert_eq!(raw.lines[0].unstable, unstable);
+    }
+    let mut port = FakePort {
+        state: Arc::new(Mutex::new(FakeState {
+            stall: true,
+            ..Default::default()
+        })),
+        queue: [
+            "info depth 10 multipv 2 score cp 0 pv d2d4",
+            "bestmove d2d4",
+        ]
+        .map(str::to_owned)
+        .into(),
+        fen: String::new(),
+        permit: None,
+    };
+    let (_tx, cancel) = cancel();
+    assert_eq!(
+        evaluate(
+            &mut port,
+            &core::fen(&shakmaty::Chess::default()),
+            Mode::Time,
+            100,
+            1000,
+            &cancel
+        )
+        .await
+        .unwrap_err()
+        .code,
+        "missingEvaluation"
+    );
+}
+
+#[tokio::test]
 async fn quiet_critical_move_refines_only_pair_and_flushes_before_failure() {
     let pgn = "1. a3 a6 2. h3 h6 3. f3 f6 4. g3 g6 5. Kf2 Kf7";
     for failure in [None, Some(13)] {
@@ -45,8 +203,8 @@ async fn quiet_critical_move_refines_only_pair_and_flushes_before_failure() {
         } else {
             assert_eq!(review.unwrap_err().message, "engine failed");
             let writes = repo.writes.lock().unwrap();
-            assert_eq!(writes.iter().map(|(_, count)| count).sum::<usize>(), 11);
-            assert!(writes.iter().all(|(value, _)| *value == 180));
+            assert_eq!(writes.iter().map(|(_, count)| count).sum::<usize>(), 12);
+            assert!(writes.iter().all(|(value, _)| [180, 2000].contains(value)));
         }
         assert_eq!(f.state.lock().unwrap().stopped, 1);
     }
@@ -261,31 +419,4 @@ async fn cancellation_interrupts_a_blocked_cache_lookup() {
     assert_eq!(error.code, "cancelled");
     cancel_task.await.unwrap();
     assert_eq!(f.acquired.load(Ordering::SeqCst), 0);
-}
-
-#[tokio::test]
-async fn candidate_search_sends_base_roots_to_engine() {
-    let f = factory(FakeState::default());
-    let (_tx, cancel) = cancel();
-    let mut port = f.acquire(&cancel).await.unwrap();
-    let roots = vec!["e2e4".into(), "d2d4".into(), "g1f3".into()];
-    super::super::engine::evaluate_candidates(
-        port.as_mut(),
-        &core::fen(&shakmaty::Chess::default()),
-        Mode::Time,
-        500,
-        1000,
-        &cancel,
-        &roots,
-    )
-    .await
-    .unwrap();
-    assert!(f
-        .state
-        .lock()
-        .unwrap()
-        .sent
-        .iter()
-        .any(|c| c == "go movetime 500 searchmoves e2e4 d2d4 g1f3"));
-    port.shutdown().await;
 }

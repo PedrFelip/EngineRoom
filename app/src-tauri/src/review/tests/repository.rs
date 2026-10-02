@@ -12,6 +12,7 @@ fn cache_rejects_incomplete_duplicate_or_missing_principal_slots() {
                 pv: vec!["e2e4".into()],
                 san: None,
                 depth: Some(10),
+                unstable: false,
             })
             .collect();
         let hit = crate::db::cache::CachedPosition {
@@ -83,6 +84,7 @@ fn cache_shape_corruption_and_covering_queries_are_preserved() {
     raw.depth = 14;
     raw.lines = (1..=3)
         .map(|multipv| RawLine {
+            unstable: false,
             multipv,
             cp: 15,
             depth: Some(14),

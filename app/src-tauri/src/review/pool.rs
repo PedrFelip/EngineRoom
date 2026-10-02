@@ -8,29 +8,22 @@ use std::sync::{Arc, Mutex};
 use tokio::{
     sync::{mpsc, oneshot, watch},
     task::JoinSet,
-    time::Instant,
 };
 
 pub struct Completed {
     pub raw: RawPosition,
-    /// Actual UCI budget, including clipping to the shared deadline.
+    /// UCI time budget used for this search.
     pub value: u32,
 }
-pub type Evaluation = oneshot::Receiver<Result<Option<Completed>>>;
+pub type Evaluation = oneshot::Receiver<Result<Completed>>;
 struct Job {
     fen: String,
-    candidates: Vec<String>,
-    result: oneshot::Sender<Result<Option<Completed>>>,
-}
-struct Batch {
-    jobs: Vec<Job>,
-    mode: Mode,
+    result: oneshot::Sender<Result<Completed>>,
     value: u32,
     multipv: u32,
-    deadline: Option<Instant>,
 }
 pub struct Pool {
-    workers: Vec<mpsc::Sender<Batch>>,
+    workers: Vec<mpsc::Sender<Job>>,
     tasks: JoinSet<()>,
     stop: watch::Sender<bool>,
     failure: Arc<Mutex<Option<ReviewError>>>,
@@ -96,20 +89,14 @@ impl Pool {
         fen: String,
         value: u32,
         multipv: u32,
-        candidates: Vec<String>,
     ) -> Result<Evaluation> {
         let (result, receiver) = oneshot::channel();
         self.workers[worker]
-            .send(Batch {
-                jobs: vec![Job {
-                    fen,
-                    result,
-                    candidates,
-                }],
-                mode: Mode::Time,
+            .send(Job {
+                fen,
+                result,
                 value,
                 multipv,
-                deadline: None,
             })
             .await
             .map_err(|_| self.failure().unwrap_or_else(ReviewError::cancelled))?;
@@ -132,7 +119,7 @@ impl Pool {
 
 async fn worker(
     mut port: Box<dyn EnginePort>,
-    mut jobs: mpsc::Receiver<Batch>,
+    mut jobs: mpsc::Receiver<Job>,
     threads: u32,
     memory: u32,
     root: Cancellation,
@@ -145,94 +132,58 @@ async fn worker(
     };
     let mut configured = None;
     loop {
-        let batch = tokio::select! {
+        let job = tokio::select! {
             _ = root.cancelled() => break,
             _ = local.cancelled() => break,
-            batch = jobs.recv() => match batch { Some(batch) => batch, None => break },
+            job = jobs.recv() => match job { Some(job) => job, None => break },
         };
-        for job in batch.jobs {
-            let run = async {
-                root.check()?;
-                local.check()?;
-                let value = match batch.deadline {
-                    Some(deadline) => batch.value.min(
-                        deadline
-                            .saturating_duration_since(Instant::now())
-                            .as_millis()
-                            .min(u32::MAX as u128) as u32,
-                    ),
-                    None => batch.value,
-                };
-                if value == 0 {
-                    return Ok(None);
-                }
-                if configured.is_none() {
-                    engine::configure(
-                        port.as_mut(),
-                        Some(threads),
-                        Some(memory),
-                        batch.multipv,
-                        &local,
-                    )
-                    .await?;
-                } else if configured != Some(batch.multipv) {
-                    port.send(&format!("setoption name MultiPV value {}", batch.multipv))?;
-                    engine::ask(port.as_mut(), "isready", "readyok", 10000, &local).await?;
-                }
-                configured = Some(batch.multipv);
-                // Configuration can be expensive: recompute the usable budget.
-                let value = match batch.deadline {
-                    Some(deadline) => value.min(
-                        deadline
-                            .saturating_duration_since(Instant::now())
-                            .as_millis()
-                            .min(u32::MAX as u128) as u32,
-                    ),
-                    None => value,
-                };
-                if value == 0 {
-                    return Ok(None);
-                }
-                let result = engine::evaluate_candidates(
+        let run = async {
+            root.check()?;
+            local.check()?;
+            if configured.is_none() {
+                engine::configure(
                     port.as_mut(),
-                    &job.fen,
-                    batch.mode,
-                    value,
-                    super::pipeline::timeout(batch.mode, value),
+                    Some(threads),
+                    Some(memory),
+                    job.multipv,
                     &local,
-                    &job.candidates,
                 )
-                .await;
-                let mut raw = match result {
-                    Ok(raw) => raw,
-                    // A deadline-clipped search can finish before publishing a
-                    // score. bestmove was consumed, so retaining triage is safe.
-                    Err(error) if batch.deadline.is_some() && error.code == "missingEvaluation" => {
-                        return Ok(None)
-                    }
-                    Err(error) => return Err(error),
-                };
-                super::core::add_san(&mut raw);
-                tokio::task::yield_now().await;
-                Ok(Some(Completed { raw, value }))
-            };
-            let result = tokio::select! {
-                _ = root.cancelled() => Err(ReviewError::cancelled()),
-                _ = local.cancelled() => Err(ReviewError::cancelled()),
-                result = run => result,
-            };
-            let failed = result.is_err();
-            if let Err(error) = &result {
-                if error.code != "cancelled" {
-                    failure.lock().unwrap().get_or_insert(error.clone());
-                }
-                stop.send_replace(true);
+                .await?;
+            } else if configured != Some(job.multipv) {
+                port.send(&format!("setoption name MultiPV value {}", job.multipv))?;
+                engine::ask(port.as_mut(), "isready", "readyok", 10000, &local).await?;
             }
-            let _ = job.result.send(result);
-            if failed {
-                port.shutdown().await;
-                return;
+            configured = Some(job.multipv);
+            let mut raw = engine::evaluate(
+                port.as_mut(),
+                &job.fen,
+                Mode::Time,
+                job.value,
+                super::pipeline::timeout(Mode::Time, job.value),
+                &local,
+            )
+            .await?;
+            super::core::add_san(&mut raw);
+            Ok(Completed {
+                raw,
+                value: job.value,
+            })
+        };
+        let result = tokio::select! {
+            _ = root.cancelled() => Err(ReviewError::cancelled()),
+            _ = local.cancelled() => Err(ReviewError::cancelled()),
+            result = run => result,
+        };
+        let failed = result.is_err();
+        if let Err(error) = &result {
+            if error.code != "cancelled" {
+                failure.lock().unwrap().get_or_insert(error.clone());
             }
+            stop.send_replace(true);
+        }
+        let _ = job.result.send(result);
+        if failed {
+            break;
         }
     }
     port.shutdown().await;

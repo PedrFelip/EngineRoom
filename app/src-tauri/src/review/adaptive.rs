@@ -1,5 +1,5 @@
 use super::{
-    core::{opening, position, Game},
+    core::{opening, Game},
     scoring::win_pct,
     types::*,
 };
@@ -71,20 +71,41 @@ impl Profile {
         SearchBudget { ms, multipv }
     }
 }
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+pub enum Reason {
+    #[serde(rename = "perda de avaliação")]
+    Loss,
+    #[serde(rename = "virada de avaliação")]
+    Swing,
+    #[serde(rename = "sequência tática")]
+    Tactical,
+    #[serde(rename = "posição complexa")]
+    Complex,
+    #[serde(rename = "melhor lance se destaca")]
+    BestMoveGap,
+    #[serde(rename = "proximidade do limite de classificação")]
+    ClassificationBoundary,
+    #[serde(rename = "busca instável")]
+    UnstableSearch,
+    #[serde(rename = "sequência de mate")]
+    Mate,
+    #[serde(rename = "promoção")]
+    Promotion,
+}
 fn refinement_kind(m: &Critical) -> RefinementKind {
-    let has = |reason: &str| m.reasons.iter().any(|r| r == reason);
-    if has("sequência de mate") {
+    let has = |reason| m.reasons.contains(&reason);
+    if has(Reason::Mate) {
         RefinementKind::Mate
     } else if m.hard {
         // Promotion is tracked independently of captures and checks.
-        if m.promotion {
+        if has(Reason::Promotion) {
             RefinementKind::Promotion
         } else {
             RefinementKind::Critical
         }
-    } else if has("classificação incerta") {
+    } else if has(Reason::ClassificationBoundary) || has(Reason::UnstableSearch) {
         RefinementKind::Uncertain
-    } else if has("sequência tática") {
+    } else if has(Reason::Tactical) {
         RefinementKind::Tactical
     } else {
         RefinementKind::Complex
@@ -95,16 +116,13 @@ pub struct Critical {
     pub ply: usize,
     pub score: u32,
     pub hard: bool,
-    pub reasons: Vec<String>,
-    #[serde(skip)]
-    pub promotion: bool,
+    pub reasons: Vec<Reason>,
 }
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Target {
     pub position_index: usize,
     pub score: u32,
-    pub budget: String,
     #[serde(skip)]
     pub hard: bool,
     #[serde(skip)]
@@ -116,11 +134,20 @@ pub fn rank(game: &Game, raw: &[RawPosition]) -> Vec<Critical> {
     let book = opening(&game.moves).map_or(0, |(n, _)| n);
     game.moves
         .iter()
-        .map(|m| rank_move(m, &raw[m.ply - 1], &raw[m.ply], book))
+        .map(|m| {
+            rank_move(
+                m,
+                &game.positions[m.ply - 1],
+                &raw[m.ply - 1],
+                &raw[m.ply],
+                book,
+            )
+        })
         .collect()
 }
 pub fn rank_move(
     m: &PlayedMove,
+    position: &Chess,
     before: &RawPosition,
     after: &RawPosition,
     book: usize,
@@ -131,7 +158,6 @@ pub fn rank_move(
             score: 0,
             hard: false,
             reasons: vec![],
-            promotion: false,
         };
     }
     let delta = win_pct(before.cp) - (100.0 - win_pct(after.cp));
@@ -142,19 +168,15 @@ pub fn rank_move(
         .iter()
         .find(|l| l.multipv == 1)
         .zip(before.lines.iter().find(|l| l.multipv == 2))
+        .filter(|(a, b)| a.depth == b.depth)
         .map(|(a, b)| (a.cp as f64 - b.cp as f64).abs());
-    let (legal, pieces, in_check) = position(&m.fen_before)
-        .map(|p| {
-            (
-                p.legal_moves().len(),
-                p.board()
-                    .iter()
-                    .filter(|(_, piece)| piece.role != Role::Pawn && piece.role != Role::King)
-                    .count(),
-                p.is_check(),
-            )
-        })
-        .unwrap_or((0, 0, false));
+    let legal = position.legal_moves().len();
+    let pieces = position
+        .board()
+        .iter()
+        .filter(|(_, piece)| piece.role != Role::Pawn && piece.role != Role::King)
+        .count();
+    let in_check = position.is_check();
     let capture = m.san.contains('x');
     let check = m.san.contains('+') || m.san.contains('#');
     let promotion = m.san.contains('=');
@@ -163,10 +185,10 @@ pub fn rank_move(
         ((loss / 20.0) * 24.0).clamp(0.0, 24.0) + ((swing / 20.0) * 11.0).clamp(0.0, 11.0);
     let mut reasons = Vec::new();
     if loss >= 5.0 {
-        reasons.push("perda de avaliação".into());
+        reasons.push(Reason::Loss);
     }
     if swing >= 10.0 {
-        reasons.push("virada de avaliação".into());
+        reasons.push(Reason::Swing);
     }
     if capture {
         score += 4.0;
@@ -175,23 +197,24 @@ pub fn rank_move(
         score += 7.0;
     }
     if promotion {
+        reasons.push(Reason::Promotion);
         score += 12.0;
     }
     if in_check {
         score += 7.0;
     }
     if capture || check || promotion {
-        reasons.push("sequência tática".into());
+        reasons.push(Reason::Tactical);
     }
     score += (((legal as f64 - 18.0) / 22.0) * 10.0).clamp(0.0, 10.0)
         + ((pieces as f64 / 10.0) * 8.0).clamp(0.0, 8.0);
     if legal >= 30 || pieces >= 8 {
-        reasons.push("posição complexa".into());
+        reasons.push(Reason::Complex);
     }
     if let Some(gap) = gap {
         score += ((gap / 180.0) * 12.0).clamp(0.0, 12.0);
         if gap >= 80.0 {
-            reasons.push("melhor lance se destaca".into());
+            reasons.push(Reason::BestMoveGap);
         }
     }
     if [2.0, 5.0, 10.0, 20.0]
@@ -199,25 +222,32 @@ pub fn rank_move(
         .any(|b| (loss - b).abs() <= 1.25)
     {
         score += 8.0;
-        reasons.push("classificação incerta".into());
+        reasons.push(Reason::ClassificationBoundary);
+    }
+    if [before, after].iter().any(|raw| {
+        raw.lines
+            .iter()
+            .any(|line| line.multipv == 1 && line.unstable)
+    }) {
+        score += 8.0;
+        reasons.push(Reason::UnstableSearch);
     }
     if mate {
         score += 20.0;
-        reasons.push("sequência de mate".into());
+        reasons.push(Reason::Mate);
     }
     Critical {
         ply: m.ply,
         score: score.round().min(100.0) as u32,
         hard: loss >= 10.0 || swing >= 15.0 || mate || promotion,
         reasons,
-        promotion,
     }
 }
 
 pub fn targets(critical: &[Critical], count: usize, profile: Profile) -> Vec<Target> {
     let mut ranked: Vec<_> = critical
         .iter()
-        .filter(|m| m.score >= 32 || m.hard)
+        .filter(|m| m.score >= 32 || m.hard || m.reasons.contains(&Reason::UnstableSearch))
         .collect();
     ranked.sort_by(|a, b| {
         b.hard
@@ -232,45 +262,36 @@ pub fn targets(critical: &[Critical], count: usize, profile: Profile) -> Vec<Tar
     let mut order = Vec::new();
     let mut selected: BTreeMap<usize, Target> = BTreeMap::new();
     for m in ranked {
-        let indexes = [m.ply - 1, m.ply];
+        let kind = refinement_kind(m);
+        let pair = [m.ply - 1, m.ply];
+        let indexes = if kind == RefinementKind::Complex {
+            &pair[..1]
+        } else {
+            &pair[..]
+        };
         if !m.hard && indexes.iter().any(|i| !selected.contains_key(i)) && selected.len() >= limit {
             continue;
         }
-        for i in indexes {
+        for &i in indexes {
             if i >= count {
                 continue;
             }
-            let budget = if m.hard || m.score >= 65 {
-                "high"
-            } else {
-                "medium"
-            };
-            if !selected.contains_key(&i) {
+            let search = profile.budget(kind);
+            let target = selected.entry(i).or_insert_with(|| {
                 order.push(i);
-            }
-            selected.insert(
-                i,
                 Target {
                     position_index: i,
-                    score: selected.get(&i).map_or(m.score, |t| t.score.max(m.score)),
-                    budget: if selected.get(&i).is_some_and(|t| t.budget == "high") {
-                        "high"
-                    } else {
-                        budget
-                    }
-                    .into(),
-                    hard: m.hard || selected.get(&i).is_some_and(|t| t.hard),
-                    search: {
-                        let next = profile.budget(refinement_kind(m));
-                        selected.get(&i).map_or(next, |t| SearchBudget {
-                            ms: t.search.ms.max(next.ms),
-                            multipv: t.search.multipv.max(next.multipv),
-                        })
-                    },
-                    kind: refinement_kind(m)
-                        .max(selected.get(&i).map_or(RefinementKind::Context, |t| t.kind)),
-                },
-            );
+                    score: m.score,
+                    hard: m.hard,
+                    kind,
+                    search,
+                }
+            });
+            target.score = target.score.max(m.score);
+            target.hard |= m.hard;
+            target.kind = target.kind.max(kind);
+            target.search.ms = target.search.ms.max(search.ms);
+            target.search.multipv = target.search.multipv.max(search.multipv);
         }
     }
     let mut result: Vec<_> = order.iter().filter_map(|i| selected.remove(i)).collect();
@@ -286,7 +307,7 @@ pub fn targets(critical: &[Critical], count: usize, profile: Profile) -> Vec<Tar
 /// Context follows the played sequence; Stockfish already searches continuations
 /// inside each position. Only selected decisions may open an optional sequence.
 pub fn review_targets(game: &Game, raw: &[RawPosition], profile: Profile) -> Vec<Target> {
-    let positions: Vec<_> = game.fens.iter().map(|fen| position(fen).ok()).collect();
+    let positions = &game.positions;
     let forcing: Vec<_> = game
         .moves
         .iter()
@@ -296,9 +317,7 @@ pub fn review_targets(game: &Game, raw: &[RawPosition], profile: Profile) -> Vec
                 || m.san.contains('+')
                 || m.san.contains('#')
                 || m.san.contains('=')
-                || positions[i]
-                    .as_ref()
-                    .is_some_and(|p| p.is_check() || p.legal_moves().len() == 1)
+                || (positions[i].is_check() || positions[i].legal_moves().len() == 1)
         })
         .collect();
     let unstable = |i: usize| (win_pct(raw[i].cp) - (100.0 - win_pct(raw[i + 1].cp))).abs() >= 2.0;
@@ -312,12 +331,8 @@ pub fn review_targets(game: &Game, raw: &[RawPosition], profile: Profile) -> Vec
             if i + 2 >= positions.len() || i + 1 <= book {
                 return false;
             }
-            let Some(before) = &positions[i] else {
-                return false;
-            };
-            let Some(after) = &positions[i + 2] else {
-                return false;
-            };
+            let before = &positions[i];
+            let after = &positions[i + 2];
             let color = before.turn();
             // Material surrendered over the reply with evaluation compensation is
             // a candidate sacrifice, not a claim that the sacrifice is sound.
@@ -332,7 +347,7 @@ pub fn review_targets(game: &Game, raw: &[RawPosition], profile: Profile) -> Vec
     for (i, candidate) in critical.iter_mut().enumerate() {
         if sacrifices[i] && candidate.ply > book {
             candidate.score = candidate.score.max(32);
-            candidate.reasons.push("sequência tática".into());
+            candidate.reasons.push(Reason::Tactical);
         }
     }
     let mut selected = targets(&critical, raw.len(), profile);
@@ -345,9 +360,7 @@ pub fn review_targets(game: &Game, raw: &[RawPosition], profile: Profile) -> Vec
             let i = m.ply - 1;
             m.ply > book
                 && (m.hard || m.score >= 32)
-                && (forcing[i]
-                    || sacrifices[i]
-                    || m.reasons.iter().any(|r| r == "sequência de mate"))
+                && (forcing[i] || sacrifices[i] || m.reasons.contains(&Reason::Mate))
                 && selected
                     .iter()
                     .any(|t| t.position_index == i && t.kind != RefinementKind::Context)
@@ -396,7 +409,6 @@ pub fn review_targets(game: &Game, raw: &[RawPosition], profile: Profile) -> Vec
                     selected.push(Target {
                         position_index: index,
                         score: seed.score,
-                        budget: "medium".into(),
                         hard: false,
                         kind: RefinementKind::Context,
                         search: profile.budget(RefinementKind::Context),

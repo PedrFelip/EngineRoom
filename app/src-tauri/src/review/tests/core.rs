@@ -49,6 +49,54 @@ fn accuracy_uses_fen_start_and_actual_phase_entry_evaluation() {
 }
 
 #[test]
+fn isolated_complexity_refines_one_position_and_instability_selects_pair() {
+    use adaptive::{Critical, Reason, RefinementKind};
+    let profile = adaptive::profile(AnalysisKind::Fast).unwrap();
+    let candidate = Critical {
+        ply: 3,
+        score: 40,
+        hard: false,
+        reasons: vec![Reason::Complex],
+    };
+    let targets = adaptive::targets(&[candidate], 10, profile);
+    assert_eq!(targets.len(), 1);
+    assert_eq!(targets[0].position_index, 2);
+
+    let game = core::extract("[FEN \"7k/8/8/8/8/8/8/R6K w - - 0 1\"]\n1. Ra2").unwrap();
+    let mut before = core::terminal_raw(&game.fens[0], 700);
+    before.lines[0].unstable = true;
+    let after = core::terminal_raw(&game.fens[1], -700);
+    let critical = adaptive::rank(&game, &[before, after]);
+    assert!(critical[0].reasons.contains(&Reason::UnstableSearch));
+    assert!(!critical[0]
+        .reasons
+        .contains(&Reason::ClassificationBoundary));
+    let targets = adaptive::targets(&critical, 2, profile);
+    assert_eq!(targets.len(), 2);
+    assert!(targets.iter().all(|t| t.kind == RefinementKind::Uncertain));
+}
+
+#[test]
+fn candidate_gap_requires_comparable_depths() {
+    let game = core::extract("[FEN \"7k/8/8/8/8/8/8/R6K w - - 0 1\"]\n1. Ra2").unwrap();
+    let mut before = core::terminal_raw(&game.fens[0], 100);
+    before.lines[0].depth = Some(12);
+    let mut alternative = before.lines[0].clone();
+    alternative.multipv = 2;
+    alternative.cp = -100;
+    alternative.depth = Some(11);
+    before.lines.push(alternative);
+    let after = core::terminal_raw(&game.fens[1], -100);
+    assert!(!adaptive::rank(&game, &[before.clone(), after.clone()])[0]
+        .reasons
+        .contains(&adaptive::Reason::BestMoveGap));
+    before.lines[1].depth = Some(12);
+    assert!(adaptive::rank(&game, &[before, after])[0]
+        .reasons
+        .contains(&adaptive::Reason::BestMoveGap));
+}
+
+#[test]
 fn pgn_comments_variations_fen_promotion_and_invalid_moves() {
     let g = core::extract("[White \"Alice\"]\n1. e4 {hello} e5 (1... c5) 2. Nf3 $1 Nc6 *").unwrap();
     assert_eq!(g.moves.len(), 4);
@@ -87,20 +135,19 @@ fn pgn_comments_variations_fen_promotion_and_invalid_moves() {
 
 #[test]
 fn situation_priorities_context_quotas_and_overlapping_requirements() {
-    use adaptive::{Critical, RefinementKind as K};
-    let candidate = |ply, score, hard, reason: &str| Critical {
+    use adaptive::{Critical, Reason, RefinementKind as K};
+    let candidate = |ply, score, hard, reason: Reason| Critical {
         ply,
         score,
         hard,
-        reasons: vec![reason.into()],
-        promotion: false,
+        reasons: vec![reason],
     };
     let profile = adaptive::profile(AnalysisKind::Deep).unwrap();
     let candidates = vec![
-        candidate(5, 45, true, "perda de avaliação"),
-        candidate(6, 90, true, "sequência de mate"),
-        candidate(12, 90, false, "posição complexa"),
-        candidate(16, 35, false, "classificação incerta"),
+        candidate(5, 45, true, Reason::Loss),
+        candidate(6, 90, true, Reason::Mate),
+        candidate(12, 90, false, Reason::Complex),
+        candidate(16, 35, false, Reason::ClassificationBoundary),
     ];
     let targets = adaptive::targets(&candidates, 40, profile);
     assert_eq!(targets[0].kind, K::Mate);

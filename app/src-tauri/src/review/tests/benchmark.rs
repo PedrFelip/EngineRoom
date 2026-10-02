@@ -451,6 +451,7 @@ async fn benchmark_analysis_overhead() {
                 depth: 32,
                 pv: vec!["e2e4".into(), "e7e5".into()],
                 lines: vec![RawLine {
+                    unstable: false,
                     multipv: 1,
                     cp: 15,
                     depth: Some(32),

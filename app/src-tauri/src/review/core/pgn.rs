@@ -6,6 +6,7 @@ use shakmaty::{san, CastlingMode, Chess, Position};
 use std::{collections::HashMap, io::Cursor, ops::ControlFlow};
 
 pub struct Game {
+    pub positions: Vec<Chess>,
     pub fens: Vec<String>,
     pub moves: Vec<PlayedMove>,
     pub meta: PgnMeta,
@@ -64,9 +65,10 @@ impl Visitor for PgnVisitor {
         };
         let start = fen(&pos);
         ControlFlow::Continue(Reading {
-            pos,
+            pos: pos.clone(),
             game: Game {
                 fens: vec![start],
+                positions: vec![pos],
                 moves: vec![],
                 meta,
             },
@@ -94,6 +96,7 @@ impl Visitor for PgnVisitor {
             fen_before: before,
         });
         state.game.fens.push(fen(&state.pos));
+        state.game.positions.push(state.pos.clone());
         ControlFlow::Continue(())
     }
     fn outcome(&mut self, state: &mut Reading, outcome: Outcome) -> ControlFlow<Self::Output> {

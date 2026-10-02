@@ -36,6 +36,7 @@ pub(super) struct FakeState {
     pub(super) fail_at: Option<usize>,
     pub(super) stall: bool,
     pub(super) scores: HashMap<String, RawPosition>,
+    pub(super) refined_scores: HashMap<String, RawPosition>,
     pub(super) critical_fen: Option<String>,
     pub(super) empty_once: bool,
     pub(super) verbose: bool,
@@ -68,7 +69,15 @@ impl EnginePort for FakePort {
             if s.empty_once {
                 s.empty_once = false;
             } else {
-                let raw = s.scores.get(&self.fen).cloned();
+                let refined = !command.starts_with("go movetime 180")
+                    && !command.starts_with("go movetime 450");
+                let raw = if refined {
+                    s.refined_scores.get(&self.fen)
+                } else {
+                    None
+                }
+                .or_else(|| s.scores.get(&self.fen))
+                .cloned();
                 if let Some(raw) = raw {
                     for l in raw.lines {
                         let depths: Vec<_> = if s.verbose {
@@ -143,6 +152,7 @@ impl EngineFactory for FakeFactory {
 pub(super) struct MemoryRepo {
     pub(super) hits: Mutex<HashMap<String, RawPosition>>,
     pub(super) writes: Mutex<Vec<(u32, usize)>>,
+    pub(super) lookups: Mutex<Vec<(Vec<String>, u32, u32)>>,
     pub(super) fail_put: bool,
     pub(super) fail_read: bool,
     pub(super) fail_save: bool,
@@ -152,13 +162,17 @@ impl Repository for MemoryRepo {
         &'a self,
         fens: &'a [String],
         _: Mode,
-        _: u32,
+        value: u32,
         multipv: u32,
     ) -> Task<'a, Result<Vec<Option<RawPosition>>>> {
         Box::pin(async move {
             if self.fail_read {
                 return Err(ReviewError::new("cache", "lookup", "cache read failed"));
             }
+            self.lookups
+                .lock()
+                .unwrap()
+                .push((fens.to_vec(), value, multipv));
             let hits = self.hits.lock().unwrap();
             Ok(fens
                 .iter()

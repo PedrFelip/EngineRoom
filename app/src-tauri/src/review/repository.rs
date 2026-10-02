@@ -331,6 +331,7 @@ pub fn validate_review(review: &ReviewResult) -> Result<()> {
                 && p.win_pct.is_finite()
                 && p.lines
                     .iter()
+                    .chain(p.triage_lines.iter().flatten())
                     .all(|l| l.multipv > 0 && l.win_pct.is_finite())
         })
         && review.moves.iter().enumerate().all(|(i, m)| {

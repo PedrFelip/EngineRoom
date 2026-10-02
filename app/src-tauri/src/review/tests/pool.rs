@@ -141,13 +141,13 @@ async fn submitted_searches_run_concurrently_and_preserve_hash_on_multipv_change
         let mut results = vec![];
         for (index, fen) in game.fens.iter().enumerate() {
             results.push(
-                pool.submit(index % pool.len(), fen.clone(), 100, multipv, vec![])
+                pool.submit(index % pool.len(), fen.clone(), 100, multipv)
                     .await
                     .unwrap(),
             );
         }
         for (fen, receiver) in game.fens.iter().zip(results) {
-            let result = receiver.await.unwrap().unwrap().unwrap();
+            let result = receiver.await.unwrap().unwrap();
             assert_eq!(result.raw.fen, *fen);
             assert_eq!(result.value, 100);
         }
@@ -224,14 +224,10 @@ async fn real_sidecar_pool_holds_one_lease_until_all_processes_terminate() {
     assert_eq!(permit.available_permits(), 0);
     let mut results = vec![];
     for (worker, fen) in fens.iter().enumerate() {
-        results.push(
-            pool.submit(worker, fen.clone(), 100, 1, vec![])
-                .await
-                .unwrap(),
-        );
+        results.push(pool.submit(worker, fen.clone(), 100, 1).await.unwrap());
     }
     for (fen, receiver) in fens.iter().zip(results) {
-        let result = receiver.await.unwrap().unwrap().unwrap();
+        let result = receiver.await.unwrap().unwrap();
         assert_eq!(result.raw.fen, *fen);
         assert!(result.raw.depth > 0);
         assert_eq!(result.value, 100);
@@ -289,13 +285,15 @@ async fn parallel_pipeline_keeps_profile_budgets_and_failure_flush_keeps_origina
             assert!(budgets.iter().all(|value| [180, 500, 2000].contains(value)));
             let writes = repo.writes.lock().unwrap();
             assert!(!writes.is_empty());
-            assert!(writes.iter().all(|(value, _)| *value == 180));
+            assert!(writes
+                .iter()
+                .all(|(value, _)| [180, 500, 2000].contains(value)));
             assert!(sent
                 .iter()
                 .filter(|s| s.starts_with("go ")
                     && !s.starts_with("go movetime 180 ")
                     && s.as_str() != "go movetime 180")
-                .all(|s| s.contains(" searchmoves ")));
+                .all(|s| !s.contains(" searchmoves ")));
             let indexes: Vec<_> = events
                 .iter()
                 .filter_map(|event| match event {
@@ -324,6 +322,7 @@ async fn mixed_queue_starts_critical_refinements_before_triage_finishes() {
         let cp = if i == 1 { 500 } else { 0 };
         let mut raw = core::terminal_raw(fen, cp);
         raw.lines = vec![RawLine {
+            unstable: false,
             multipv: 1,
             cp,
             pv: vec![],
@@ -412,7 +411,7 @@ async fn mixed_queue_starts_critical_refinements_before_triage_finishes() {
             .iter()
             .map(|(_, count)| count)
             .sum::<usize>(),
-        searches.iter().filter(|(_, value)| *value == 180).count()
+        searches.len()
     );
 }
 

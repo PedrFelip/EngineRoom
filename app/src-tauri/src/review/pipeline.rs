@@ -72,7 +72,7 @@ impl Pipeline {
         emit: &mut (dyn FnMut(Event) + Send),
     ) -> Result<ReviewResult> {
         let pgn = config.pgn.clone();
-        let game = tauri::async_runtime::spawn_blocking(move || core::extract(&pgn))
+        let game = tokio::task::spawn_blocking(move || core::extract(&pgn))
             .await
             .map_err(|e| ReviewError::new("invalidPgn", "pgn", e))??;
         cancel.check()?;
@@ -112,10 +112,10 @@ impl Pipeline {
                 ));
             }
             let terminals = game
-                .fens
+                .positions
                 .iter()
-                .map(|f| core::terminal(f))
-                .collect::<Result<Vec<_>>>()?;
+                .map(core::terminal_position)
+                .collect::<Vec<_>>();
             let mut remaining = hits
                 .iter()
                 .zip(&terminals)

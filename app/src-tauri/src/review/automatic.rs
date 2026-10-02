@@ -1,6 +1,6 @@
 //! Mixed automatic queue. Baseline scores remain immutable for adaptive ranking.
 use super::{
-    adaptive::{self, Profile, RefinementKind, SearchBudget, Target},
+    adaptive::{self, Profile, SearchBudget, Target},
     core::{self, Game},
     engine::{Cancellation, EngineFactory},
     pipeline::cancellable,
@@ -34,38 +34,28 @@ struct State<'a> {
     searched: usize,
     refinement_stage: bool,
     final_targets: Option<Vec<Target>>,
+    ready_targets: Vec<Target>,
 }
 impl State<'_> {
     fn complete(&self) -> bool {
         self.baseline.iter().all(Option::is_some)
     }
-    fn targets(&self) -> Vec<Target> {
-        // Hard candidates bypass the global soft quota. Soft candidates wait
-        // for the full ranking so early moves cannot consume later moves' quota.
-        if let Some(targets) = &self.final_targets {
-            return targets.clone();
-        }
-        let critical: Vec<_> = self
-            .critical
-            .iter()
-            .flatten()
-            .filter(|c| c.hard)
-            .cloned()
-            .collect();
-        adaptive::targets(&critical, self.baseline.len(), self.profile)
-            .into_iter()
-            .filter(|t| t.hard && self.terminals[t.position_index].is_none())
-            .collect()
-    }
-    fn value(&self, target: &Target) -> u32 {
-        target.search.ms
-    }
-    fn multipv(&self, target: &Target) -> u32 {
-        target.search.multipv
+    fn targets(&self) -> &[Target] {
+        self.final_targets.as_deref().unwrap_or(&self.ready_targets)
     }
     fn satisfied(&self, target: &Target) -> bool {
         self.budgets[target.position_index]
-            .is_some_and(|b| b.ms >= self.value(target) && b.multipv >= self.multipv(target))
+            .is_some_and(|b| b.ms >= target.search.ms && b.multipv >= target.search.multipv)
+    }
+    fn refinement(&self, index: usize) -> Option<&RawPosition> {
+        let baseline = self.baseline[index].as_ref().unwrap();
+        self.refined[index]
+            .as_ref()
+            .filter(|refined| refined.depth >= baseline.depth)
+    }
+    fn evaluation(&self, index: usize) -> &RawPosition {
+        self.refinement(index)
+            .unwrap_or_else(|| self.baseline[index].as_ref().unwrap())
     }
     fn discover(&mut self, index: usize) {
         for ply in [index, index + 1] {
@@ -75,10 +65,25 @@ impl State<'_> {
             if let (Some(before), Some(after)) = (&self.baseline[ply - 1], &self.baseline[ply]) {
                 self.critical[ply - 1] = Some(adaptive::rank_move(
                     &self.game.moves[ply - 1],
+                    &self.game.positions[ply - 1],
                     before,
                     after,
                     self.book,
                 ));
+                if self.critical[ply - 1].as_ref().is_some_and(|c| c.hard) {
+                    let critical: Vec<_> = self
+                        .critical
+                        .iter()
+                        .flatten()
+                        .filter(|c| c.hard)
+                        .cloned()
+                        .collect();
+                    self.ready_targets =
+                        adaptive::targets(&critical, self.baseline.len(), self.profile)
+                            .into_iter()
+                            .filter(|t| self.terminals[t.position_index].is_none())
+                            .collect();
+                }
             }
         }
     }
@@ -94,7 +99,7 @@ impl State<'_> {
             + targets
                 .iter()
                 .filter(|t| !self.satisfied(t))
-                .map(|t| self.value(t) as u64)
+                .map(|t| t.search.ms as u64)
                 .sum::<u64>();
         let (completed, total) = if self.refinement_stage {
             (
@@ -145,11 +150,7 @@ pub(super) async fn review(
         game,
         profile,
         phases: core::phases(&game.fens),
-        terminals: game
-            .fens
-            .iter()
-            .map(|f| core::terminal(f))
-            .collect::<Result<_>>()?,
+        terminals: game.positions.iter().map(core::terminal_position).collect(),
         baseline: vec![None; count],
         refined: vec![None; count],
         budgets: vec![None; count],
@@ -159,6 +160,7 @@ pub(super) async fn review(
         searched: 0,
         refinement_stage: false,
         final_targets: None,
+        ready_targets: vec![],
     };
     let mut pool: Option<Pool> = None;
     let mut pending: Vec<(u32, u32, Vec<RawPosition>)> = vec![];
@@ -197,47 +199,25 @@ async fn execute(
     let profile = state.profile;
     let count = game.fens.len();
 
-    let mut caches = vec![];
-    let mut requests = vec![SearchBudget {
-        ms: profile.triage_ms,
-        multipv: profile.triage_multipv,
-    }];
-    for kind in [
-        RefinementKind::Context,
-        RefinementKind::Uncertain,
-        RefinementKind::Tactical,
-        RefinementKind::Complex,
-        RefinementKind::Critical,
-        RefinementKind::Promotion,
-        RefinementKind::Mate,
-    ] {
-        let budget = profile.budget(kind);
-        if !requests.contains(&budget) {
-            requests.push(budget);
-        }
-    }
-    for budget in &requests {
-        let (value, multipv) = (budget.ms, budget.multipv);
-        let hits = cancellable(
-            repository.lookup(&game.fens, Mode::Time, value, multipv),
-            cancel,
-        )
-        .await?;
-        if hits.len() != count {
-            return Err(ReviewError::new(
-                "cache",
-                "cache.lookup",
-                "Quantidade de avaliações inválida.",
-            ));
-        }
-        caches.push(hits);
+    let mut hits = cancellable(
+        repository.lookup(
+            &game.fens,
+            Mode::Time,
+            profile.triage_ms,
+            profile.triage_multipv,
+        ),
+        cancel,
+    )
+    .await?;
+    if hits.len() != count {
+        return Err(invalid_cache_count());
     }
     let mut queue = VecDeque::new();
     for i in 0..count {
         cancel.check()?;
         state.baseline[i] = if let Some(cp) = state.terminals[i] {
             Some(core::terminal_raw(&game.fens[i], cp))
-        } else if let Some(hit) = caches[0][i].take() {
+        } else if let Some(hit) = hits[i].take() {
             state.cached += 1;
             Some(hit)
         } else {
@@ -253,6 +233,7 @@ async fn execute(
     let mut blocks: Vec<VecDeque<usize>> = vec![];
     let mut busy = vec![];
     let mut refining = vec![false; count];
+    let mut cache_checked = vec![None; count];
     loop {
         cancel.check()?;
         if state.complete() && state.final_targets.is_none() {
@@ -264,37 +245,54 @@ async fn execute(
                     .collect(),
             );
         }
-        let targets = state.targets();
+        let targets = state.targets().to_vec();
         if state.complete() && !state.refinement_stage {
             state.refinement_stage = true;
             if let Some(target) = targets.first() {
                 state.progress(target.position_index, None, emit);
             }
         }
+        // Query only selected positions, grouped by budget. Recheck only if a
+        // later overlapping decision raises the required coverage.
+        let mut groups: Vec<(SearchBudget, Vec<usize>)> = vec![];
         for target in &targets {
             let i = target.position_index;
-            let value = state.value(target);
-            if state.satisfied(target) || refining[i] {
+            if state.satisfied(target) || refining[i] || cache_checked[i] == Some(target.search) {
                 continue;
             }
-            let hit = requests
+            let slot = groups
                 .iter()
-                .enumerate()
-                .skip(1)
-                .filter(|(_, b)| b.ms >= value && b.multipv >= state.multipv(target))
-                .find_map(|(slot, b)| caches[slot][i].take().map(|raw| (raw, *b)));
-            if let Some((raw, budget)) = hit {
-                state.budgets[i] = Some(budget);
-                state.refined[i] = Some(raw);
-                state.cached += 1;
-                state.progress(i, state.refined[i].as_ref(), emit);
+                .position(|(budget, _)| *budget == target.search)
+                .unwrap_or_else(|| {
+                    groups.push((target.search, vec![]));
+                    groups.len() - 1
+                });
+            groups[slot].1.push(i);
+        }
+        for (budget, indexes) in groups {
+            let fens: Vec<_> = indexes.iter().map(|&i| game.fens[i].clone()).collect();
+            let hits = cancellable(
+                repository.lookup(&fens, Mode::Time, budget.ms, budget.multipv),
+                cancel,
+            )
+            .await?;
+            if hits.len() != indexes.len() {
+                return Err(invalid_cache_count());
+            }
+            for (i, hit) in indexes.into_iter().zip(hits) {
+                cache_checked[i] = Some(budget);
+                if let Some(raw) = hit {
+                    state.budgets[i] = Some(budget);
+                    state.refined[i] = Some(raw);
+                    state.cached += 1;
+                    state.progress(i, Some(state.evaluation(i)), emit);
+                }
             }
         }
-        let todo: Vec<_> = targets
+        let needs_refinement = targets
             .iter()
-            .filter(|t| !state.satisfied(t) && !refining[t.position_index])
-            .collect();
-        if pool.is_none() && (!queue.is_empty() || !todo.is_empty()) {
+            .any(|t| !state.satisfied(t) && !refining[t.position_index]);
+        if pool.is_none() && (!queue.is_empty() || needs_refinement) {
             *pool = Some(Pool::acquire(factory, sizing, count, cancel).await?);
             let workers = pool.as_ref().unwrap().len();
             blocks = (0..workers).map(|_| VecDeque::new()).collect();
@@ -319,8 +317,8 @@ async fn execute(
                         worker,
                         index: target.position_index,
                         refinement: true,
-                        value: state.value(target),
-                        multipv: state.multipv(target),
+                        value: target.search.ms,
+                        multipv: target.search.multipv,
                     })
                 } else {
                     if blocks[worker].is_empty() {
@@ -351,22 +349,8 @@ async fn execute(
                     })
                 };
                 if let Some(job) = job {
-                    let candidates = if job.refinement {
-                        refinement_candidates(
-                            state.baseline[job.index].as_ref().unwrap(),
-                            game.moves.get(job.index).map(|m| m.uci.as_str()),
-                        )
-                    } else {
-                        vec![]
-                    };
                     let receiver = pool
-                        .submit(
-                            worker,
-                            game.fens[job.index].clone(),
-                            job.value,
-                            job.multipv,
-                            candidates,
-                        )
+                        .submit(worker, game.fens[job.index].clone(), job.value, job.multipv)
                         .await?;
                     busy[worker] = true;
                     if job.refinement {
@@ -404,26 +388,19 @@ async fn execute(
         let pool = pool.as_ref().unwrap();
         let completed: Completed = reply
             .map_err(|_| disconnected_worker_error(pool.failure(), cancel))?
-            .map_err(|e| pool.failure().unwrap_or(e))?
-            .ok_or_else(|| {
-                ReviewError::new("missingEvaluation", "review.queue", "Busca não concluída.")
-            })?;
+            .map_err(|e| pool.failure().unwrap_or(e))?;
         busy[job.worker] = false;
         state.searched += 1;
         let raw = completed.raw;
-        // Restricted candidate scores must never satisfy unrestricted cache requests.
-        if !job.refinement {
-            let buffer = pending
-                .iter()
-                .position(|(value, multipv, _)| {
-                    *value == completed.value && *multipv == job.multipv
-                })
-                .unwrap_or_else(|| {
-                    pending.push((completed.value, job.multipv, vec![]));
-                    pending.len() - 1
-                });
-            pending[buffer].2.push(raw.clone());
-        }
+        // Both stages use unrestricted searches and can populate the FEN cache.
+        let buffer = pending
+            .iter()
+            .position(|(value, multipv, _)| *value == completed.value && *multipv == job.multipv)
+            .unwrap_or_else(|| {
+                pending.push((completed.value, job.multipv, vec![]));
+                pending.len() - 1
+            });
+        pending[buffer].2.push(raw.clone());
         if job.refinement {
             refining[job.index] = false;
             state.budgets[job.index] = Some(SearchBudget {
@@ -435,11 +412,7 @@ async fn execute(
             state.baseline[job.index] = Some(raw.clone());
             state.discover(job.index);
         }
-        state.progress(
-            job.index,
-            state.refined[job.index].as_ref().or(Some(&raw)),
-            emit,
-        );
+        state.progress(job.index, Some(state.evaluation(job.index)), emit);
     }
     flush(repository, pending).await?;
     cancel.check()?;
@@ -456,13 +429,22 @@ async fn execute(
             update: None,
         },
     });
-    let raw: Vec<_> = state
-        .refined
-        .iter()
-        .zip(&state.baseline)
-        .map(|(refined, baseline)| refined.as_ref().or(baseline.as_ref()).unwrap().clone())
-        .collect();
-    core::build(game, &raw)
+    let raw: Vec<_> = (0..count).map(|i| state.evaluation(i).clone()).collect();
+    let mut result = core::build(game, &raw)?;
+    for (i, position) in result.positions.iter_mut().enumerate() {
+        if let (Some(budget), Some(_)) = (state.budgets[i], state.refinement(i)) {
+            position.triage_lines = Some(
+                core::position_analysis(state.baseline[i].as_ref().unwrap(), i, state.phases[i])
+                    .lines,
+            );
+            position.search = Some(Search {
+                purpose: "refinement".into(),
+                movetime_ms: budget.ms,
+                multipv: budget.multipv,
+            });
+        }
+    }
+    Ok(result)
 }
 async fn flush(
     repository: &dyn Repository,
@@ -491,21 +473,12 @@ fn disconnected_worker_error(failure: Option<ReviewError>, cancel: &Cancellation
     })
 }
 
-/// Keep all baseline roots and the played move, preserving baseline priority.
-fn refinement_candidates(baseline: &RawPosition, played: Option<&str>) -> Vec<String> {
-    let mut candidates = Vec::new();
-    for candidate in baseline
-        .lines
-        .iter()
-        .filter_map(|line| line.pv.first().map(String::as_str))
-        .chain(baseline.pv.first().map(String::as_str))
-        .chain(played)
-    {
-        if !candidates.iter().any(|existing| existing == candidate) {
-            candidates.push(candidate.to_owned());
-        }
-    }
-    candidates
+fn invalid_cache_count() -> ReviewError {
+    ReviewError::new(
+        "cache",
+        "cache.lookup",
+        "Quantidade de avaliações inválida.",
+    )
 }
 
 #[cfg(test)]
