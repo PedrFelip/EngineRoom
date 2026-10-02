@@ -506,3 +506,134 @@ async fn benchmark_analysis_overhead() {
         serde_json::json!({"samples":11,"searches":300,"linesPerSearch":33,"searchesMedianMs":search_samples[5],"gameWithProgressMedianMs":game_samples[5],"excludes":["Stockfish","IPC","rendering"]})
     );
 }
+
+/// Diagnostic sample, not a strength test: a fixed time reference is not truth.
+#[tokio::test]
+#[ignore = "explicit Stockfish quality comparison; includes shell/SQLite, excludes frontend IPC/rendering"]
+async fn benchmark_stockfish_review_quality() {
+    use crate::review::repository::SqliteRepository;
+    use tauri::Manager;
+    let corpus = [
+        (
+            "sacrifice",
+            "[FEN \"7k/8/5p2/8/8/8/8/R1B4K w - - 0 1\"]\n1. Bg5 fxg5 2. Ra2 Kg7 3. Ra3",
+        ),
+        (
+            "exchange",
+            "[FEN \"7k/8/7p/6b1/8/8/8/R1B4K w - - 0 1\"]\n1. Bxg5 hxg5 2. Ra2 Kg7 3. Ra3",
+        ),
+        (
+            "promotion",
+            "[FEN \"7k/P7/8/8/8/8/8/7K w - - 0 1\"]\n1. a8=Q+ Kh7 2. Qh8+ Kg6 3. Qg8+",
+        ),
+    ];
+    let app = tauri::test::mock_builder()
+        .plugin(tauri_plugin_shell::init())
+        .build(tauri::test::mock_context(tauri::test::noop_assets()))
+        .unwrap();
+    app.manage(db::DbState(Mutex::new(db::open_memory().unwrap())));
+    let factory = Arc::new(SidecarFactory {
+        app: app.handle().clone(),
+        permit: Arc::new(Semaphore::new(1)),
+    });
+    let repo = Arc::new(SqliteRepository::new(app.handle().clone()));
+    let (_closed, cancel) = cancel();
+    let mut rows = Vec::new();
+    for (name, pgn) in corpus {
+        let game = core::extract(pgn).unwrap();
+        // Separate cold caches and processes for reference and each profile.
+        let clear = || {
+            let db = app.state::<db::DbState>();
+            Cache::new(&db.0.lock().unwrap()).clear().unwrap();
+        };
+        clear();
+        let mut pipeline = Pipeline::new(factory.clone(), repo.clone());
+        let mut reference_config = config(pgn, AnalysisKind::Manual);
+        reference_config.mode = Mode::Time;
+        reference_config.movetime_ms = Some(5000);
+        reference_config.lines = 1;
+        eprintln!("Stockfish reference: {name}, 5s/position");
+        let start = Instant::now();
+        let reference = pipeline
+            .review(&reference_config, Some((6, 96)), &cancel, &mut |event| {
+                if let Event::Progress { progress } = event {
+                    eprintln!(
+                        "Reference {name}: {} {}/{}",
+                        progress.stage, progress.completed, progress.total
+                    );
+                }
+            })
+            .await
+            .unwrap();
+        let reference_ms = start.elapsed().as_millis();
+        pipeline.close().await;
+        for kind in [AnalysisKind::Fast, AnalysisKind::Deep] {
+            clear();
+            eprintln!("Stockfish quality: {name} {}", kind.as_str());
+            let mut pipeline = Pipeline::new(factory.clone(), repo.clone());
+            let start = Instant::now();
+            let adaptive = pipeline
+                .review(&config(pgn, kind), Some((6, 96)), &cancel, &mut |_| {})
+                .await
+                .unwrap();
+            let elapsed_ms = start.elapsed().as_millis();
+            pipeline.close().await;
+            let triage: Vec<_> = adaptive
+                .positions
+                .iter()
+                .map(|position| {
+                    let cp = position
+                        .triage_lines
+                        .as_ref()
+                        .and_then(|lines| lines.first())
+                        .map(|line| {
+                            if position.fen.split_whitespace().nth(1) == Some("b") {
+                                -line.cp
+                            } else {
+                                line.cp
+                            }
+                        })
+                        .unwrap_or(position.cp);
+                    core::terminal_raw(&position.fen, cp)
+                })
+                .collect();
+            let triage = core::build(&game, &triage).unwrap();
+            let metrics = |review: &ReviewResult| {
+                let disagreements = review
+                    .moves
+                    .iter()
+                    .zip(&reference.moves)
+                    .filter(|(a, b)| a.classification != b.classification)
+                    .count();
+                let mean_error = review
+                    .positions
+                    .iter()
+                    .zip(&reference.positions)
+                    .map(|(a, b)| (a.win_pct - b.win_pct).abs())
+                    .sum::<f64>()
+                    / review.positions.len() as f64;
+                serde_json::json!({ "classificationDisagreements": disagreements, "meanWinPctError": mean_error })
+            };
+            rows.push(serde_json::json!({
+                "game": name, "profile": kind.as_str(), "plies": game.moves.len(),
+                "elapsedMs": elapsed_ms, "referenceMs": reference_ms,
+                "triage": metrics(&triage), "adaptive": metrics(&adaptive),
+                "positions": adaptive.positions.iter().map(|position| serde_json::json!({
+                    "ply": position.ply, "cp": position.cp, "depth": position.depth,
+                    "triageDepth": position.triage_lines.as_ref().and_then(|lines| lines.first()).and_then(|line| line.depth),
+                    "refined": position.search.is_some(),
+                })).collect::<Vec<_>>(),
+            }));
+        }
+    }
+    let report = serde_json::json!({
+        "reference": "Stockfish 18, 5000ms/position, MultiPV 1",
+        "resources": { "threads": 6, "hashMb": 96 }, "samplesPerCase": 1,
+        "excludes": ["frontend IPC", "rendering"], "cases": rows,
+    });
+    if let Ok(path) = std::env::var("BENCH_REPORT_PATH") {
+        std::fs::write(path, serde_json::to_string_pretty(&report).unwrap()).unwrap();
+    } else {
+        eprintln!("STOCKFISH_QUALITY_JSON={report}");
+    }
+}

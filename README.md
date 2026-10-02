@@ -141,10 +141,14 @@ análise ao vivo e teardown; seus dados não são gravados no histórico do usu�
   classificação incerta e complexidade usam MultiPV 2 por 750 ms / 2,7 s;
   tática usa MultiPV 2 por 1 s / 3,6 s. Perdas/viradas fortes e promoções
   usam MultiPV 2 por 2 s / 6 s; mate usa o mesmo tempo com MultiPV 1.
-  Cada refinamento aprofunda os lances candidatos encontrados na base e o
-  lance jogado, via `searchmoves`, recalculando suas continuações. Resultados
-  de buscas restritas ficam na revisão salva, sem entrar no cache geral por
-  FEN. Avaliações irrestritas já presentes no cache podem atender ao pedido.
+  Cada refinamento busca todos os lances legais, podendo descobrir alternativas
+  ausentes na triagem. Ambas as etapas alimentam o cache geral por FEN.
+  As linhas da triagem são preservadas separadamente, com suas profundidades,
+  e exibidas como avaliações preliminares, sem misturá-las às linhas refinadas.
+  Um refinamento mais raso não substitui a avaliação da triagem.
+  Proximidade dos limites de classificação e instabilidade da busca são sinais
+  distintos: a última compara as duas últimas profundidades da PV principal,
+  procurando mudança de lance ou de pelo menos 2 pontos percentuais de avaliação.
   A prioridade é mate, promoção, perda/virada, incerteza, tática,
   complexidade e contexto; pares obrigatórios precedem os opcionais.
   Pares críticos têm prioridade sobre todos os opcionais e não são descartados
@@ -161,8 +165,10 @@ análise ao vivo e teardown; seus dados não são gravados no histórico do usu�
   25% (mínimo 6), depois das decisões selecionadas.
   Candidatos obrigatórios podem começar assim que o par antes/depois está pronto;
   candidatos sujeitos à cota aguardam a classificação completa. Resultados
-  atualizam o gráfico na ordem de conclusão; a base alimenta o buffer de cache. As buscas
-  continuam durante as gravações, feitas a cada oito posições e no final.
+  atualizam o gráfico na ordem de conclusão; triagem e refinamento alimentam
+  o buffer de cache. O prefetch inicial consulta apenas a triagem; refinamentos
+  consultam os alvos selecionados em lotes por orçamento. As buscas continuam
+  durante as gravações, feitas a cada oito posições e no final.
   O modo manual usa uma única engine com os recursos configurados.
 - **Lifecycle estruturado**: um semáforo Rust é compartilhado entre sessões e o
   probe das configurações. Um único dono controla todo o pool. As engines
@@ -180,10 +186,18 @@ análise ao vivo e teardown; seus dados não são gravados no histórico do usu�
   de origem. Pedidos de profundidade aceitam avaliações suficientemente profundas;
   pedidos por tempo aceitam somente entradas de tempo com orçamento suficiente.
   Consultas são em lote e gravações incrementais usam transações a cada oito
-  posições. JSON corrompido vira miss; erros de I/O continuam fatais.
+  posições. Novas entradas registram a cobertura MultiPV efetivamente produzida
+  e a menor profundidade das linhas armazenadas. Posições com poucos lances
+  legais cobrem pedidos maiores quando todas as alternativas foram avaliadas.
+  O adapter rejeita payloads incompletos, slots duplicados e linhas rasas em
+  pedidos de profundidade, inclusive de entradas antigas. JSON corrompido vira
+  miss; erros de I/O continuam fatais.
 - **Histórico**: a sessão publica o resultado antes de salvar em best-effort.
   `games_get_review_config` normaliza revisões antigas em Rust, preservando o
   formato SQLite/JSON e a reabertura sem nova busca.
+- **Acurácia**: usa a avaliação real da posição inicial e da entrada de cada
+  fase, inclusive em partidas com FEN. Ao reabrir revisões de modelos anteriores,
+  recalcula a acurácia a partir das avaliações salvas, sem nova busca.
 - **PGN como fonte de verdade**: o backend revalida a linha principal e respeita
   FEN de início. Metadados são derivados do PGN, sem novos campos duplicados.
   `chess.js` permanece na prévia de importação e nas interações do tabuleiro.
