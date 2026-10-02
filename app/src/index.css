@@ -466,10 +466,6 @@
     color-mix(in srgb, var(--brand) 72%, transparent);
 }
 
-.engine-loading-orb {
-  box-shadow: 0 0 0 6px color-mix(in srgb, var(--brand) 9%, transparent);
-}
-
 /* Scrollbar fina, thumb discreto sobre a rampa de painéis. */
 * {
   scrollbar-width: thin;

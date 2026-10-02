@@ -221,20 +221,34 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
   )
 
   useEffect(() => {
-    if (!result) return
+    if (!result || analysisModalOpen) return
     const onKey = (e: KeyboardEvent) => {
-      stopExplorePlayback()
+      if (
+        e.ctrlKey ||
+        e.altKey ||
+        e.metaKey ||
+        document.querySelector('[role="dialog"]') ||
+        (e.target instanceof HTMLElement &&
+          (e.target.isContentEditable ||
+            e.target.closest('input, textarea, select, [contenteditable]')))
+      ) {
+        return
+      }
       switch (e.key) {
         case 'ArrowLeft':
+          stopExplorePlayback()
           review.prev()
           break
         case 'ArrowRight':
+          stopExplorePlayback()
           review.next()
           break
         case 'Home':
+          stopExplorePlayback()
           review.first()
           break
         case 'End':
+          stopExplorePlayback()
           review.last()
           break
         default:
@@ -270,7 +284,10 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
         config={config}
         opening={opening}
         onExit={onExit}
-        onOpenAnalysisSettings={() => setAnalysisModalOpen(true)}
+        onOpenAnalysisSettings={() => {
+          stopExplorePlayback()
+          setAnalysisModalOpen(true)
+        }}
       />
 
       <ReviewAnalysisModal
