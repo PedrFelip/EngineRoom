@@ -15,6 +15,14 @@ const Classification = S.Literal(
   'blunder',
 )
 const Accuracy = S.Struct({ white: Num, black: Num })
+export const PvLineSchema = S.Struct({
+  multipv: Positive,
+  san: S.NullOr(S.String),
+  cp: Num,
+  winPct: Num,
+  pv: Strings,
+  depth: S.optional(Count),
+})
 export const PositionAnalysisSchema = S.Struct({
   ply: Count,
   fen: S.String,
@@ -23,17 +31,8 @@ export const PositionAnalysisSchema = S.Struct({
   cp: Num,
   winPct: Num,
   pv: Strings,
-  lines: S.mutable(
-    S.Array(
-      S.Struct({
-        multipv: Positive,
-        san: S.NullOr(S.String),
-        cp: Num,
-        winPct: Num,
-        pv: Strings,
-      }),
-    ),
-  ),
+  lines: S.mutable(S.Array(PvLineSchema)),
+  triageLines: S.optional(S.mutable(S.Array(PvLineSchema))),
   search: S.optional(
     S.Struct({
       purpose: S.Literal('playback', 'refinement'),
