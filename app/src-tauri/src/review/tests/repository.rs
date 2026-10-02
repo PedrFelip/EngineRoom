@@ -1,6 +1,29 @@
 use super::*;
 
 #[test]
+fn cache_rejects_incomplete_duplicate_or_missing_principal_slots() {
+    let fen = core::fen(&shakmaty::Chess::default());
+    for slots in [vec![1], vec![1, 1, 2], vec![2, 3], vec![1, 3]] {
+        let lines: Vec<_> = slots
+            .into_iter()
+            .map(|multipv| RawLine {
+                multipv,
+                cp: 15,
+                pv: vec!["e2e4".into()],
+                san: None,
+                depth: Some(10),
+            })
+            .collect();
+        let hit = crate::db::cache::CachedPosition {
+            cp: 15,
+            reached_depth: 10,
+            lines_json: serde_json::to_string(&lines).unwrap(),
+        };
+        assert!(repository::shape(hit, &fen, 2).is_none());
+    }
+}
+
+#[test]
 fn previous_accuracy_model_is_recalculated_from_saved_initial_evaluation() {
     let game = core::extract("[FEN \"7k/8/8/8/8/8/8/R6K w - - 0 1\"]\n1. Ra2 Kg7").unwrap();
     let raw: Vec<_> = game

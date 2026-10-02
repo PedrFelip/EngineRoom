@@ -1,9 +1,10 @@
 //! Cache de posições avaliadas pelo engine.
 //!
 //! O cache é unificado entre modos (depth/time), chaveado por
-//! (fen, reached_depth, multipv). `reached_depth` é a profundidade real
-//! atingida pela pv-1; entries que chegam ao mesmo reached_depth coalescem
-//! (o engine é determinístico num dado reached_depth). `source_mode`/
+//! (fen, reached_depth, multipv). Novas entries do repository usam a menor
+//! profundidade das linhas armazenadas; entries antigas podem usar a PV1 e
+//! são revalidadas no adapter. A PK coalesce essas entries; isso não implica
+//! determinismo da busca. `source_mode`/
 //! `source_value` preservam o contexto da análise original: `source_mode` é
 //! `"depth"` ou `"time"`; `source_value` é o ply pedido (depth) ou os
 //! milissegundos (time).
@@ -163,13 +164,36 @@ impl<'a> Cache<'a> {
         value: u32,
         multipv: u32,
     ) -> Result<(), String> {
+        self.store_rows(entries.iter().map(|entry| (entry, multipv)), mode, value)
+    }
+
+    /// One atomic flush even when searches produced different MultiPV coverage.
+    pub(crate) fn store_many_covered(
+        &self,
+        entries: &[(CachedPositionPut, u32)],
+        mode: Mode,
+        value: u32,
+    ) -> Result<(), String> {
+        self.store_rows(
+            entries.iter().map(|(entry, coverage)| (entry, *coverage)),
+            mode,
+            value,
+        )
+    }
+
+    fn store_rows<'e>(
+        &self,
+        entries: impl IntoIterator<Item = (&'e CachedPositionPut, u32)>,
+        mode: Mode,
+        value: u32,
+    ) -> Result<(), String> {
         let tx = self
             .conn
             .unchecked_transaction()
             .map_err(|e| e.to_string())?;
         {
             let mut stmt = tx.prepare(INSERT_SQL).map_err(|e| e.to_string())?;
-            for entry in entries {
+            for (entry, multipv) in entries {
                 stmt.execute(rusqlite::params![
                     entry.fen,
                     entry.reached_depth,

@@ -5,6 +5,28 @@ const FEN: &str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 const LINES: &str = r#"[{"multipv":1,"cp":35,"pv":["e2e4","e7e5"],"san":"e4"}]"#;
 
 #[test]
+fn mixed_coverage_flush_rolls_back_all_entries_on_failure() {
+    let conn = open_memory().unwrap();
+    conn.execute_batch(
+        "CREATE TRIGGER reject_cache_write BEFORE INSERT ON position_cache
+        WHEN NEW.fen = 'fail' BEGIN SELECT RAISE(ABORT, 'write failed'); END;",
+    )
+    .unwrap();
+    let entry = |fen: &str| CachedPositionPut {
+        fen: fen.into(),
+        reached_depth: 12,
+        cp: 35,
+        lines_json: LINES.into(),
+    };
+    let cache = Cache::new(&conn);
+    let error = cache
+        .store_many_covered(&[(entry(FEN), 1), (entry("fail"), 3)], Mode::Time, 1000)
+        .unwrap_err();
+    assert!(error.contains("write failed"));
+    assert!(cache.lookup(FEN, Mode::Time, 1000, 1).unwrap().is_none());
+}
+
+#[test]
 fn cache_put_depois_get_devolve_posicao_armazenada() {
     let conn = open_memory().unwrap();
     let cache = Cache::new(&conn);

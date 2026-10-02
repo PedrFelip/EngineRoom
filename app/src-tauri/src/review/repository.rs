@@ -5,6 +5,7 @@ use crate::db::{
     mode::Mode,
     DbState,
 };
+use shakmaty::Position;
 use tauri::Manager;
 
 pub trait Repository: Send + Sync {
@@ -77,14 +78,22 @@ impl<R: tauri::Runtime> SqliteRepository<R> {
 }
 pub fn shape(hit: CachedPosition, fen: &str, multipv: u32) -> Option<RawPosition> {
     let mut lines: Vec<RawLine> = serde_json::from_str(&hit.lines_json).ok()?;
-    if lines.is_empty() || lines.iter().any(|l| l.multipv == 0) {
+    let required = multipv.min(core::position(fen).ok()?.legal_moves().len() as u32);
+    lines.sort_by_key(|line| line.multipv);
+    if required == 0
+        || lines.len() < required as usize
+        || lines
+            .iter()
+            .enumerate()
+            .any(|(i, line)| line.multipv != i as u32 + 1)
+    {
         return None;
     }
-    lines.truncate(multipv as usize);
-    let principal = lines
-        .iter()
-        .find(|l| l.multipv == 1)
-        .or_else(|| lines.first())?;
+    lines.truncate(required as usize);
+    let principal = lines.first()?;
+    if principal.cp != hit.cp {
+        return None;
+    }
     Some(RawPosition {
         fen: fen.into(),
         cp: hit.cp,
@@ -117,7 +126,15 @@ impl<R: tauri::Runtime> Repository for SqliteRepository<R> {
             Ok(hits
                 .into_iter()
                 .zip(fens)
-                .map(|(hit, f)| hit.and_then(|h| shape(h, f, multipv)))
+                .map(|(hit, f)| {
+                    hit.and_then(|h| shape(h, f, multipv)).filter(|raw| {
+                        mode != Mode::Depth
+                            || raw
+                                .lines
+                                .iter()
+                                .all(|line| line.depth.unwrap_or(raw.depth) >= value)
+                    })
+                })
                 .collect())
         })
     }
@@ -129,20 +146,48 @@ impl<R: tauri::Runtime> Repository for SqliteRepository<R> {
         multipv: u32,
     ) -> Task<'a, Result<()>> {
         Box::pin(async move {
-            let entries: Vec<_> = entries
-                .iter()
-                .map(|p| {
-                    Ok(CachedPositionPut {
-                        fen: p.fen.clone(),
-                        reached_depth: p.depth,
-                        cp: p.cp,
-                        lines_json: serde_json::to_string(&p.lines)
+            // A short search may not publish every requested PV. Store only
+            // contiguous, scored lines, at the minimum depth they all reached.
+            let mut writes = Vec::with_capacity(entries.len());
+            for position in entries {
+                let legal = core::position(&position.fen)?.legal_moves().len();
+                let mut lines = position.lines.clone();
+                lines.sort_by_key(|line| line.multipv);
+                let coverage = lines
+                    .iter()
+                    .enumerate()
+                    .take_while(|(i, line)| line.multipv == *i as u32 + 1)
+                    .count()
+                    .min(multipv as usize);
+                if coverage == 0 {
+                    continue;
+                }
+                lines.truncate(coverage);
+                let reached_depth = lines
+                    .iter()
+                    .map(|line| line.depth.unwrap_or(position.depth))
+                    .min()
+                    .unwrap();
+                // MultiPV beyond the legal move count is fully covered once
+                // every legal move has a line.
+                let advertised = if coverage >= legal {
+                    multipv
+                } else {
+                    coverage as u32
+                };
+                writes.push((
+                    CachedPositionPut {
+                        fen: position.fen.clone(),
+                        reached_depth,
+                        cp: lines[0].cp,
+                        lines_json: serde_json::to_string(&lines)
                             .map_err(|e| ReviewError::new("cache", "cache.encode", e))?,
-                    })
-                })
-                .collect::<Result<_>>()?;
+                    },
+                    advertised,
+                ));
+            }
             self.db("cache.put", "cache", move |c| {
-                Cache::new(c).store_many(&entries, mode, value, multipv)
+                Cache::new(c).store_many_covered(&writes, mode, value)
             })
             .await
         })
