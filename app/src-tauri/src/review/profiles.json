@@ -1,0 +1,24 @@
+{
+  "fast": {
+    "triageMs": 180,
+    "triageMultipv": 3,
+    "mediumMs": 500,
+    "highMs": 2000,
+    "refinementMultipv": 2,
+    "mediumMultipv": 1,
+    "maxRefineFraction": 0.15,
+    "minRefinePositions": 4,
+    "contextPlies": 2
+  },
+  "deep": {
+    "triageMs": 450,
+    "triageMultipv": 5,
+    "mediumMs": 1800,
+    "highMs": 6000,
+    "refinementMultipv": 2,
+    "mediumMultipv": 1,
+    "maxRefineFraction": 0.25,
+    "minRefinePositions": 6,
+    "contextPlies": 4
+  }
+}

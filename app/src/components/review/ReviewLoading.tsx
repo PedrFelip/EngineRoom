@@ -1,5 +1,5 @@
 import { Clock3 } from 'lucide-react'
-import type { ReactNode } from 'react'
+import { type ReactNode, useMemo } from 'react'
 import { ThinkingOrb } from 'thinking-orbs'
 import { formatEngineTag } from '../../lib/engine-tag'
 import type { ReviewProgress } from '../../lib/review-session'
@@ -15,7 +15,7 @@ const PHASE_LABELS = {
 const STAGE_LABELS = {
   preparing: 'Iniciando Stockfish',
   analyzing: 'Analisando a partida',
-  triage: 'Triagem da partida',
+  triage: 'Analisando e refinando a partida',
   refinement: 'Refinando lances críticos',
   finalizing: 'Finalizando a revisão',
 } as const
@@ -33,6 +33,11 @@ export default function ReviewLoading({
   partialWinPcts,
   progress,
 }: Props) {
+  const graphValues = useMemo(() => {
+    const values = [...partialWinPcts]
+    values.length = Math.max(values.length, config.meta.plies + 1)
+    return values
+  }, [partialWinPcts, config.meta.plies])
   const progressPct =
     progress.total > 0
       ? Math.round((progress.completed / progress.total) * 100)
@@ -119,8 +124,8 @@ export default function ReviewLoading({
         {partialWinPcts.length >= 2 ? (
           <div className='eval-graph-loading elev-card rounded-2xl border border-edge bg-panel-2/60 p-5'>
             <EvalGraph
-              winPcts={partialWinPcts}
-              currentPly={partialWinPcts.length - 1}
+              winPcts={graphValues}
+              currentPly={progress.currentPly}
               onSelect={() => {}}
               pulse
             />

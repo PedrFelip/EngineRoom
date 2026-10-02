@@ -1,4 +1,5 @@
 import { Schema as S } from 'effect'
+import { PvLineSchema } from '../review-protocol'
 
 const Num = S.Number.pipe(S.finite())
 const Count = Num.pipe(S.int(), S.nonNegative())
@@ -90,17 +91,8 @@ export const LegacyReviewSchema = S.parseJson(
           cp: Num,
           winPct: Num,
           pv: Strings,
-          lines: S.mutable(
-            S.Array(
-              S.Struct({
-                multipv: Positive,
-                san: S.NullOr(S.String),
-                cp: Num,
-                winPct: Num,
-                pv: Strings,
-              }),
-            ),
-          ),
+          lines: S.mutable(S.Array(PvLineSchema)),
+          triageLines: S.optional(S.mutable(S.Array(PvLineSchema))),
           search: S.optional(
             S.Struct({
               purpose: S.Literal('playback', 'refinement'),

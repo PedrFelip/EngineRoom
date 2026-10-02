@@ -1,61 +1,50 @@
 # AGENTS.md
 
-Tauri 2 desktop app (Rust + React 19) that reviews chess games locally with Stockfish 18. The root `README.md` has the full feature/architecture overview — this file only captures what isn't obvious from the repo.
+Tauri 2 desktop app (Rust + React 19) that reviews chess games locally with Stockfish 18. The root `README.md` is the canonical feature/architecture overview; `app/README.md` is template boilerplate.
 
-## Working directory
+## Working directory and setup
 
-- Run frontend and Tauri commands from `app/`; run Rust commands from `app/src-tauri/`. The repo root holds only READMEs.
-- `app/README.md` is leftover Tauri template boilerplate — ignore it. The canonical README is at the repo root.
+- Run frontend/Tauri commands from `app/`; Rust commands from `app/src-tauri/`.
+- First setup: `bun install`, then `node scripts/fetch-stockfish.mjs` from `app/`.
+- The gitignored sidecar is `src-tauri/binaries/stockfish-<triple>`. The real Rust session test fails if it cannot spawn the bundled sidecar; do not report it as verified when only the old handshake test skipped.
+- `tauri dev` starts Vite through `beforeDevCommand`; do not start a second Vite on strict port 1420.
 
-## First-run setup (from `app/`)
+## Required verification
 
-```bash
-bun install
-node scripts/fetch-stockfish.mjs   # idempotent; downloads Stockfish 18 for the host triple
-```
+From `app/`: `bun run lint && bun run typecheck && bun run test`.
+From `app/src-tauri/`: `cargo test`.
+There is no CI/pre-commit hook. `typecheck` checks the app and `tsconfig.tests.json`; Vitest transpilation alone does not type-check tests.
+Vitest 4 uses `node`, not jsdom. Use Effect TestContext/TestClock directly; do not install `@effect/vitest` 0.30 (requires Vitest 3).
 
-The sidecar lives at `app/src-tauri/binaries/stockfish-<triple>` (gitignored). Without it, analyzing a game fails at `engine_spawn`, and the Rust integration test in `src-tauri/tests/engine_handshake.rs` silently skips (does not fail).
+## Architecture and resource ownership
 
-## Before claiming work is done
+- **Rust owns analysis.** `src-tauri/src/review/` contains the pure chess/scoring/adaptive core, UCI transport, injected pipeline, repository and window-owned session task. Manual, adaptive, live, playback, cache and persistence decisions belong here.
+- **EngineFactory/EnginePort and Repository are Rust test seams.** Keep Rust fake-engine tests. Do not hardcode Tauri in the pure core or the pipeline. The shell and SQLite adapters are production implementations.
+- **The engine lease is exclusive.** `ReviewSessions` shares a Rust semaphore between review sessions and Settings probes. Automatic reviews use a bounded mixed queue of Stockfish workers under one shared permit; manual reviews use one process. Automatic workers claim four consecutive triage positions, with one preferring ready hard refinements. Preserve profile budgets and final soft quotas; publish/cache in completion order. Refinements are unrestricted and cacheable; preserve triage lines separately as preliminary evaluations. Divide the total Threads/Hash budgets across workers. An owner holds its permit through completed teardown of every process; never stop another owner's process. After interruption/failure of a live search, kill and await termination before reuse.
+- **Sidecar framing is explicit.** Use `app.shell().sidecar("stockfish")` (basename only), with `set_raw_out(true)` before spawn. The frontend receives structured Channels, never raw UCI stdout. The shared stdout helper preserves partial chunks.
+- **Latest navigation wins.** Session intents carry monotonic request IDs. Updates/cancellations invalidate older live searches, and the session finishes their cleanup before starting the latest. Frontend events carry session ID, sequence and live request ID; reject stale events before applying them to the store.
+- **Close is acknowledged after cleanup.** `review_session_close` is idempotent. Window destruction signals cancellation; app exit waits for session cleanup. Scoped frontend acquisition must finish before honoring interruption, then close the acquired session. Track outstanding blocking DB operations and drain them at session close.
+- **UI state remains separate.** `review-store.ts` owns navigation/variation transitions. `review-session.ts` and `effect/ui-runtime.ts` are scoped IPC/store glue over the injected `AnalysisSessions` Context service. Keep I/O out of React. UI methods enqueue intent synchronously; asynchronous IPC runs inside their scope.
+- **Use Effect at frontend I/O boundaries**, tagged errors and Schema validation for IPC/settings. Execute Effects at the UI/test boundary. Cancellation must not appear as an analysis error. Critical cache errors propagate; resource sizing and history saves are best-effort.
+- **PGN is the metadata source.** Rust revalidates the mainline, respects FEN setup, derives metadata for saving and normalizes old review JSON when reopening. Keep PGN Elo/event out of new DB/settings fields. Existing historical summary fields are retained for compatibility. `chess.js` remains for import preview and board/variation interactions.
 
-From `app/`:
-```bash
-bun run lint && bun run typecheck && bun run test
-```
-From `app/src-tauri/`:
-```bash
-cargo test
-```
-There is no CI and no pre-commit hook — verification is manual.
+## Cache and persistence
 
-Frontend tests run under Vitest 4 (pure logic and injected Effect I/O — no component tests). Effect's TestContext/TestClock work directly with the existing runner; do not install `@effect/vitest` 0.30 (it requires Vitest 3). To run one module: `bun run test src/lib/<module>.test.ts`.
+- The current DB PK is `(fen, reached_depth, multipv)`, with `source_mode` and `source_value`. Depth requests accept reached depth >= requested depth (including time entries); time requests only accept time entries with budget >= requested budget. Both require sufficient MultiPV. Preserve the current covering SQL; numeric time/depth budgets are not interchangeable.
+- Cache prefetch uses bulk queries; writes flush every eight completed positions and at the end. Corrupt JSON becomes a miss; actual SQLite I/O failure remains fatal. Failure flush is best-effort and must preserve the original error.
+- The Rust session publishes completion before best-effort history save and owns that save through teardown. Saved JSON and current normalization remain compatible; this migration needs no schema change.
+- `db::open_file` applies migrations every startup. Future migrations must be idempotent and gated on `PRAGMA table_info`, following existing helpers. SQLite is `engineroom.db` in `app_data_dir`.
 
-## Gotchas
+## UI/style gotchas
 
-- **`tauri dev` starts Vite itself** via `beforeDevCommand: "bun run dev"`, strict port 1420. Don't run a separate Vite dev server alongside it.
-- **Test files have a separate TS config.** `bun run typecheck` checks both the app and `tsconfig.tests.json`. Vitest transpiles tests without checking their types; keep both compiler passes.
-- **Vitest runs in the `node` environment, not jsdom.** Existing tests are pure logic over `chess.js`; don't reach for DOM APIs.
-- **The position cache key is `(fen, mode, depth, multipv)`**, not `(fen, depth, multipv)` as the root README says. `mode` is `"depth"` (`go depth N`) or `"time"` (`go movetime N`); the same numeric value means different things across modes — never collide them.
-- **The engine process is a singleton.** `EngineState(Mutex<Option<EngineHandle>>)` in `src-tauri/src/engine.rs`; a second `engine_spawn` errors with `"A engine já está em execução."`.
-- **The sidecar is referenced by basename.** `app.shell().sidecar("stockfish")` — not `"binaries/stockfish"`. Tauri resolves the platform binary from `binaries/stockfish-<triple>` automatically.
-- **DB schema migrations run on every startup.** `open_file` in `src-tauri/src/db.rs` calls `migrate()` unconditionally. To add a column, write a new idempotent `migrate_*` helper gated on `PRAGMA table_info` (see `migrate_position_cache_mode` for the pattern). SQLite file: `engineroom.db` in Tauri's `app_data_dir`.
-- **Theme is applied pre-paint** by an inline script in `app/index.html` that reads `localStorage["engineroom.settings.v1"]` before React mounts. Don't move theme init into a React effect — it will flash.
+- Theme is applied pre-paint in `app/index.html` using `localStorage["engineroom.settings.v1"]`; never move it into a React effect.
+- Biome: single quotes, no semicolons, trailing commas, two spaces, 80 columns.
+- TypeScript is strict with unused locals/parameters rejected. `bun run build` runs tsc before Vite.
+- Rust edition 2021; release has LTO, opt-level 3 and `panic = "abort"`. Use `cargo fmt`.
+- Distribution is GPL-3.0-or-later, as approved for linked shakmaty/pgn-reader dependencies. Preserve `LICENSE` and third-party notices in bundled resources.
 
-## Architectural invariants (don't break)
+## Tauri IPC
 
-- **`EnginePort` is the test seam.** `send` and cache methods return Effects; `onLine`/`onExit` register local callbacks. `analyzeGame` returns Effect and accepts the injected port. Keep fake-engine tests; never hardcode Tauri. Old Promise-shaped regression fixtures are adapted only under `__tests__`.
-- **The review decomposes into store + session + glue.** State/transitions live in `review-store.ts`; scoped orchestration lives in `review-session.ts`. `backend.ts` declares Context services (Engine, PositionCache, GamesRepository, SystemResources), composed as production Layers in `tauri-backend.ts` or fake Layers in tests. `use-review.ts` and `effect/ui-runtime.ts` are UI/runtime glue: do not move I/O into React.
-- **Resource ownership is scoped.** Acquire the production port inside a Scope; never run its acquisition in an unmanaged `runPromise`. The shared permit covers startup through completed teardown, including Settings probes. A cancelled/failed live search discards the process before reuse to prevent stale `bestmove` responses.
-- **Use Effect at I/O boundaries, ordinary functions in the pure core.** Execute Effects only at the UI/test boundary. Expected errors are tagged; cancellation uses fiber interruption. Preserve critical cache errors, best-effort sizing/saves and legacy Schema normalization.
-- **Pure core vs. injected I/O.** `lib/uci.ts`, `lib/scoring.ts`, `lib/eco.ts`, and `buildReview` are side-effect-free. Engine, cache, and DB are always injected — keep them that way.
-- **PGN is the single source of truth** for game metadata (Elo, event, result). Don't duplicate into the DB or settings.
-
-## Style
-
-- **Biome** (`bun run lint`): single quotes, no semicolons, trailing commas, 2-space indent, 80 cols.
-- **TypeScript**: strict, `noUnusedLocals`, `noUnusedParameters`. `bun run build` runs `tsc` before `vite build`.
-- **Rust**: edition 2021; release profile uses LTO + `panic = "abort"` (see `Cargo.toml`).
-
-## Tauri IPC surface
-
-Registered in `app/src-tauri/src/lib.rs`: `cache_get`, `cache_put`, `cache_get_bulk`, `cache_put_many`, `cache_clear`, `games_save`, `games_list`, `games_get`, `games_delete`, `games_clear`, `storage_stats`, `engine_spawn`, `engine_send`, `engine_stop`, `system_resources`. `cache_get_bulk`/`cache_put_many` batch a whole game in one IPC (prefetch all hits; flush writes in one transaction) — the analysis loop no longer does per-position cache round-trips. The engine emits one `engine://line` Tauri event per stdout line; the frontend subscribes via `EnginePort` (`src/lib/engine-port.ts`).
+Session commands: `review_session_open`, `review_session_analyze_position`, `review_session_cancel_live`, `review_session_close`, `engine_probe`, `games_get_review_config`.
+Existing cache/history/storage/system commands remain registered for administration and compatibility. Raw engine spawn/send/stop commands are no longer public. UCI benchmark commands are restricted to `--bench-uci-ipc` and describe the historical transport, not the new session.
+`bun run bench:rust` measures the Rust fake-engine pipeline in release mode. It excludes Stockfish, IPC and rendering; do not present those figures as end-to-end game speedups.

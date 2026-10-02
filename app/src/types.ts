@@ -111,7 +111,8 @@ export type Phase = 'opening' | 'middlegame' | 'endgame'
 
 /** Resultado da análise do engine numa única posição. */
 export interface PositionAnalysis {
-  /** Metadados transitórios da busca ao vivo; ausentes em revisões antigas. */
+  triageLines?: PvLine[]
+  /** Orçamento da busca ao vivo ou do refinamento; ausente em revisões antigas. */
   search?: {
     purpose: 'playback' | 'refinement'
     movetimeMs: number
@@ -129,6 +130,7 @@ export interface PositionAnalysis {
 
 /** Uma linha candidata (multipv) numa posição, normalizada p/ POV das brancas. */
 export interface PvLine {
+  depth?: number
   multipv: number
   san: string | null
   cp: number

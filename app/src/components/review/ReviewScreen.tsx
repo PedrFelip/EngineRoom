@@ -378,6 +378,29 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
             />
           ) : null}
 
+          {settings.reviewEngineEnabled && displayedPosition?.triageLines ? (
+            <details className='rounded-xl border border-border p-3 text-xs'>
+              <summary className='cursor-pointer text-muted-foreground'>
+                Linhas da triagem — avaliação preliminar
+              </summary>
+              <div className='mt-2 flex flex-col gap-1'>
+                {displayedPosition.triageLines
+                  .slice(0, settings.reviewAnalysisLines)
+                  .map((line) => (
+                    <button
+                      key={line.multipv}
+                      type='button'
+                      className='rounded px-2 py-1 text-left hover:bg-accent'
+                      onClick={() => exploreLineSlowly(line.pv)}
+                    >
+                      {line.san ?? '—'} · {line.winPct.toFixed(1)}%
+                      {line.depth !== undefined ? ` · d${line.depth}` : ''}
+                    </button>
+                  ))}
+              </div>
+            </details>
+          ) : null}
+
           {isExploringLine ? (
             <p className='px-1 text-xs text-ink-faint' role='status'>
               Reproduzindo linha · avaliando lances…

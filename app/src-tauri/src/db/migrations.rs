@@ -206,6 +206,5 @@ fn migrate_games_list_index(conn: &Connection) -> Result<(), String> {
 }
 
 #[cfg(test)]
-#[cfg(test)]
 #[path = "migrations/tests.rs"]
 mod tests;

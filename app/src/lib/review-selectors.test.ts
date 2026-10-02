@@ -1,7 +1,12 @@
+import { Schema } from 'effect'
 import { describe, expect, it } from 'vitest'
-import { existingResult } from './review/__tests__/review-session-test-helpers'
+import reviewFixture from './__tests__/fixtures/review.json'
+import { ReviewResultSchema } from './review-protocol'
 import { selectSourceFen, selectSourcePosition } from './review-selectors'
 import { createReviewStore } from './review-store'
+
+const existingResult = () =>
+  Schema.decodeUnknownSync(ReviewResultSchema)(reviewFixture.result)
 
 describe('posição anterior de uma variação', () => {
   it('usa a base no primeiro lance, mas exige o pai nos lances seguintes', () => {

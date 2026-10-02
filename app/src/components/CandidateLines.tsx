@@ -56,6 +56,11 @@ export default function CandidateLines({
               <span className='font-mono text-xs tabular-nums text-muted-foreground'>
                 {formatEval(l.cp)}
               </span>
+              {l.depth !== undefined && (
+                <span className='font-mono text-[10px] text-muted-foreground'>
+                  d{l.depth}
+                </span>
+              )}
               {mate === null && (
                 <span className='ml-auto font-mono text-xs tabular-nums text-muted-foreground'>
                   {l.winPct.toFixed(1)}%
