@@ -170,7 +170,7 @@ async fn submitted_searches_run_concurrently_and_preserve_hash_on_multipv_change
     assert_eq!(hash.iter().sum::<u32>(), 512);
     assert_eq!(hash.len(), 3);
     assert_eq!(factory.permit.available_permits(), 0);
-    pool.close().await;
+    pool.close().await.unwrap();
     assert_eq!(factory.activity.closed.load(Ordering::SeqCst), 3);
     assert_eq!(factory.permit.available_permits(), 1);
     assert_eq!(factory.activity.active.load(Ordering::SeqCst), 0);
@@ -240,7 +240,7 @@ async fn real_sidecar_pool_holds_one_lease_until_all_processes_terminate() {
             .await
             .is_err()
     );
-    pool.close().await;
+    pool.close().await.unwrap();
     assert_eq!(permit.available_permits(), 1);
     let mut probe = factory.acquire(&cancel).await.unwrap();
     ask(probe.as_mut(), "uci", "uciok", 10000, &cancel)
@@ -392,7 +392,7 @@ async fn mixed_queue_starts_critical_refinements_before_triage_finishes() {
             .iter()
             .map(|f| factory.state.lock().unwrap().scores[f].clone())
             .collect::<Vec<_>>(),
-        adaptive::profile(AnalysisKind::Fast).unwrap(),
+        adaptive::profile(AnalysisKind::Fast).unwrap().unwrap(),
     );
     let mut refined: Vec<_> = searches
         .iter()

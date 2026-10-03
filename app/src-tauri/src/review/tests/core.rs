@@ -51,7 +51,7 @@ fn accuracy_uses_fen_start_and_actual_phase_entry_evaluation() {
 #[test]
 fn isolated_complexity_refines_one_position_and_instability_selects_pair() {
     use adaptive::{Critical, Reason, RefinementKind};
-    let profile = adaptive::profile(AnalysisKind::Fast).unwrap();
+    let profile = adaptive::profile(AnalysisKind::Fast).unwrap().unwrap();
     let candidate = Critical {
         ply: 3,
         score: 40,
@@ -142,7 +142,7 @@ fn situation_priorities_context_quotas_and_overlapping_requirements() {
         hard,
         reasons: vec![reason],
     };
-    let profile = adaptive::profile(AnalysisKind::Deep).unwrap();
+    let profile = adaptive::profile(AnalysisKind::Deep).unwrap().unwrap();
     let candidates = vec![
         candidate(5, 45, true, Reason::Loss),
         candidate(6, 90, true, Reason::Mate),
@@ -178,7 +178,7 @@ fn situation_priorities_context_quotas_and_overlapping_requirements() {
 fn adaptive_parameters_use_wide_baseline_and_focused_refinement() {
     use adaptive::RefinementKind as K;
     for kind in [AnalysisKind::Fast, AnalysisKind::Deep] {
-        let profile = adaptive::profile(kind).unwrap();
+        let profile = adaptive::profile(kind).unwrap().unwrap();
         assert_eq!(
             profile.triage_multipv,
             if kind == AnalysisKind::Fast { 3 } else { 5 }
@@ -205,7 +205,7 @@ fn adaptive_parameters_use_wide_baseline_and_focused_refinement() {
 #[test]
 fn quiet_losses_and_uncertain_classification_do_not_expand_neighbors() {
     let game = core::extract("1. a3 a6 2. h3 h6 3. f3 f6 4. g3 g6 5. Kf2 Kf7").unwrap();
-    let profile = adaptive::profile(AnalysisKind::Deep).unwrap();
+    let profile = adaptive::profile(AnalysisKind::Deep).unwrap().unwrap();
     for cp in [500, 100] {
         let raw: Vec<_> = game
             .fens
@@ -232,7 +232,7 @@ fn sacrifice_context_follows_reply_and_stops_at_calm_stable_move() {
         .iter()
         .map(|fen| core::terminal_raw(fen, 0))
         .collect();
-    let profile = adaptive::profile(AnalysisKind::Fast).unwrap();
+    let profile = adaptive::profile(AnalysisKind::Fast).unwrap().unwrap();
     let targets = adaptive::review_targets(&game, &raw, profile);
     assert!(targets
         .iter()
@@ -286,7 +286,7 @@ fn context_stays_inside_forcing_sequence_and_profile_limit() {
         .iter()
         .map(|fen| core::terminal_raw(fen, 0))
         .collect();
-    let profile = adaptive::profile(AnalysisKind::Deep).unwrap();
+    let profile = adaptive::profile(AnalysisKind::Deep).unwrap().unwrap();
     let targets = adaptive::review_targets(&game, &raw, profile);
     assert!(targets.iter().any(|t| t.position_index == 2));
     assert!(!targets.iter().any(|t| t.position_index >= 3));
@@ -307,7 +307,10 @@ fn equal_piece_exchange_is_not_a_sacrifice_context_seed() {
         .iter()
         .map(|fen| core::terminal_raw(fen, 0))
         .collect();
-    let targets =
-        adaptive::review_targets(&game, &raw, adaptive::profile(AnalysisKind::Deep).unwrap());
+    let targets = adaptive::review_targets(
+        &game,
+        &raw,
+        adaptive::profile(AnalysisKind::Deep).unwrap().unwrap(),
+    );
     assert!(targets.is_empty());
 }

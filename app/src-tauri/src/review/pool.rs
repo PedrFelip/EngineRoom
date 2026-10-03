@@ -27,6 +27,7 @@ pub struct Pool {
     tasks: JoinSet<()>,
     stop: watch::Sender<bool>,
     failure: Arc<Mutex<Option<ReviewError>>>,
+    cancel: Cancellation,
 }
 impl Pool {
     pub async fn acquire(
@@ -57,6 +58,7 @@ impl Pool {
             tasks: JoinSet::new(),
             stop,
             failure,
+            cancel: cancel.clone(),
         };
         for (index, port) in ports.into_iter().enumerate() {
             let (sender, receiver) = mpsc::channel(1);
@@ -80,8 +82,11 @@ impl Pool {
     pub fn len(&self) -> usize {
         self.workers.len()
     }
-    pub fn failure(&self) -> Option<ReviewError> {
-        self.failure.lock().unwrap().clone()
+    pub fn failure(&self) -> Result<Option<ReviewError>> {
+        self.failure
+            .lock()
+            .map(|failure| failure.clone())
+            .map_err(|_| poisoned_failure())
     }
     pub async fn submit(
         &self,
@@ -91,7 +96,18 @@ impl Pool {
         multipv: u32,
     ) -> Result<Evaluation> {
         let (result, receiver) = oneshot::channel();
-        self.workers[worker]
+        if let Some(error) = self.failure()? {
+            return Err(error);
+        }
+        self.workers
+            .get(worker)
+            .ok_or_else(|| {
+                ReviewError::new(
+                    ReviewErrorCode::EngineExited,
+                    "engine.pool.submit",
+                    "Worker inválido.",
+                )
+            })?
             .send(Job {
                 fen,
                 result,
@@ -99,22 +115,53 @@ impl Pool {
                 multipv,
             })
             .await
-            .map_err(|_| self.failure().unwrap_or_else(ReviewError::cancelled))?;
+            .map_err(|_| match self.failure() {
+                Ok(Some(error)) | Err(error) => error,
+                Ok(None) => self.cancel.check().err().unwrap_or_else(|| {
+                    ReviewError::new(
+                        ReviewErrorCode::EngineExited,
+                        "engine.pool.submit",
+                        "Worker encerrou sem resultado.",
+                    )
+                }),
+            })?;
         Ok(receiver)
     }
-    pub async fn close(&mut self) {
+    pub async fn close(&mut self) -> Result<()> {
+        let mut cleanup_error = None;
         self.stop.send_replace(true);
         self.workers.clear();
         // A worker acknowledges shutdown only after process termination. The
         // shared lease remains held until the last worker has finished.
         while let Some(result) = self.tasks.join_next().await {
             if let Err(error) = result {
-                self.failure.lock().unwrap().get_or_insert_with(|| {
-                    ReviewError::new(ReviewErrorCode::EngineExited, "engine.worker", error)
-                });
+                let error = ReviewError::new(ReviewErrorCode::EngineExited, "engine.worker", error);
+                let error = record_failure(&self.failure, error.clone())
+                    .err()
+                    .unwrap_or(error);
+                cleanup_error.get_or_insert(error);
             }
         }
+        match self.failure() {
+            Ok(Some(error)) | Err(error) => Err(error),
+            Ok(None) => cleanup_error.map_or(Ok(()), Err),
+        }
     }
+}
+
+fn poisoned_failure() -> ReviewError {
+    ReviewError::new(
+        ReviewErrorCode::EngineExited,
+        "engine.pool.failure",
+        "Estado de falha do pool indisponível.",
+    )
+}
+fn record_failure(failure: &Mutex<Option<ReviewError>>, error: ReviewError) -> Result<()> {
+    failure
+        .lock()
+        .map_err(|_| poisoned_failure())?
+        .get_or_insert(error);
+    Ok(())
 }
 
 async fn worker(
@@ -169,7 +216,7 @@ async fn worker(
                 value: job.value,
             })
         };
-        let result = tokio::select! {
+        let mut result = tokio::select! {
             _ = root.cancelled() => Err(ReviewError::cancelled()),
             _ = local.cancelled() => Err(ReviewError::cancelled()),
             result = run => result,
@@ -177,7 +224,9 @@ async fn worker(
         let failed = result.is_err();
         if let Err(error) = &result {
             if error.code != ReviewErrorCode::Cancelled {
-                failure.lock().unwrap().get_or_insert(error.clone());
+                if let Err(record_error) = record_failure(&failure, error.clone()) {
+                    result = Err(record_error);
+                }
             }
             stop.send_replace(true);
         }
@@ -187,4 +236,139 @@ async fn worker(
         }
     }
     port.shutdown().await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    fn poison(failure: &Arc<Mutex<Option<ReviewError>>>) {
+        let failure = failure.clone();
+        assert!(std::thread::spawn(move || {
+            let _guard = failure.lock().unwrap();
+            panic!("test poison");
+        })
+        .join()
+        .is_err());
+    }
+
+    struct FailingPort(Arc<AtomicUsize>);
+    impl EnginePort for FailingPort {
+        fn send(&mut self, _: &str) -> Result<()> {
+            Err(ReviewError::new(
+                ReviewErrorCode::EngineCommand,
+                "test.send",
+                "original failure",
+            ))
+        }
+        fn next(&mut self) -> super::super::engine::Task<'_, Result<String>> {
+            Box::pin(async { unreachable!("send fails first") })
+        }
+        fn shutdown(&mut self) -> super::super::engine::Task<'_, ()> {
+            Box::pin(async {
+                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+                self.0.fetch_add(1, Ordering::SeqCst);
+            })
+        }
+    }
+
+    fn empty_pool(cancel: Cancellation) -> Pool {
+        let (stop, _) = watch::channel(false);
+        Pool {
+            workers: vec![],
+            tasks: JoinSet::new(),
+            stop,
+            failure: Arc::new(Mutex::new(None)),
+            cancel,
+        }
+    }
+
+    #[tokio::test]
+    async fn submission_distinguishes_invalid_closed_and_cancelled_workers() {
+        let (closed, receiver) = watch::channel(false);
+        let mut pool = empty_pool(Cancellation {
+            closed: receiver,
+            revision: None,
+        });
+        assert_eq!(
+            pool.submit(0, String::new(), 1, 1)
+                .await
+                .err()
+                .unwrap()
+                .code,
+            ReviewErrorCode::EngineExited
+        );
+        let (sender, receiver) = mpsc::channel(1);
+        drop(receiver);
+        pool.workers.push(sender);
+        assert_eq!(
+            pool.submit(0, String::new(), 1, 1)
+                .await
+                .err()
+                .unwrap()
+                .code,
+            ReviewErrorCode::EngineExited
+        );
+        closed.send_replace(true);
+        assert_eq!(
+            pool.submit(0, String::new(), 1, 1)
+                .await
+                .err()
+                .unwrap()
+                .code,
+            ReviewErrorCode::Cancelled
+        );
+        pool.close().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn poisoned_failure_returns_errors_and_drains_every_worker() {
+        let (_closed, receiver) = watch::channel(false);
+        let mut pool = empty_pool(Cancellation {
+            closed: receiver,
+            revision: None,
+        });
+        poison(&pool.failure);
+        assert_eq!(pool.failure().unwrap_err().operation, "engine.pool.failure");
+        assert_eq!(
+            pool.submit(0, String::new(), 1, 1)
+                .await
+                .err()
+                .unwrap()
+                .operation,
+            "engine.pool.failure"
+        );
+        let shutdowns = Arc::new(AtomicUsize::new(0));
+        for _ in 0..3 {
+            let (sender, jobs) = mpsc::channel(1);
+            let (result, reply) = oneshot::channel();
+            sender
+                .send(Job {
+                    fen: String::new(),
+                    result,
+                    value: 1,
+                    multipv: 1,
+                })
+                .await
+                .unwrap();
+            pool.tasks.spawn(worker(
+                Box::new(FailingPort(shutdowns.clone())),
+                jobs,
+                1,
+                16,
+                pool.cancel.clone(),
+                pool.stop.clone(),
+                pool.failure.clone(),
+            ));
+            pool.workers.push(sender);
+            let error = reply.await.unwrap().err().unwrap();
+            assert_eq!(error.operation, "engine.pool.failure");
+            // Allow the next worker to exercise failed recording as well.
+            pool.stop.send_replace(false);
+        }
+        assert!(pool.close().await.is_err());
+        assert_eq!(shutdowns.load(Ordering::SeqCst), 3);
+        assert!(pool.tasks.is_empty());
+    }
 }

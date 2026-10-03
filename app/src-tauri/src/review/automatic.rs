@@ -47,15 +47,28 @@ impl State<'_> {
         self.budgets[target.position_index]
             .is_some_and(|b| b.ms >= target.search.ms && b.multipv >= target.search.multipv)
     }
-    fn refinement(&self, index: usize) -> Option<&RawPosition> {
-        let baseline = self.baseline[index].as_ref().unwrap();
-        self.refined[index]
-            .as_ref()
-            .filter(|refined| refined.depth >= baseline.depth)
+    fn baseline(&self, index: usize) -> Result<&RawPosition> {
+        self.baseline
+            .get(index)
+            .and_then(Option::as_ref)
+            .ok_or_else(|| {
+                ReviewError::new(
+                    ReviewErrorCode::MissingEvaluation,
+                    "review.triage",
+                    "Avaliação de triagem ausente.",
+                )
+            })
     }
-    fn evaluation(&self, index: usize) -> &RawPosition {
-        self.refinement(index)
-            .unwrap_or_else(|| self.baseline[index].as_ref().unwrap())
+    fn refinement(&self, index: usize) -> Result<Option<&RawPosition>> {
+        let baseline = self.baseline(index)?;
+        Ok(self
+            .refined
+            .get(index)
+            .and_then(Option::as_ref)
+            .filter(|refined| refined.depth >= baseline.depth))
+    }
+    fn evaluation(&self, index: usize) -> Result<&RawPosition> {
+        Ok(self.refinement(index)?.unwrap_or(self.baseline(index)?))
     }
     fn discover(&mut self, index: usize) {
         for ply in [index, index + 1] {
@@ -164,7 +177,7 @@ pub(super) async fn review(
     };
     let mut pool: Option<Pool> = None;
     let mut pending: Vec<(u32, u32, Vec<RawPosition>)> = vec![];
-    let run = execute(
+    let mut run = execute(
         factory,
         repository,
         sizing,
@@ -176,7 +189,13 @@ pub(super) async fn review(
     )
     .await;
     if let Some(pool) = &mut pool {
-        pool.close().await;
+        if let Err(error) = pool.close().await {
+            if run.is_err() {
+                emit(Event::Warning { error });
+            } else {
+                run = Err(error);
+            }
+        }
     }
     if run.is_err() {
         if let Err(error) = flush(repository, &mut pending).await {
@@ -285,7 +304,7 @@ async fn execute(
                     state.budgets[i] = Some(budget);
                     state.refined[i] = Some(raw);
                     state.cached += 1;
-                    state.progress(i, Some(state.evaluation(i)), emit);
+                    state.progress(i, Some(state.evaluation(i)?), emit);
                 }
             }
         }
@@ -293,8 +312,9 @@ async fn execute(
             .iter()
             .any(|t| !state.satisfied(t) && !refining[t.position_index]);
         if pool.is_none() && (!queue.is_empty() || needs_refinement) {
-            *pool = Some(Pool::acquire(factory, sizing, count, cancel).await?);
-            let workers = pool.as_ref().unwrap().len();
+            let acquired = Pool::acquire(factory, sizing, count, cancel).await?;
+            let workers = acquired.len();
+            *pool = Some(acquired);
             blocks = (0..workers).map(|_| VecDeque::new()).collect();
             busy = vec![false; workers];
         }
@@ -331,7 +351,9 @@ async fn execute(
                             if blocks[worker].back().is_some_and(|last| next != last + 1) {
                                 break;
                             }
-                            blocks[worker].push_back(queue.pop_front().unwrap());
+                            if let Some(index) = queue.pop_front() {
+                                blocks[worker].push_back(index);
+                            }
                         }
                     }
                     // A refiner may have paused its block. Let a free triage
@@ -382,13 +404,16 @@ async fn execute(
         }
         let result = tokio::select! {
             _ = cancel.cancelled() => return Err(ReviewError::cancelled()),
-            result = waiters.join_next() => result.unwrap().map_err(|e| ReviewError::new(ReviewErrorCode::EngineExited, "review.queue", e))?,
+            result = waiters.join_next() => result.ok_or_else(|| queue_error("Fila encerrou sem resultado."))?.map_err(|e| ReviewError::new(ReviewErrorCode::EngineExited, "review.queue", e))?,
         };
         let (job, reply) = result;
-        let pool = pool.as_ref().unwrap();
+        let pool = pool
+            .as_ref()
+            .ok_or_else(|| queue_error("Pool indisponível."))?;
+        let failure = pool.failure()?;
         let completed: Completed = reply
-            .map_err(|_| disconnected_worker_error(pool.failure(), cancel))?
-            .map_err(|e| pool.failure().unwrap_or(e))?;
+            .map_err(|_| disconnected_worker_error(failure.clone(), cancel))?
+            .map_err(|e| failure.unwrap_or(e))?;
         busy[job.worker] = false;
         state.searched += 1;
         let raw = completed.raw;
@@ -412,7 +437,7 @@ async fn execute(
             state.baseline[job.index] = Some(raw.clone());
             state.discover(job.index);
         }
-        state.progress(job.index, Some(state.evaluation(job.index)), emit);
+        state.progress(job.index, Some(state.evaluation(job.index)?), emit);
     }
     flush(repository, pending).await?;
     cancel.check()?;
@@ -429,14 +454,14 @@ async fn execute(
             update: None,
         },
     });
-    let raw: Vec<_> = (0..count).map(|i| state.evaluation(i).clone()).collect();
+    let raw: Vec<_> = (0..count)
+        .map(|i| state.evaluation(i).cloned())
+        .collect::<Result<_>>()?;
     let mut result = core::build(game, &raw)?;
     for (i, position) in result.positions.iter_mut().enumerate() {
-        if let (Some(budget), Some(_)) = (state.budgets[i], state.refinement(i)) {
-            position.triage_lines = Some(
-                core::position_analysis(state.baseline[i].as_ref().unwrap(), i, state.phases[i])
-                    .lines,
-            );
+        if let (Some(budget), Some(_)) = (state.budgets[i], state.refinement(i)?) {
+            position.triage_lines =
+                Some(core::position_analysis(state.baseline(i)?, i, state.phases[i]).lines);
             position.search = Some(Search {
                 purpose: "refinement".into(),
                 movetime_ms: budget.ms,
@@ -483,3 +508,7 @@ fn invalid_cache_count() -> ReviewError {
 
 #[cfg(test)]
 mod tests;
+
+fn queue_error(message: &str) -> ReviewError {
+    ReviewError::new(ReviewErrorCode::EngineExited, "review.queue", message)
+}

@@ -310,15 +310,8 @@ pub fn engine_probe(
             let mut owned = None;
             let result = async {
                 let port = factory.acquire(&cancel).await?;
-                owned = Some(port);
-                let lines = engine::ask(
-                    owned.as_mut().unwrap().as_mut(),
-                    "uci",
-                    "uciok",
-                    timeout,
-                    &cancel,
-                )
-                .await?;
+                let port = owned.insert(port);
+                let lines = engine::ask(port.as_mut(), "uci", "uciok", timeout, &cancel).await?;
                 Ok::<_, ReviewError>(
                     lines
                         .iter()

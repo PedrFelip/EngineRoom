@@ -51,8 +51,14 @@ pub fn run() {
             engine::benchmark_uci_report,
             system::system_resources,
         ])
-        .build(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!());
+    let app = match app {
+        Ok(app) => app,
+        Err(error) => {
+            eprintln!("Failed to initialize EngineRoom: {error}");
+            std::process::exit(1);
+        }
+    };
     app.run(|app, event| {
         if let tauri::RunEvent::ExitRequested { api, .. } = event {
             use tauri::Manager;

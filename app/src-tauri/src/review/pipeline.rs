@@ -41,7 +41,7 @@ impl Pipeline {
         memory: Option<u32>,
         multipv: u32,
         cancel: &Cancellation,
-    ) -> Result<()> {
+    ) -> Result<&mut (dyn EnginePort + 'static)> {
         if let Some(port) = self.port.as_mut() {
             let next = (threads.unwrap_or(1), memory.unwrap_or(16), multipv);
             let previous = self.settings;
@@ -62,7 +62,14 @@ impl Pipeline {
             engine::configure(port.as_mut(), threads, memory, multipv, cancel).await?;
         }
         self.settings = Some((threads.unwrap_or(1), memory.unwrap_or(16), multipv));
-        Ok(())
+        match self.port.as_mut() {
+            Some(port) => Ok(port.as_mut()),
+            None => Err(ReviewError::new(
+                ReviewErrorCode::EngineExited,
+                "engine.ensure",
+                "Engine indisponível.",
+            )),
+        }
     }
     pub async fn review(
         &mut self,
@@ -76,7 +83,7 @@ impl Pipeline {
             .await
             .map_err(|e| ReviewError::new(ReviewErrorCode::InvalidPgn, "pgn", e))??;
         cancel.check()?;
-        if let Some(profile) = adaptive::profile(config.analysis_kind) {
+        if let Some(profile) = adaptive::profile(config.analysis_kind)? {
             self.discard().await;
             return super::automatic::review(
                 self.factory.as_ref(),
@@ -133,17 +140,12 @@ impl Pipeline {
                     hit.clone()
                 } else {
                     let (threads, memory) = sizing.unwrap_or((1, 16));
-                    self.ensure(Some(threads), Some(memory), multipv, cancel)
+                    let port = self
+                        .ensure(Some(threads), Some(memory), multipv, cancel)
                         .await?;
-                    let mut pos = engine::evaluate(
-                        self.port.as_mut().unwrap().as_mut(),
-                        fen,
-                        mode,
-                        value,
-                        timeout(mode, value),
-                        cancel,
-                    )
-                    .await?;
+                    let mut pos =
+                        engine::evaluate(port, fen, mode, value, timeout(mode, value), cancel)
+                            .await?;
                     core::add_san(&mut pos);
                     pending.push(pos.clone());
                     searched += 1;
@@ -240,9 +242,9 @@ impl Pipeline {
             } else {
                 (settings.threads, settings.memory_mb)
             };
-            self.ensure(Some(threads), Some(memory), multipv, cancel)
+            let port = self
+                .ensure(Some(threads), Some(memory), multipv, cancel)
                 .await?;
-            let port = self.port.as_mut().unwrap().as_mut();
             let mut result =
                 engine::evaluate(port, fen, Mode::Time, value, value as u64 + 10000, cancel).await;
             if result

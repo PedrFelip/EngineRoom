@@ -28,17 +28,24 @@ struct Profiles {
 }
 
 // Embedded in the binary and also imported by the frontend.
-static PROFILES: LazyLock<Profiles> = LazyLock::new(|| {
-    serde_json::from_str(include_str!("profiles.json"))
-        .expect("bundled adaptive profiles must match the Rust schema")
-});
+static PROFILES: LazyLock<Result<Profiles>> =
+    LazyLock::new(|| parse_profiles(include_str!("profiles.json")));
 
-pub fn profile(kind: AnalysisKind) -> Option<Profile> {
-    match kind {
-        AnalysisKind::Manual => None,
-        AnalysisKind::Fast => Some(PROFILES.fast),
-        AnalysisKind::Deep => Some(PROFILES.deep),
+fn parse_profiles(json: &str) -> Result<Profiles> {
+    serde_json::from_str(json).map_err(|error| {
+        ReviewError::with_source(ReviewErrorCode::Session, "review.profiles", error)
+    })
+}
+pub fn profile(kind: AnalysisKind) -> Result<Option<Profile>> {
+    if kind == AnalysisKind::Manual {
+        return Ok(None);
     }
+    let profiles = PROFILES.as_ref().map_err(Clone::clone)?;
+    Ok(Some(match kind {
+        AnalysisKind::Fast => profiles.fast,
+        AnalysisKind::Deep => profiles.deep,
+        AnalysisKind::Manual => return Ok(None),
+    }))
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub enum RefinementKind {
@@ -433,4 +440,22 @@ fn material(position: &Chess, color: Color) -> i32 {
             Role::King => 0,
         })
         .sum()
+}
+
+#[cfg(test)]
+mod profile_tests {
+    use super::*;
+
+    #[test]
+    fn invalid_profiles_return_contextual_errors() {
+        for json in ["invalid", "{}", r#"{"fast":{},"deep":{}}"#] {
+            let error = parse_profiles(json).err().unwrap();
+            assert_eq!(error.code, ReviewErrorCode::Session);
+            assert_eq!(error.operation, "review.profiles");
+            assert!(std::error::Error::source(&error).is_some());
+        }
+        assert!(profile(AnalysisKind::Manual).unwrap().is_none());
+        assert!(profile(AnalysisKind::Fast).unwrap().is_some());
+        assert!(profile(AnalysisKind::Deep).unwrap().is_some());
+    }
 }

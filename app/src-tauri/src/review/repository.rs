@@ -163,11 +163,13 @@ impl<R: tauri::Runtime> Repository for SqliteRepository<R> {
                     continue;
                 }
                 lines.truncate(coverage);
+                let Some(first) = lines.first() else { continue };
                 let reached_depth = lines
                     .iter()
-                    .map(|line| line.depth.unwrap_or(position.depth))
-                    .min()
-                    .unwrap();
+                    .skip(1)
+                    .fold(first.depth.unwrap_or(position.depth), |depth, line| {
+                        depth.min(line.depth.unwrap_or(position.depth))
+                    });
                 // MultiPV beyond the legal move count is fully covered once
                 // every legal move has a line.
                 let advertised = if coverage >= legal {
@@ -179,7 +181,7 @@ impl<R: tauri::Runtime> Repository for SqliteRepository<R> {
                     CachedPositionPut {
                         fen: position.fen.clone(),
                         reached_depth,
-                        cp: lines[0].cp,
+                        cp: first.cp,
                         lines_json: serde_json::to_string(&lines).map_err(|e| {
                             ReviewError::with_source(ReviewErrorCode::Cache, "cache.encode", e)
                         })?,
@@ -200,7 +202,7 @@ impl<R: tauri::Runtime> Repository for SqliteRepository<R> {
     ) -> Task<'a, Result<()>> {
         Box::pin(async move {
             let game = core::extract(&config.pgn)?;
-            let profile = super::adaptive::profile(config.analysis_kind);
+            let profile = super::adaptive::profile(config.analysis_kind)?;
             let value = profile.map(|p| p.high_ms).unwrap_or_else(|| {
                 if config.mode == Mode::Time {
                     config.movetime_ms.unwrap_or(0)

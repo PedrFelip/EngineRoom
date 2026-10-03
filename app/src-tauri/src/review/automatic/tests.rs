@@ -29,3 +29,29 @@ async fn closed_worker_reply_requires_actual_cancellation_and_preserves_failure(
     assert_eq!(error.code, ReviewErrorCode::EngineProtocol);
     assert_eq!(error.message, "original failure");
 }
+
+#[test]
+fn missing_baseline_is_an_error_even_with_a_refinement() {
+    let game = core::extract("1. e4").unwrap();
+    let state = State {
+        game: &game,
+        profile: adaptive::profile(AnalysisKind::Fast).unwrap().unwrap(),
+        phases: core::phases(&game.fens),
+        terminals: vec![None; 2],
+        baseline: vec![None; 2],
+        refined: vec![Some(core::terminal_raw(&game.fens[0], 0)), None],
+        budgets: vec![None; 2],
+        critical: vec![None],
+        book: 0,
+        cached: 0,
+        searched: 0,
+        refinement_stage: false,
+        final_targets: None,
+        ready_targets: vec![],
+    };
+    for index in [0, 1, 2] {
+        let error = state.evaluation(index).unwrap_err();
+        assert_eq!(error.code, ReviewErrorCode::MissingEvaluation);
+        assert_eq!(error.operation, "review.triage");
+    }
+}
