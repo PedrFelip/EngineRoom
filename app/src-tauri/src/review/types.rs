@@ -20,23 +20,73 @@ pub enum ReviewErrorCode {
     MissingEvaluation,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone)]
 pub struct ReviewError {
     pub code: ReviewErrorCode,
     pub operation: String,
     pub message: String,
+    source: Option<std::sync::Arc<dyn std::error::Error + Send + Sync>>,
 }
+/// Stable error contract at the UI boundary; technical causes stay in Rust.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewErrorPayload {
+    pub code: ReviewErrorCode,
+    pub operation: String,
+    pub message: String,
+}
+impl From<&ReviewError> for ReviewErrorPayload {
+    fn from(error: &ReviewError) -> Self {
+        Self {
+            code: error.code,
+            operation: error.operation.clone(),
+            message: error.message.clone(),
+        }
+    }
+}
+impl From<ReviewError> for ReviewErrorPayload {
+    fn from(error: ReviewError) -> Self {
+        Self::from(&error)
+    }
+}
+fn serialize_error<S: serde::Serializer>(
+    error: &ReviewError,
+    serializer: S,
+) -> std::result::Result<S::Ok, S::Error> {
+    ReviewErrorPayload::from(error).serialize(serializer)
+}
+pub type IpcResult<T> = std::result::Result<T, ReviewErrorPayload>;
+
 impl ReviewError {
     pub fn new(code: ReviewErrorCode, operation: &str, message: impl ToString) -> Self {
         Self {
             code,
             operation: operation.into(),
             message: message.to_string(),
+            source: None,
         }
+    }
+    pub fn with_source(
+        code: ReviewErrorCode,
+        operation: &str,
+        source: impl std::error::Error + Send + Sync + 'static,
+    ) -> Self {
+        let mut error = Self::new(code, operation, &source);
+        error.source = Some(std::sync::Arc::new(source));
+        error
     }
     pub fn cancelled() -> Self {
         Self::new(ReviewErrorCode::Cancelled, "session", "Análise cancelada.")
+    }
+}
+impl std::fmt::Display for ReviewError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}: {}", self.operation, self.message)
+    }
+}
+impl std::error::Error for ReviewError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.source.as_deref().map(|source| source as _)
     }
 }
 pub type Result<T> = std::result::Result<T, ReviewError>;
@@ -262,7 +312,7 @@ pub struct WinPctUpdate {
     pub index: usize,
     pub win_pct: f64,
 }
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum Event {
     Progress {
@@ -284,15 +334,17 @@ pub enum Event {
         classification: Classification,
     },
     Error {
+        #[serde(serialize_with = "serialize_error")]
         error: ReviewError,
         #[serde(skip_serializing_if = "Option::is_none")]
         fen: Option<String>,
     },
     Warning {
+        #[serde(serialize_with = "serialize_error")]
         error: ReviewError,
     },
 }
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Envelope {
     pub session_id: String,
@@ -333,19 +385,55 @@ mod error_tests {
                 "message": "failure",
             });
             let error = ReviewError::new(code, "test", "failure");
-            assert_eq!(serde_json::to_value(&error).unwrap(), payload);
-            let decoded: ReviewError = serde_json::from_value(payload).unwrap();
+            assert_eq!(
+                serde_json::to_value(ReviewErrorPayload::from(&error)).unwrap(),
+                payload
+            );
+            let decoded: ReviewErrorPayload = serde_json::from_value(payload).unwrap();
             assert_eq!(decoded.code, code);
         }
     }
 
     #[test]
+    fn event_payload_excludes_internal_cause() {
+        let error = ReviewError::with_source(
+            ReviewErrorCode::Cache,
+            "cache.lookup",
+            rusqlite::Error::InvalidQuery,
+        );
+        assert!(std::error::Error::source(&error)
+            .unwrap()
+            .is::<rusqlite::Error>());
+        let expected = serde_json::json!({
+            "code": "cache", "operation": "cache.lookup", "message": error.message,
+        });
+        for event in [
+            Event::Error {
+                error: error.clone(),
+                fen: None,
+            },
+            Event::Warning { error },
+        ] {
+            let payload = serde_json::to_value(Envelope {
+                session_id: "test".into(),
+                sequence: 1,
+                request_id: None,
+                event,
+            })
+            .unwrap();
+            assert_eq!(payload["error"], expected);
+        }
+    }
+
+    #[test]
     fn unknown_error_codes_are_rejected() {
-        assert!(serde_json::from_value::<ReviewError>(serde_json::json!({
-            "code": "engineTimout",
-            "operation": "test",
-            "message": "failure",
-        }))
-        .is_err());
+        assert!(
+            serde_json::from_value::<ReviewErrorPayload>(serde_json::json!({
+                "code": "engineTimout",
+                "operation": "test",
+                "message": "failure",
+            }))
+            .is_err()
+        );
     }
 }

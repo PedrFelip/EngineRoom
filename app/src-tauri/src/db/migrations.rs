@@ -7,7 +7,7 @@ use rusqlite::Connection;
 /// Aplica todas as migrações na ordem. Idempotente: no-op quando o schema já
 /// está atualizado. Chamado por [`crate::db::open_file`] e
 /// [`crate::db::open_memory`].
-pub(super) fn migrate(conn: &Connection) -> Result<(), String> {
+pub(super) fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS position_cache (
             fen TEXT NOT NULL,
@@ -37,8 +37,7 @@ pub(super) fn migrate(conn: &Connection) -> Result<(), String> {
             created_at TEXT NOT NULL DEFAULT (datetime('now')),
             UNIQUE (pgn, analysis_kind, mode, depth, multipv)
         );",
-    )
-    .map_err(|e| e.to_string())?;
+    )?;
     migrate_position_cache_mode(conn)?;
     migrate_position_cache_reached_depth(conn)?;
     migrate_games_mode(conn)?;
@@ -47,13 +46,11 @@ pub(super) fn migrate(conn: &Connection) -> Result<(), String> {
 }
 
 /// `true` se a coluna existe na tabela (via `PRAGMA table_info`).
-fn has_column(conn: &Connection, table: &str, column: &str) -> Result<bool, String> {
-    let mut stmt = conn
-        .prepare(&format!("PRAGMA table_info({table})"))
-        .map_err(|e| e.to_string())?;
-    let mut rows = stmt.query(()).map_err(|e| e.to_string())?;
-    while let Some(row) = rows.next().map_err(|e| e.to_string())? {
-        let name: String = row.get(1).map_err(|e| e.to_string())?;
+fn has_column(conn: &Connection, table: &str, column: &str) -> rusqlite::Result<bool> {
+    let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
+    let mut rows = stmt.query(())?;
+    while let Some(row) = rows.next()? {
+        let name: String = row.get(1)?;
         if name == column {
             return Ok(true);
         }
@@ -65,7 +62,7 @@ fn has_column(conn: &Connection, table: &str, column: &str) -> Result<bool, Stri
 /// chave primária. Idempotente: se a tabela já está no schema unificado
 /// (`reached_depth` presente) ou já tem `mode`, é no-op; se não, recria a
 /// tabela copiando as linhas antigas (que recebem `mode='depth'`).
-fn migrate_position_cache_mode(conn: &Connection) -> Result<(), String> {
+fn migrate_position_cache_mode(conn: &Connection) -> rusqlite::Result<()> {
     if has_column(conn, "position_cache", "reached_depth")? {
         return Ok(());
     }
@@ -88,7 +85,6 @@ fn migrate_position_cache_mode(conn: &Connection) -> Result<(), String> {
             SELECT fen, 'depth', depth, multipv, cp, lines_json FROM position_cache_old;
          DROP TABLE position_cache_old;",
     )
-    .map_err(|e| e.to_string())
 }
 
 /// Migração do `position_cache` para o schema unificado: chave por
@@ -96,7 +92,7 @@ fn migrate_position_cache_mode(conn: &Connection) -> Result<(), String> {
 /// metadata do contexto original. Linhas legacy de depth são preservadas com
 /// `reached_depth = depth` (sob `go depth N`, reached == pedido); linhas legacy
 /// de time são descartadas (não sabemos o reached_depth atingido). Idempotente.
-fn migrate_position_cache_reached_depth(conn: &Connection) -> Result<(), String> {
+fn migrate_position_cache_reached_depth(conn: &Connection) -> rusqlite::Result<()> {
     if has_column(conn, "position_cache", "reached_depth")? {
         return Ok(());
     }
@@ -119,12 +115,11 @@ fn migrate_position_cache_reached_depth(conn: &Connection) -> Result<(), String>
          FROM position_cache_old WHERE mode = 'depth';
          DROP TABLE position_cache_old;",
     )
-    .map_err(|e| e.to_string())
 }
 
 /// Migração análoga para a tabela `games`: adiciona `mode` à chave UNIQUE,
 /// permitindo reanalisar a mesma PGN em modos diferentes (depth vs time).
-fn migrate_games_mode(conn: &Connection) -> Result<(), String> {
+fn migrate_games_mode(conn: &Connection) -> rusqlite::Result<()> {
     if has_column(conn, "games", "mode")? {
         return Ok(());
     }
@@ -155,12 +150,11 @@ fn migrate_games_mode(conn: &Connection) -> Result<(), String> {
             FROM games_old;
          DROP TABLE games_old;",
     )
-    .map_err(|e| e.to_string())
 }
 
 /// Adiciona a estratégia da revisão à tabela de partidas e à chave UNIQUE.
 /// Revisões existentes continuam sendo controles manuais.
-fn migrate_games_analysis_kind(conn: &Connection) -> Result<(), String> {
+fn migrate_games_analysis_kind(conn: &Connection) -> rusqlite::Result<()> {
     if has_column(conn, "games", "analysis_kind")? {
         return Ok(());
     }
@@ -194,15 +188,13 @@ fn migrate_games_analysis_kind(conn: &Connection) -> Result<(), String> {
             FROM games_old;
          DROP TABLE games_old;",
     )
-    .map_err(|e| e.to_string())
 }
 
 /// Índice para a listagem paginada do histórico, ordenada por data e id.
-fn migrate_games_list_index(conn: &Connection) -> Result<(), String> {
+fn migrate_games_list_index(conn: &Connection) -> rusqlite::Result<()> {
     conn.execute_batch(
         "CREATE INDEX IF NOT EXISTS games_created_at_id ON games (created_at DESC, id DESC);",
     )
-    .map_err(|e| e.to_string())
 }
 
 #[cfg(test)]

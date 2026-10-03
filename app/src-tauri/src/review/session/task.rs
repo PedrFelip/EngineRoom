@@ -17,8 +17,8 @@ pub(super) async fn run_session(
     let mut sequence = 0;
     let mut resources_detected = false;
     let mut publish = |request_id, event| {
-        if let Event::Warning { error } = &event {
-            eprintln!("review warning [{}]: {}", error.operation, error.message);
+        if let Event::Warning { error } | Event::Error { error, .. } = &event {
+            eprintln!("review failure: {error:?}");
         }
         sequence += 1;
         if !publish_envelope(Envelope {

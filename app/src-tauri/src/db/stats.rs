@@ -29,29 +29,23 @@ impl<'a> Stats<'a> {
 
     /// Soma os comprimentos das colunas de texto de cada tabela. Não preenche
     /// `db_bytes` (resolvido pelo comando a partir do arquivo em disco).
-    pub fn compute(&self) -> Result<StorageStats, String> {
-        let cache_bytes: u64 = self
-            .conn
-            .query_row(
-                "SELECT COALESCE(SUM(LENGTH(fen) + LENGTH(source_mode) + LENGTH(lines_json)), 0)
+    pub fn compute(&self) -> rusqlite::Result<StorageStats> {
+        let cache_bytes: u64 = self.conn.query_row(
+            "SELECT COALESCE(SUM(LENGTH(fen) + LENGTH(source_mode) + LENGTH(lines_json)), 0)
                  FROM position_cache",
-                [],
-                |row| row.get(0),
-            )
-            .map_err(|e| e.to_string())?;
-        let games_bytes: u64 = self
-            .conn
-            .query_row(
-                "SELECT COALESCE(
+            [],
+            |row| row.get(0),
+        )?;
+        let games_bytes: u64 = self.conn.query_row(
+            "SELECT COALESCE(
                     SUM(LENGTH(pgn) + LENGTH(white) + LENGTH(black) + LENGTH(result)
                         + LENGTH(engine_tier) + LENGTH(mode) + LENGTH(review_json)),
                     0
                  )
                  FROM games",
-                [],
-                |row| row.get(0),
-            )
-            .map_err(|e| e.to_string())?;
+            [],
+            |row| row.get(0),
+        )?;
         Ok(StorageStats {
             cache_bytes,
             games_bytes,
@@ -69,7 +63,7 @@ pub fn storage_stats(
     app: tauri::AppHandle,
 ) -> Result<StorageStats, String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
-    let mut stats = Stats::new(&conn).compute()?;
+    let mut stats = Stats::new(&conn).compute().map_err(|e| e.to_string())?;
     use tauri::Manager;
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     let db_bytes = std::fs::metadata(dir.join("engineroom.db"))

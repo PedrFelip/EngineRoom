@@ -113,7 +113,7 @@ fn lista_devolve_mais_recentes_primeiro() {
 }
 
 #[test]
-fn lista_pagina_por_cursor_sem_repetir_partidas() -> Result<(), String> {
+fn lista_pagina_por_cursor_sem_repetir_partidas() -> Result<(), Box<dyn std::error::Error>> {
     let conn = open_memory()?;
     let store = Store::new(&conn);
     for white in ["Primeira", "Segunda", "Terceira"] {

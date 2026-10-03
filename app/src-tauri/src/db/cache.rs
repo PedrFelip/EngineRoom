@@ -81,15 +81,13 @@ impl<'a> Cache<'a> {
         fen: &str,
         value: u32,
         multipv: u32,
-    ) -> Result<Option<CachedPosition>, String> {
-        let mut rows = stmt
-            .query(rusqlite::params![fen, value, multipv])
-            .map_err(|e| e.to_string())?;
-        match rows.next().map_err(|e| e.to_string())? {
+    ) -> rusqlite::Result<Option<CachedPosition>> {
+        let mut rows = stmt.query(rusqlite::params![fen, value, multipv])?;
+        match rows.next()? {
             Some(row) => Ok(Some(CachedPosition {
-                cp: row.get(0).map_err(|e| e.to_string())?,
-                lines_json: row.get(1).map_err(|e| e.to_string())?,
-                reached_depth: row.get(2).map_err(|e| e.to_string())?,
+                cp: row.get(0)?,
+                lines_json: row.get(1)?,
+                reached_depth: row.get(2)?,
             })),
             None => Ok(None),
         }
@@ -106,11 +104,8 @@ impl<'a> Cache<'a> {
         mode: Mode,
         value: u32,
         multipv: u32,
-    ) -> Result<Option<CachedPosition>, String> {
-        let mut stmt = self
-            .conn
-            .prepare(Self::lookup_sql(mode))
-            .map_err(|e| e.to_string())?;
+    ) -> rusqlite::Result<Option<CachedPosition>> {
+        let mut stmt = self.conn.prepare(Self::lookup_sql(mode))?;
         Self::query_with_stmt(&mut stmt, fen, value, multipv)
     }
 
@@ -123,11 +118,8 @@ impl<'a> Cache<'a> {
         mode: Mode,
         value: u32,
         multipv: u32,
-    ) -> Result<Vec<Option<CachedPosition>>, String> {
-        let mut stmt = self
-            .conn
-            .prepare(Self::lookup_sql(mode))
-            .map_err(|e| e.to_string())?;
+    ) -> rusqlite::Result<Vec<Option<CachedPosition>>> {
+        let mut stmt = self.conn.prepare(Self::lookup_sql(mode))?;
         fens.iter()
             .map(|fen| Self::query_with_stmt(&mut stmt, fen, value, multipv))
             .collect()
@@ -143,13 +135,11 @@ impl<'a> Cache<'a> {
         reached_depth: u32,
         cp: i32,
         lines_json: &str,
-    ) -> Result<(), String> {
-        self.conn
-            .execute(
-                INSERT_SQL,
-                rusqlite::params![fen, reached_depth, multipv, mode, value, cp, lines_json],
-            )
-            .map_err(|e| e.to_string())?;
+    ) -> rusqlite::Result<()> {
+        self.conn.execute(
+            INSERT_SQL,
+            rusqlite::params![fen, reached_depth, multipv, mode, value, cp, lines_json],
+        )?;
         Ok(())
     }
 
@@ -163,7 +153,7 @@ impl<'a> Cache<'a> {
         mode: Mode,
         value: u32,
         multipv: u32,
-    ) -> Result<(), String> {
+    ) -> rusqlite::Result<()> {
         self.store_rows(entries.iter().map(|entry| (entry, multipv)), mode, value)
     }
 
@@ -173,7 +163,7 @@ impl<'a> Cache<'a> {
         entries: &[(CachedPositionPut, u32)],
         mode: Mode,
         value: u32,
-    ) -> Result<(), String> {
+    ) -> rusqlite::Result<()> {
         self.store_rows(
             entries.iter().map(|(entry, coverage)| (entry, *coverage)),
             mode,
@@ -186,13 +176,10 @@ impl<'a> Cache<'a> {
         entries: impl IntoIterator<Item = (&'e CachedPositionPut, u32)>,
         mode: Mode,
         value: u32,
-    ) -> Result<(), String> {
-        let tx = self
-            .conn
-            .unchecked_transaction()
-            .map_err(|e| e.to_string())?;
+    ) -> rusqlite::Result<()> {
+        let tx = self.conn.unchecked_transaction()?;
         {
-            let mut stmt = tx.prepare(INSERT_SQL).map_err(|e| e.to_string())?;
+            let mut stmt = tx.prepare(INSERT_SQL)?;
             for (entry, multipv) in entries {
                 stmt.execute(rusqlite::params![
                     entry.fen,
@@ -202,17 +189,14 @@ impl<'a> Cache<'a> {
                     value,
                     entry.cp,
                     entry.lines_json,
-                ])
-                .map_err(|e| e.to_string())?;
+                ])?;
             }
         }
-        tx.commit().map_err(|e| e.to_string())
+        tx.commit()
     }
 
-    pub fn clear(&self) -> Result<(), String> {
-        self.conn
-            .execute("DELETE FROM position_cache", [])
-            .map_err(|e| e.to_string())?;
+    pub fn clear(&self) -> rusqlite::Result<()> {
+        self.conn.execute("DELETE FROM position_cache", [])?;
         Ok(())
     }
 }
@@ -226,7 +210,9 @@ pub fn cache_get(
     multipv: u32,
 ) -> Result<Option<CachedPosition>, String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
-    Cache::new(&conn).lookup(fen, mode, depth, multipv)
+    Cache::new(&conn)
+        .lookup(fen, mode, depth, multipv)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -242,13 +228,15 @@ pub fn cache_put(
     lines_json: &str,
 ) -> Result<(), String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
-    Cache::new(&conn).store(fen, mode, depth, multipv, reached_depth, cp, lines_json)
+    Cache::new(&conn)
+        .store(fen, mode, depth, multipv, reached_depth, cp, lines_json)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub fn cache_clear(state: tauri::State<'_, DbState>) -> Result<(), String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
-    Cache::new(&conn).clear()
+    Cache::new(&conn).clear().map_err(|e| e.to_string())
 }
 
 /// Prefetch em lote: devolve um `Option<CachedPosition>` por fen, na mesma
@@ -262,7 +250,9 @@ pub fn cache_get_bulk(
     multipv: u32,
 ) -> Result<Vec<Option<CachedPosition>>, String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
-    Cache::new(&conn).lookup_bulk(&fens, mode, depth, multipv)
+    Cache::new(&conn)
+        .lookup_bulk(&fens, mode, depth, multipv)
+        .map_err(|e| e.to_string())
 }
 
 /// Descarga em lote: grava N entries numa única transação, num único lock.
@@ -275,7 +265,9 @@ pub fn cache_put_many(
     multipv: u32,
 ) -> Result<(), String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
-    Cache::new(&conn).store_many(&entries, mode, depth, multipv)
+    Cache::new(&conn)
+        .store_many(&entries, mode, depth, multipv)
+        .map_err(|e| e.to_string())
 }
 
 #[cfg(test)]

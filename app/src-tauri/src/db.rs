@@ -23,16 +23,16 @@ pub struct DbState(pub Mutex<Connection>);
 
 /// Abre (criando, se preciso) o banco em disco e aplica as migrações. O
 /// diretório pai deve existir.
-pub fn open_file(path: &Path) -> Result<Connection, String> {
-    let conn = Connection::open(path).map_err(|e| e.to_string())?;
+pub fn open_file(path: &Path) -> rusqlite::Result<Connection> {
+    let conn = Connection::open(path)?;
     migrations::migrate(&conn)?;
     Ok(conn)
 }
 
 /// Abre um banco in-memory já migrado (apenas em testes).
 #[cfg(test)]
-pub fn open_memory() -> Result<Connection, String> {
-    let conn = Connection::open_in_memory().map_err(|e| e.to_string())?;
+pub fn open_memory() -> rusqlite::Result<Connection> {
+    let conn = Connection::open_in_memory()?;
     migrations::migrate(&conn)?;
     Ok(conn)
 }

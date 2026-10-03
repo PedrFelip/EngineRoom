@@ -82,58 +82,54 @@ impl<'a> Store<'a> {
         Self { conn }
     }
 
-    pub fn save(&self, game: &NewGame) -> Result<i64, String> {
-        self.conn
-            .execute(
-                "INSERT OR REPLACE INTO games
+    pub fn save(&self, game: &NewGame) -> rusqlite::Result<i64> {
+        self.conn.execute(
+            "INSERT OR REPLACE INTO games
                 (pgn, white, black, result, plies, engine_tier, mode, analysis_kind,
                  depth, multipv, accuracy_white, accuracy_black, review_json)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
-                (
-                    &game.pgn,
-                    &game.white,
-                    &game.black,
-                    &game.result,
-                    game.plies,
-                    &game.engine_tier,
-                    game.mode,
-                    &game.analysis_kind,
-                    game.depth,
-                    game.multipv,
-                    game.accuracy_white,
-                    game.accuracy_black,
-                    &game.review_json,
-                ),
-            )
-            .map_err(|e| e.to_string())?;
+            (
+                &game.pgn,
+                &game.white,
+                &game.black,
+                &game.result,
+                game.plies,
+                &game.engine_tier,
+                game.mode,
+                &game.analysis_kind,
+                game.depth,
+                game.multipv,
+                game.accuracy_white,
+                game.accuracy_black,
+                &game.review_json,
+            ),
+        )?;
         Ok(self.conn.last_insert_rowid())
     }
 
-    pub fn list_page(&self, limit: usize, cursor: Option<&GameCursor>) -> Result<GamePage, String> {
+    pub fn list_page(
+        &self,
+        limit: usize,
+        cursor: Option<&GameCursor>,
+    ) -> rusqlite::Result<GamePage> {
         let limit = limit.clamp(1, 100);
         let total = self
             .conn
-            .query_row("SELECT COUNT(*) FROM games", [], |row| row.get(0))
-            .map_err(|e| e.to_string())?;
-        let mut stmt = self
-            .conn
-            .prepare(&format!(
-                "SELECT {SUMMARY_COLS} FROM games
+            .query_row("SELECT COUNT(*) FROM games", [], |row| row.get(0))?;
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT {SUMMARY_COLS} FROM games
                  WHERE ?1 IS NULL OR created_at < ?1 OR (created_at = ?1 AND id < ?2)
                  ORDER BY created_at DESC, id DESC LIMIT ?3"
-            ))
-            .map_err(|e| e.to_string())?;
+        ))?;
         let cursor_created_at = cursor.map(|value| value.created_at.as_str());
         let cursor_id = cursor.map(|value| value.id);
-        let mut rows = stmt
-            .query(rusqlite::params![
-                cursor_created_at,
-                cursor_id,
-                (limit + 1) as i64,
-            ])
-            .map_err(|e| e.to_string())?;
+        let mut rows = stmt.query(rusqlite::params![
+            cursor_created_at,
+            cursor_id,
+            (limit + 1) as i64,
+        ])?;
         let mut out = Vec::new();
-        while let Some(row) = rows.next().map_err(|e| e.to_string())? {
+        while let Some(row) = rows.next()? {
             out.push(summary_from_row(row)?);
         }
         let has_more = out.len() > limit;
@@ -153,66 +149,60 @@ impl<'a> Store<'a> {
         })
     }
 
-    pub fn get(&self, id: i64) -> Result<Option<StoredGame>, String> {
-        let mut stmt = self
-            .conn
-            .prepare(&format!(
-                "SELECT {SUMMARY_COLS}, pgn, review_json FROM games WHERE id = ?1"
-            ))
-            .map_err(|e| e.to_string())?;
-        let mut rows = stmt.query((id,)).map_err(|e| e.to_string())?;
-        match rows.next().map_err(|e| e.to_string())? {
+    pub fn get(&self, id: i64) -> rusqlite::Result<Option<StoredGame>> {
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT {SUMMARY_COLS}, pgn, review_json FROM games WHERE id = ?1"
+        ))?;
+        let mut rows = stmt.query((id,))?;
+        match rows.next()? {
             Some(row) => Ok(Some(stored_from_row(row)?)),
             None => Ok(None),
         }
     }
 
-    pub fn remove(&self, id: i64) -> Result<(), String> {
+    pub fn remove(&self, id: i64) -> rusqlite::Result<()> {
         self.conn
-            .execute("DELETE FROM games WHERE id = ?1", (id,))
-            .map_err(|e| e.to_string())?;
+            .execute("DELETE FROM games WHERE id = ?1", (id,))?;
         Ok(())
     }
 
-    pub fn clear(&self) -> Result<(), String> {
-        self.conn
-            .execute("DELETE FROM games", [])
-            .map_err(|e| e.to_string())?;
+    pub fn clear(&self) -> rusqlite::Result<()> {
+        self.conn.execute("DELETE FROM games", [])?;
         Ok(())
     }
 }
 
 /// Mapeia as colunas (ordem de `SUMMARY_COLS`) para [`GameSummary`].
-fn summary_from_row(row: &rusqlite::Row<'_>) -> Result<GameSummary, String> {
+fn summary_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<GameSummary> {
     Ok(GameSummary {
-        id: row.get(0).map_err(|e| e.to_string())?,
-        white: row.get(1).map_err(|e| e.to_string())?,
-        black: row.get(2).map_err(|e| e.to_string())?,
-        result: row.get(3).map_err(|e| e.to_string())?,
-        plies: row.get(4).map_err(|e| e.to_string())?,
-        engine_tier: row.get(5).map_err(|e| e.to_string())?,
-        mode: row.get(6).map_err(|e| e.to_string())?,
-        analysis_kind: row.get(7).map_err(|e| e.to_string())?,
-        depth: row.get(8).map_err(|e| e.to_string())?,
-        multipv: row.get(9).map_err(|e| e.to_string())?,
-        accuracy_white: row.get(10).map_err(|e| e.to_string())?,
-        accuracy_black: row.get(11).map_err(|e| e.to_string())?,
-        created_at: row.get(12).map_err(|e| e.to_string())?,
+        id: row.get(0)?,
+        white: row.get(1)?,
+        black: row.get(2)?,
+        result: row.get(3)?,
+        plies: row.get(4)?,
+        engine_tier: row.get(5)?,
+        mode: row.get(6)?,
+        analysis_kind: row.get(7)?,
+        depth: row.get(8)?,
+        multipv: row.get(9)?,
+        accuracy_white: row.get(10)?,
+        accuracy_black: row.get(11)?,
+        created_at: row.get(12)?,
     })
 }
 
-fn stored_from_row(row: &rusqlite::Row<'_>) -> Result<StoredGame, String> {
+fn stored_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoredGame> {
     Ok(StoredGame {
         summary: summary_from_row(row)?,
-        pgn: row.get(13).map_err(|e| e.to_string())?,
-        review_json: row.get(14).map_err(|e| e.to_string())?,
+        pgn: row.get(13)?,
+        review_json: row.get(14)?,
     })
 }
 
 #[tauri::command]
 pub fn games_save(state: tauri::State<'_, DbState>, game: NewGame) -> Result<i64, String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
-    Store::new(&conn).save(&game)
+    Store::new(&conn).save(&game).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -222,25 +212,27 @@ pub fn games_list(
     cursor: Option<GameCursor>,
 ) -> Result<GamePage, String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
-    Store::new(&conn).list_page(limit, cursor.as_ref())
+    Store::new(&conn)
+        .list_page(limit, cursor.as_ref())
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub fn games_get(state: tauri::State<'_, DbState>, id: i64) -> Result<Option<StoredGame>, String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
-    Store::new(&conn).get(id)
+    Store::new(&conn).get(id).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub fn games_delete(state: tauri::State<'_, DbState>, id: i64) -> Result<(), String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
-    Store::new(&conn).remove(id)
+    Store::new(&conn).remove(id).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub fn games_clear(state: tauri::State<'_, DbState>) -> Result<(), String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
-    Store::new(&conn).clear()
+    Store::new(&conn).clear().map_err(|e| e.to_string())
 }
 
 #[cfg(test)]

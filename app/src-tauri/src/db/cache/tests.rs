@@ -22,7 +22,36 @@ fn mixed_coverage_flush_rolls_back_all_entries_on_failure() {
     let error = cache
         .store_many_covered(&[(entry(FEN), 1), (entry("fail"), 3)], Mode::Time, 1000)
         .unwrap_err();
-    assert!(error.contains("write failed"));
+    assert_eq!(
+        error.sqlite_error_code(),
+        Some(rusqlite::ErrorCode::ConstraintViolation)
+    );
+    assert!(
+        matches!(&error, rusqlite::Error::SqliteFailure(_, Some(message)) if message == "write failed")
+    );
+    let review_error = crate::review::types::ReviewError::with_source(
+        crate::review::types::ReviewErrorCode::Cache,
+        "cache.put",
+        error,
+    );
+    let cloned = review_error.clone();
+    let cause = std::error::Error::source(&cloned)
+        .unwrap()
+        .downcast_ref::<rusqlite::Error>()
+        .unwrap();
+    assert_eq!(
+        cause.sqlite_error_code(),
+        Some(rusqlite::ErrorCode::ConstraintViolation)
+    );
+    assert_eq!(
+        serde_json::to_value(crate::review::types::ReviewErrorPayload::from(
+            &review_error
+        ))
+        .unwrap(),
+        serde_json::json!({
+            "code": "cache", "operation": "cache.put", "message": "write failed",
+        })
+    );
     assert!(cache.lookup(FEN, Mode::Time, 1000, 1).unwrap().is_none());
 }
 
