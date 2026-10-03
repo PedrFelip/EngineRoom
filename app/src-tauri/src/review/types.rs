@@ -1,23 +1,42 @@
 use crate::db::mode::Mode;
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ReviewErrorCode {
+    Cancelled,
+    Cache,
+    Persistence,
+    Session,
+    SessionClosed,
+    SessionExists,
+    InvalidPayload,
+    InvalidPgn,
+    EngineSpawn,
+    EngineExited,
+    EngineCommand,
+    EngineTimeout,
+    EngineProtocol,
+    MissingEvaluation,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReviewError {
-    pub code: String,
+    pub code: ReviewErrorCode,
     pub operation: String,
     pub message: String,
 }
 impl ReviewError {
-    pub fn new(code: &str, operation: &str, message: impl ToString) -> Self {
+    pub fn new(code: ReviewErrorCode, operation: &str, message: impl ToString) -> Self {
         Self {
-            code: code.into(),
+            code,
             operation: operation.into(),
             message: message.to_string(),
         }
     }
     pub fn cancelled() -> Self {
-        Self::new("cancelled", "session", "Análise cancelada.")
+        Self::new(ReviewErrorCode::Cancelled, "session", "Análise cancelada.")
     }
 }
 pub type Result<T> = std::result::Result<T, ReviewError>;
@@ -282,4 +301,51 @@ pub struct Envelope {
     pub request_id: Option<u64>,
     #[serde(flatten)]
     pub event: Event,
+}
+
+#[cfg(test)]
+mod error_tests {
+    use super::*;
+
+    #[test]
+    fn error_codes_preserve_ipc_strings() {
+        use ReviewErrorCode::*;
+        let cases = [
+            (Cancelled, "cancelled"),
+            (Cache, "cache"),
+            (Persistence, "persistence"),
+            (Session, "session"),
+            (SessionClosed, "sessionClosed"),
+            (SessionExists, "sessionExists"),
+            (InvalidPayload, "invalidPayload"),
+            (InvalidPgn, "invalidPgn"),
+            (EngineSpawn, "engineSpawn"),
+            (EngineExited, "engineExited"),
+            (EngineCommand, "engineCommand"),
+            (EngineTimeout, "engineTimeout"),
+            (EngineProtocol, "engineProtocol"),
+            (MissingEvaluation, "missingEvaluation"),
+        ];
+        for (code, wire_code) in cases {
+            let payload = serde_json::json!({
+                "code": wire_code,
+                "operation": "test",
+                "message": "failure",
+            });
+            let error = ReviewError::new(code, "test", "failure");
+            assert_eq!(serde_json::to_value(&error).unwrap(), payload);
+            let decoded: ReviewError = serde_json::from_value(payload).unwrap();
+            assert_eq!(decoded.code, code);
+        }
+    }
+
+    #[test]
+    fn unknown_error_codes_are_rejected() {
+        assert!(serde_json::from_value::<ReviewError>(serde_json::json!({
+            "code": "engineTimout",
+            "operation": "test",
+            "message": "failure",
+        }))
+        .is_err());
+    }
 }
