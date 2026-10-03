@@ -61,7 +61,11 @@ impl EnginePort for FakePort {
         } else if command.starts_with("go ") {
             s.searches += 1;
             if s.fail_at == Some(s.searches) {
-                return Err(ReviewError::new("engineExited", "fake", "engine failed"));
+                return Err(ReviewError::new(
+                    ReviewErrorCode::EngineExited,
+                    "fake",
+                    "engine failed",
+                ));
             }
             if s.stall {
                 return Ok(());
@@ -167,7 +171,11 @@ impl Repository for MemoryRepo {
     ) -> Task<'a, Result<Vec<Option<RawPosition>>>> {
         Box::pin(async move {
             if self.fail_read {
-                return Err(ReviewError::new("cache", "lookup", "cache read failed"));
+                return Err(ReviewError::new(
+                    ReviewErrorCode::Cache,
+                    "lookup",
+                    "cache read failed",
+                ));
             }
             self.lookups
                 .lock()
@@ -195,7 +203,11 @@ impl Repository for MemoryRepo {
         Box::pin(async move {
             self.writes.lock().unwrap().push((value, entries.len()));
             if self.fail_put {
-                return Err(ReviewError::new("cache", "put", "cache write failed"));
+                return Err(ReviewError::new(
+                    ReviewErrorCode::Cache,
+                    "put",
+                    "cache write failed",
+                ));
             }
             Ok(())
         })
@@ -203,7 +215,11 @@ impl Repository for MemoryRepo {
     fn save<'a>(&'a self, _: &'a ReviewConfig, _: &'a ReviewResult) -> Task<'a, Result<()>> {
         Box::pin(async move {
             if self.fail_save {
-                Err(ReviewError::new("persistence", "save", "save failed"))
+                Err(ReviewError::new(
+                    ReviewErrorCode::Persistence,
+                    "save",
+                    "save failed",
+                ))
             } else {
                 Ok(())
             }

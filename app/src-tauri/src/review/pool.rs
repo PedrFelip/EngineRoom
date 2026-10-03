@@ -44,7 +44,7 @@ impl Pool {
             .await?;
         if ports.is_empty() {
             return Err(ReviewError::new(
-                "engineSpawn",
+                ReviewErrorCode::EngineSpawn,
                 "engine.pool",
                 "Pool vazio.",
             ));
@@ -110,7 +110,7 @@ impl Pool {
         while let Some(result) = self.tasks.join_next().await {
             if let Err(error) = result {
                 self.failure.lock().unwrap().get_or_insert_with(|| {
-                    ReviewError::new("engineExited", "engine.worker", error)
+                    ReviewError::new(ReviewErrorCode::EngineExited, "engine.worker", error)
                 });
             }
         }
@@ -176,7 +176,7 @@ async fn worker(
         };
         let failed = result.is_err();
         if let Err(error) = &result {
-            if error.code != "cancelled" {
+            if error.code != ReviewErrorCode::Cancelled {
                 failure.lock().unwrap().get_or_insert(error.clone());
             }
             stop.send_replace(true);

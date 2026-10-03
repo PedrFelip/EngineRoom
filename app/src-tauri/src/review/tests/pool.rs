@@ -89,7 +89,7 @@ impl EnginePort for GroupPort {
                 tokio::time::sleep(Duration::from_millis(delay)).await;
                 if self.activity.fail.load(Ordering::SeqCst) {
                     return Err(ReviewError::new(
-                        "engineExited",
+                        ReviewErrorCode::EngineExited,
                         "test.pool",
                         "worker failed",
                     ));
@@ -194,7 +194,7 @@ async fn automatic_worker_failure_closes_every_process_before_next_owner() {
     .await
     .unwrap();
     let error = result.unwrap_err();
-    assert_eq!(error.code, "engineExited");
+    assert_eq!(error.code, ReviewErrorCode::EngineExited);
     assert_eq!(error.message, "worker failed");
     assert_eq!(factory.activity.closed.load(Ordering::SeqCst), 3);
     assert_eq!(factory.activity.active.load(Ordering::SeqCst), 0);
@@ -464,7 +464,7 @@ async fn mixed_review_cancellation_awaits_every_worker() {
     .await
     .unwrap();
     cancel_task.await.unwrap();
-    assert_eq!(result.unwrap_err().code, "cancelled");
+    assert_eq!(result.unwrap_err().code, ReviewErrorCode::Cancelled);
     assert_eq!(factory.activity.closed.load(Ordering::SeqCst), 3);
     assert_eq!(factory.activity.active.load(Ordering::SeqCst), 0);
     assert_eq!(factory.permit.available_permits(), 1);

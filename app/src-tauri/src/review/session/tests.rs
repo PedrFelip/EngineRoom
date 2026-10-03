@@ -160,7 +160,9 @@ async fn persistence_failure_does_not_invalidate_completed_review() {
     });
     receive(&mut rx, |e| matches!(e.event, Event::Completed { .. })).await;
     let warning = receive(&mut rx, |e| matches!(e.event, Event::Warning { .. })).await;
-    assert!(matches!(warning.event,Event::Warning {error:e} if e.code=="persistence"));
+    assert!(
+        matches!(warning.event,Event::Warning {error:e} if e.code==ReviewErrorCode::Persistence)
+    );
     s.close.send_replace(true);
     running.await.unwrap();
     assert!(*s.done.borrow());

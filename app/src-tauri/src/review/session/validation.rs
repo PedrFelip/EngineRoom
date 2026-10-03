@@ -8,7 +8,7 @@ pub(super) fn validate(config: &ReviewConfig) -> Result<()> {
             && config.movetime_ms.is_some_and(|v| v == 0 || v > 30000))
     {
         return Err(ReviewError::new(
-            "invalidPayload",
+            ReviewErrorCode::InvalidPayload,
             "session.open",
             "Parâmetros de análise inválidos.",
         ));
@@ -25,7 +25,7 @@ pub(super) fn validate_live(settings: &LiveSettings) -> Result<()> {
         || !(16..=4096).contains(&settings.memory_mb)
     {
         Err(ReviewError::new(
-            "invalidPayload",
+            ReviewErrorCode::InvalidPayload,
             "session.live",
             "Parâmetros de análise ao vivo inválidos.",
         ))

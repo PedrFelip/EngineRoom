@@ -373,7 +373,7 @@ async fn execute(
         if waiters.is_empty() {
             if !state.complete() || state.targets().iter().any(|t| !state.satisfied(t)) {
                 return Err(ReviewError::new(
-                    "engineExited",
+                    ReviewErrorCode::EngineExited,
                     "review.queue",
                     "Fila sem worker disponível.",
                 ));
@@ -382,7 +382,7 @@ async fn execute(
         }
         let result = tokio::select! {
             _ = cancel.cancelled() => return Err(ReviewError::cancelled()),
-            result = waiters.join_next() => result.unwrap().map_err(|e| ReviewError::new("engineExited", "review.queue", e))?,
+            result = waiters.join_next() => result.unwrap().map_err(|e| ReviewError::new(ReviewErrorCode::EngineExited, "review.queue", e))?,
         };
         let (job, reply) = result;
         let pool = pool.as_ref().unwrap();
@@ -465,7 +465,7 @@ fn disconnected_worker_error(failure: Option<ReviewError>, cancel: &Cancellation
     failure.unwrap_or_else(|| {
         cancel.check().err().unwrap_or_else(|| {
             ReviewError::new(
-                "engineExited",
+                ReviewErrorCode::EngineExited,
                 "review.queue",
                 "Worker encerrou sem resultado.",
             )
@@ -475,7 +475,7 @@ fn disconnected_worker_error(failure: Option<ReviewError>, cancel: &Cancellation
 
 fn invalid_cache_count() -> ReviewError {
     ReviewError::new(
-        "cache",
+        ReviewErrorCode::Cache,
         "cache.lookup",
         "Quantidade de avaliações inválida.",
     )

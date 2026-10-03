@@ -57,7 +57,7 @@ impl<R: tauri::Runtime> SqliteRepository<R> {
     async fn db<T: Send + 'static>(
         &self,
         operation: &'static str,
-        code: &'static str,
+        code: ReviewErrorCode,
         run: impl FnOnce(&rusqlite::Connection) -> std::result::Result<T, String> + Send + 'static,
     ) -> Result<T> {
         let app = self.app.clone();
@@ -119,7 +119,7 @@ impl<R: tauri::Runtime> Repository for SqliteRepository<R> {
         Box::pin(async move {
             let owned = fens.to_vec();
             let hits = self
-                .db("cache.lookup", "cache", move |c| {
+                .db("cache.lookup", ReviewErrorCode::Cache, move |c| {
                     Cache::new(c).lookup_bulk(&owned, mode, value, multipv)
                 })
                 .await?;
@@ -180,13 +180,14 @@ impl<R: tauri::Runtime> Repository for SqliteRepository<R> {
                         fen: position.fen.clone(),
                         reached_depth,
                         cp: lines[0].cp,
-                        lines_json: serde_json::to_string(&lines)
-                            .map_err(|e| ReviewError::new("cache", "cache.encode", e))?,
+                        lines_json: serde_json::to_string(&lines).map_err(|e| {
+                            ReviewError::new(ReviewErrorCode::Cache, "cache.encode", e)
+                        })?,
                     },
                     advertised,
                 ));
             }
-            self.db("cache.put", "cache", move |c| {
+            self.db("cache.put", ReviewErrorCode::Cache, move |c| {
                 Cache::new(c).store_many_covered(&writes, mode, value)
             })
             .await
@@ -224,10 +225,11 @@ impl<R: tauri::Runtime> Repository for SqliteRepository<R> {
                 multipv: config.lines,
                 accuracy_white: review.accuracy.white,
                 accuracy_black: review.accuracy.black,
-                review_json: serde_json::to_string(review)
-                    .map_err(|e| ReviewError::new("persistence", "games.encode", e))?,
+                review_json: serde_json::to_string(review).map_err(|e| {
+                    ReviewError::new(ReviewErrorCode::Persistence, "games.encode", e)
+                })?,
             };
-            self.db("games.save", "persistence", move |c| {
+            self.db("games.save", ReviewErrorCode::Persistence, move |c| {
                 Store::new(c).save(&entry).map(|_| ())
             })
             .await
@@ -238,7 +240,7 @@ impl<R: tauri::Runtime> Repository for SqliteRepository<R> {
 pub fn normalize(mut value: serde_json::Value) -> Result<ReviewResult> {
     let fail = || {
         ReviewError::new(
-            "invalidPayload",
+            ReviewErrorCode::InvalidPayload,
             "games.normalize",
             "Revisão salva inválida.",
         )
@@ -345,7 +347,7 @@ pub fn validate_review(review: &ReviewResult) -> Result<()> {
         Ok(())
     } else {
         Err(ReviewError::new(
-            "invalidPayload",
+            ReviewErrorCode::InvalidPayload,
             "review.validate",
             "Revisão inválida.",
         ))
@@ -359,14 +361,16 @@ pub async fn games_get_review_config(
 ) -> Result<Option<ReviewConfig>> {
     let repo = SqliteRepository::new(app);
     let Some(stored) = repo
-        .db("games.get", "persistence", move |c| Store::new(c).get(id))
+        .db("games.get", ReviewErrorCode::Persistence, move |c| {
+            Store::new(c).get(id)
+        })
         .await?
     else {
         return Ok(None);
     };
     let review = normalize(
         serde_json::from_str(&stored.review_json)
-            .map_err(|e| ReviewError::new("invalidPayload", "games.decode", e))?,
+            .map_err(|e| ReviewError::new(ReviewErrorCode::InvalidPayload, "games.decode", e))?,
     )?;
     let kind = match stored.summary.analysis_kind.as_str() {
         "auto-fast" => AnalysisKind::Fast,

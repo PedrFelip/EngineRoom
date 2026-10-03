@@ -54,12 +54,16 @@ impl ReviewSessions {
         let sessions = self
             .sessions
             .lock()
-            .map_err(|e| ReviewError::new("session", "session.lookup", e))?;
+            .map_err(|e| ReviewError::new(ReviewErrorCode::Session, "session.lookup", e))?;
         let s = sessions
             .get(id)
             .filter(|s| s.owner == owner)
             .ok_or_else(|| {
-                ReviewError::new("sessionClosed", "session.lookup", "Sessão encerrada.")
+                ReviewError::new(
+                    ReviewErrorCode::SessionClosed,
+                    "session.lookup",
+                    "Sessão encerrada.",
+                )
             })?;
         Ok(s.clone())
     }
@@ -70,14 +74,14 @@ impl ReviewSessions {
     ) -> Result<(Arc<Session>, watch::Sender<u64>, watch::Sender<bool>)> {
         if self.exiting.load(Ordering::SeqCst) {
             return Err(ReviewError::new(
-                "sessionClosed",
+                ReviewErrorCode::SessionClosed,
                 "session.open",
                 "O aplicativo está encerrando.",
             ));
         }
         if id.is_empty() || id.len() > 128 {
             return Err(ReviewError::new(
-                "invalidPayload",
+                ReviewErrorCode::InvalidPayload,
                 "session.open",
                 "Identificador inválido.",
             ));
@@ -97,17 +101,17 @@ impl ReviewSessions {
         let mut sessions = self
             .sessions
             .lock()
-            .map_err(|e| ReviewError::new("session", "session.open", e))?;
+            .map_err(|e| ReviewError::new(ReviewErrorCode::Session, "session.open", e))?;
         if self.exiting.load(Ordering::SeqCst) {
             return Err(ReviewError::new(
-                "sessionClosed",
+                ReviewErrorCode::SessionClosed,
                 "session.open",
                 "O aplicativo está encerrando.",
             ));
         }
         if sessions.contains_key(id) {
             return Err(ReviewError::new(
-                "sessionExists",
+                ReviewErrorCode::SessionExists,
                 "session.open",
                 "Sessão já aberta.",
             ));
@@ -188,7 +192,7 @@ pub fn review_session_open(
 fn update(s: &Session, id: u64, job: Option<Job>) -> Result<()> {
     if id == 0 || id > 9_007_199_254_740_991 {
         return Err(ReviewError::new(
-            "invalidPayload",
+            ReviewErrorCode::InvalidPayload,
             "session.intent",
             "Identificador do pedido inválido.",
         ));
@@ -196,10 +200,10 @@ fn update(s: &Session, id: u64, job: Option<Job>) -> Result<()> {
     let mut latest = s
         .latest
         .lock()
-        .map_err(|e| ReviewError::new("session", "session.intent", e))?;
+        .map_err(|e| ReviewError::new(ReviewErrorCode::Session, "session.intent", e))?;
     if *s.close.borrow() {
         return Err(ReviewError::new(
-            "sessionClosed",
+            ReviewErrorCode::SessionClosed,
             "session.intent",
             "Sessão encerrada.",
         ));
@@ -253,7 +257,7 @@ pub async fn review_session_close(
 ) -> Result<()> {
     let s = match state.get(&session_id, window.label()) {
         Ok(s) => s,
-        Err(e) if e.code == "sessionClosed" => return Ok(()),
+        Err(e) if e.code == ReviewErrorCode::SessionClosed => return Ok(()),
         Err(e) => return Err(e),
     };
     s.close.send_replace(true);

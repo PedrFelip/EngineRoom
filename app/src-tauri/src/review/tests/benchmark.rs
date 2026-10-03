@@ -183,14 +183,13 @@ impl EnginePort for RealPort {
             self.stats.lock().unwrap().searches += 1;
         }
         writeln!(self.stdin, "{command}")
-            .map_err(|e| ReviewError::new("engineCommand", "bench.send", e))
+            .map_err(|e| ReviewError::new(ReviewErrorCode::EngineCommand, "bench.send", e))
     }
     fn next(&mut self) -> Task<'_, Result<String>> {
         Box::pin(async move {
-            let line =
-                self.rx.recv().await.ok_or_else(|| {
-                    ReviewError::new("engineExited", "bench.read", "stdout closed")
-                })?;
+            let line = self.rx.recv().await.ok_or_else(|| {
+                ReviewError::new(ReviewErrorCode::EngineExited, "bench.read", "stdout closed")
+            })?;
             if line.starts_with("info depth ") {
                 self.stats.lock().unwrap().info_lines += 1;
             }
@@ -323,7 +322,7 @@ async fn execute(scenario: &Scenario, game: &BenchGame) -> (Output, Stats) {
                 tx.send_replace(true);
                 pending.await.unwrap_err()
             };
-            assert_eq!(error.code, "cancelled");
+            assert_eq!(error.code, ReviewErrorCode::Cancelled);
             port.shutdown().await;
         }
         result = Output::Cancelled { cancelled: true };

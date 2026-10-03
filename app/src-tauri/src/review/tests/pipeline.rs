@@ -154,7 +154,7 @@ async fn uci_tracks_last_depth_instability_and_requires_principal_line() {
         .await
         .unwrap_err()
         .code,
-        "missingEvaluation"
+        ReviewErrorCode::MissingEvaluation
     );
 }
 
@@ -261,7 +261,7 @@ async fn interruption_discards_stalled_search_before_next_owner_can_acquire() {
         .await
         .unwrap_err();
     cancel_task.await.unwrap();
-    assert_eq!(e.code, "cancelled");
+    assert_eq!(e.code, ReviewErrorCode::Cancelled);
     assert_eq!(f.state.lock().unwrap().stopped, 1);
     assert_eq!(f.permit.available_permits(), 1);
     f.state.lock().unwrap().stall = false;
@@ -287,7 +287,10 @@ async fn cancelled_waiter_does_not_spawn_or_stop_another_owners_process() {
             .is_err()
     );
     tx.send_replace(true);
-    assert_eq!(pending.await.err().unwrap().code, "cancelled");
+    assert_eq!(
+        pending.await.err().unwrap().code,
+        ReviewErrorCode::Cancelled
+    );
     assert_eq!(f.acquired.load(Ordering::SeqCst), 1);
     assert_eq!(f.state.lock().unwrap().stopped, 0);
     first.shutdown().await;
@@ -367,7 +370,7 @@ async fn uci_timeout_mate_scores_and_latest_multipv() {
     )
     .await
     .unwrap_err();
-    assert_eq!(e.code, "engineTimeout");
+    assert_eq!(e.code, ReviewErrorCode::EngineTimeout);
     p.shutdown().await;
 }
 
@@ -416,7 +419,7 @@ async fn cancellation_interrupts_a_blocked_cache_lookup() {
     .await
     .unwrap()
     .unwrap_err();
-    assert_eq!(error.code, "cancelled");
+    assert_eq!(error.code, ReviewErrorCode::Cancelled);
     cancel_task.await.unwrap();
     assert_eq!(f.acquired.load(Ordering::SeqCst), 0);
 }

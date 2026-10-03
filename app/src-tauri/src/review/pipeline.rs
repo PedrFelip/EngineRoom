@@ -74,7 +74,7 @@ impl Pipeline {
         let pgn = config.pgn.clone();
         let game = tokio::task::spawn_blocking(move || core::extract(&pgn))
             .await
-            .map_err(|e| ReviewError::new("invalidPgn", "pgn", e))??;
+            .map_err(|e| ReviewError::new(ReviewErrorCode::InvalidPgn, "pgn", e))??;
         cancel.check()?;
         if let Some(profile) = adaptive::profile(config.analysis_kind) {
             self.discard().await;
@@ -106,7 +106,7 @@ impl Pipeline {
             .await?;
             if hits.len() != game.fens.len() {
                 return Err(ReviewError::new(
-                    "cache",
+                    ReviewErrorCode::Cache,
                     "cache.lookup",
                     "Quantidade de avaliações inválida.",
                 ));
@@ -247,7 +247,7 @@ impl Pipeline {
                 engine::evaluate(port, fen, Mode::Time, value, value as u64 + 10000, cancel).await;
             if result
                 .as_ref()
-                .is_err_and(|e| e.code == "missingEvaluation")
+                .is_err_and(|e| e.code == ReviewErrorCode::MissingEvaluation)
             {
                 engine::ask(port, "isready", "readyok", 10000, cancel).await?;
                 result =

@@ -103,7 +103,7 @@ async fn dropped_waiter_keeps_blocking_operation_owned_until_drain() {
     let entered = started.clone();
     let worker = tokio::spawn(async move {
         owned
-            .db("test", "cache", move |_| {
+            .db("test", ReviewErrorCode::Cache, move |_| {
                 entered.notify_one();
                 wait.recv().unwrap();
                 Ok(())

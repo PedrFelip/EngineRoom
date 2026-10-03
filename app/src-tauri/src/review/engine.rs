@@ -78,10 +78,13 @@ struct Sidecar {
 impl<R: tauri::Runtime> EngineFactory for SidecarFactory<R> {
     fn acquire<'a>(&'a self, cancel: &'a Cancellation) -> Task<'a, Result<Box<dyn EnginePort>>> {
         Box::pin(async move {
-            self.acquire_pool(1, cancel)
-                .await?
-                .pop()
-                .ok_or_else(|| ReviewError::new("engineSpawn", "engine.acquire", "Pool vazio."))
+            self.acquire_pool(1, cancel).await?.pop().ok_or_else(|| {
+                ReviewError::new(
+                    ReviewErrorCode::EngineSpawn,
+                    "engine.acquire",
+                    "Pool vazio.",
+                )
+            })
         })
     }
     fn acquire_pool<'a>(
@@ -92,7 +95,7 @@ impl<R: tauri::Runtime> EngineFactory for SidecarFactory<R> {
         Box::pin(async move {
             let permit = tokio::select! {
                 _ = cancel.cancelled() => return Err(ReviewError::cancelled()),
-                permit = self.permit.clone().acquire_owned() => permit.map_err(|e| ReviewError::new("engineSpawn", "engine.acquire", e))?,
+                permit = self.permit.clone().acquire_owned() => permit.map_err(|e| ReviewError::new(ReviewErrorCode::EngineSpawn, "engine.acquire", e))?,
             };
             let permit = Arc::new(permit);
             let mut ports: Vec<Box<dyn EnginePort>> = Vec::new();
@@ -104,7 +107,7 @@ impl<R: tauri::Runtime> EngineFactory for SidecarFactory<R> {
                         .and_then(|c| c.set_raw_out(true).spawn())
                         .map_err(|e| {
                             ReviewError::new(
-                                "engineSpawn",
+                                ReviewErrorCode::EngineSpawn,
                                 "engine.spawn",
                                 format!("Falha ao iniciar o Stockfish: {e}"),
                             )
@@ -142,9 +145,15 @@ impl EnginePort for Sidecar {
     fn send(&mut self, command: &str) -> Result<()> {
         self.child
             .as_mut()
-            .ok_or_else(|| ReviewError::new("engineExited", "engine.send", "A engine encerrou."))?
+            .ok_or_else(|| {
+                ReviewError::new(
+                    ReviewErrorCode::EngineExited,
+                    "engine.send",
+                    "A engine encerrou.",
+                )
+            })?
             .write(format!("{command}\n").as_bytes())
-            .map_err(|e| ReviewError::new("engineCommand", "engine.send", e))
+            .map_err(|e| ReviewError::new(ReviewErrorCode::EngineCommand, "engine.send", e))
     }
     fn next(&mut self) -> Task<'_, Result<String>> {
         Box::pin(async move {
@@ -154,7 +163,7 @@ impl EnginePort for Sidecar {
                 }
                 if self.exited {
                     return Err(ReviewError::new(
-                        "engineExited",
+                        ReviewErrorCode::EngineExited,
                         "engine.read",
                         "A engine encerrou durante a análise.",
                     ));
@@ -169,7 +178,7 @@ impl EnginePort for Sidecar {
                     Some(CommandEvent::Terminated(p)) => {
                         self.exited = true;
                         return Err(ReviewError::new(
-                            "engineExited",
+                            ReviewErrorCode::EngineExited,
                             "engine.read",
                             format!(
                                 "A engine encerrou (código {:?}, sinal {:?}).",
@@ -178,12 +187,16 @@ impl EnginePort for Sidecar {
                         ));
                     }
                     Some(CommandEvent::Error(e)) => {
-                        return Err(ReviewError::new("engineExited", "engine.read", e))
+                        return Err(ReviewError::new(
+                            ReviewErrorCode::EngineExited,
+                            "engine.read",
+                            e,
+                        ))
                     }
                     None => {
                         self.exited = true;
                         return Err(ReviewError::new(
-                            "engineExited",
+                            ReviewErrorCode::EngineExited,
                             "engine.read",
                             "stdout da engine fechado.",
                         ));
@@ -233,7 +246,7 @@ pub async fn ask(
     };
     tokio::select! {
         _ = cancel.cancelled() => Err(ReviewError::cancelled()),
-        result = tokio::time::timeout(Duration::from_millis(timeout), read) => result.unwrap_or_else(|_| Err(ReviewError::new("engineTimeout", command, format!("A engine não respondeu a '{command}' em {timeout}ms.")))),
+        result = tokio::time::timeout(Duration::from_millis(timeout), read) => result.unwrap_or_else(|_| Err(ReviewError::new(ReviewErrorCode::EngineTimeout, command, format!("A engine não respondeu a '{command}' em {timeout}ms.")))),
     }
 }
 pub async fn configure(
@@ -347,7 +360,7 @@ pub async fn evaluate(
         let lines: Vec<_> = latest.into_values().collect();
         let principal = lines.iter().find(|l| l.multipv == 1).ok_or_else(|| {
             ReviewError::new(
-                "missingEvaluation",
+                ReviewErrorCode::MissingEvaluation,
                 "engine.evaluate",
                 "A engine encerrou a busca sem avaliação da posição.",
             )
@@ -362,6 +375,6 @@ pub async fn evaluate(
     };
     tokio::select! {
         _ = cancel.cancelled() => Err(ReviewError::cancelled()),
-        result = tokio::time::timeout(Duration::from_millis(timeout), read) => result.unwrap_or_else(|_| Err(ReviewError::new("engineTimeout", "engine.evaluate", format!("A engine não respondeu a '{go}' em {timeout}ms.")))),
+        result = tokio::time::timeout(Duration::from_millis(timeout), read) => result.unwrap_or_else(|_| Err(ReviewError::new(ReviewErrorCode::EngineTimeout, "engine.evaluate", format!("A engine não respondeu a '{go}' em {timeout}ms.")))),
     }
 }

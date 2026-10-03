@@ -32,7 +32,7 @@ pub(super) async fn run_session(
     };
     let result = if let Some(initial) = &config.initial_result {
         serde_json::to_value(initial)
-            .map_err(|e| ReviewError::new("invalidPayload", "session.restore", e))
+            .map_err(|e| ReviewError::new(ReviewErrorCode::InvalidPayload, "session.restore", e))
             .and_then(normalize)
     } else {
         publish(
@@ -81,7 +81,7 @@ pub(super) async fn run_session(
             true
         }
         Err(error) => {
-            if error.code != "cancelled" {
+            if error.code != ReviewErrorCode::Cancelled {
                 publish(None, Event::Error { error, fen: None });
             }
             false
@@ -116,7 +116,7 @@ pub(super) async fn run_session(
                     })
                     .await
                 {
-                    if error.code != "cancelled" {
+                    if error.code != ReviewErrorCode::Cancelled {
                         publish(
                             Some(job.id),
                             Event::Error {

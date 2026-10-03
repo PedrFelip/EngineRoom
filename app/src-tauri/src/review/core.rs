@@ -1,5 +1,5 @@
 //! Pure chess and review transformations. No Tauri, process or database access.
-use super::types::ReviewError;
+use super::types::{ReviewError, ReviewErrorCode};
 
 mod build;
 mod opening;
@@ -14,5 +14,5 @@ pub use phase::{phase, phases};
 pub use position::{add_san, fen, position, terminal, terminal_position, terminal_raw};
 
 fn invalid(message: impl ToString) -> ReviewError {
-    ReviewError::new("invalidPgn", "pgn", message)
+    ReviewError::new(ReviewErrorCode::InvalidPgn, "pgn", message)
 }
