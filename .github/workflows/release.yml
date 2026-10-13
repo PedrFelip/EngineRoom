@@ -134,9 +134,24 @@ jobs:
         run: bun install --frozen-lockfile
         working-directory: app
 
+      - name: Restore Stockfish sidecar cache
+        id: stockfish-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: app/src-tauri/binaries/stockfish-*
+          key: stockfish-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('app/scripts/fetch-stockfish.mjs') }}
+
       - name: Fetch Stockfish sidecar
         run: bun scripts/fetch-stockfish.mjs
         working-directory: app
+
+      # Save immediately so a later app build failure does not lose the download.
+      - name: Save Stockfish sidecar cache
+        if: steps.stockfish-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: app/src-tauri/binaries/stockfish-*
+          key: ${{ steps.stockfish-cache.outputs.cache-primary-key }}
 
       - name: Build and upload to draft
         uses: tauri-apps/tauri-action@v0
