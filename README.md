@@ -1,215 +1,101 @@
 # EngineRoom
 
-Aplicativo desktop para **revisão de partidas de xadrez** com o motor **Stockfish 18**. Importe um PGN e receba uma análise completa: barra de avaliação, gráfico de avaliação por lance, classificação lance a lance, acurácia por lado, linhas candidatas e detecção de abertura (ECO).
+Revise suas partidas de xadrez com **Stockfish 18**, direto no computador.
+Importe um PGN, analise os lances e explore as alternativas no tabuleiro.
+A análise é local: seu PGN não é enviado a um servidor.
 
-> Toda a análise acontece localmente — seu PGN não sai do seu computador.
+## Como funciona
 
-## Funcionalidades
+1. **Importe a partida** arrastando um arquivo `.pgn` ou `.txt`, usando o
+   seletor de arquivos ou colando o PGN.
+2. **Escolha a análise.** O modo automático oferece os perfis Rápido e
+   Profundo: avalia todas as posições e dedica mais tempo às decisões críticas.
+   No modo manual, você define profundidade ou tempo por posição e o número
+   de linhas candidatas.
+3. **Revise lance a lance.** Veja a avaliação, o melhor lance sugerido,
+   as linhas candidatas e a classificação dos lances. O resumo traz a
+   acurácia de cada lado e a abertura identificada (ECO).
+4. **Explore e retome.** Navegue pelo gráfico ou pela lista de lances,
+   jogue variações no tabuleiro e reabra partidas pelo histórico.
 
-- **Importação de PGN** por arrastar e soltar, seletor de arquivos (`.pgn`, `.txt`) ou colagem direta, com validação ao vivo (nomes, Elos, resultado, número de lances).
-- **Análise com Stockfish 18** em profundidade fixa por posição, com três níveis de qualidade (Rápido / Equilibrado / Profundo) e de 1 a 5 linhas candidatas por lance.
-- **Classificação de lances** no estilo chess.com: Melhor / Excelente / Bom / Imprecisão / Erro / Erro Grave / Livro, com acurácia percentual por cor.
-- **Detecção de abertura (ECO)** offline a partir de ~500 códigos (A00–E99), com o dataset incorporado no backend Rust.
-- **Tela de revisão** com tabuleiro (Chessground + peças cburnett), seta do melhor lance, barra de avaliação, gráfico SVG navegável, painel de linhas candidatas, lista de lances com badges coloridos e resumo da partida.
-- **Navegação por teclado**: ← → (anterior/próximo), Home/End (primeiro/último).
-- **Persistência local (SQLite)**: cache de posições com cobertura por profundidade alcançada, orçamento de tempo e MultiPV e histórico de partidas revisadas com reabertura instantânea, reanálise e exclusão.
-- **Autoconfiguração do motor**: ajusta o orçamento total de `Threads` (núcleos físicos) e `Hash` (~20% da RAM, entre 512 MB e 4 GB) automaticamente. A revisão distribui esse orçamento entre até três instâncias persistentes do Stockfish.
-- **Engine embarcada**: usa exclusivamente o Stockfish 18 distribuído como sidecar, com botão de teste nas configurações.
-- **Tema claro/escuro** aplicado antes da pintura para evitar _flash_.
+As posições analisadas ficam em um cache local para reaproveitar resultados
+compatíveis em novas revisões. O histórico permite reabrir, reanalisar e
+excluir partidas.
 
-Os parâmetros dos perfis automáticos ficam em `app/src-tauri/src/review/profiles.json`, compartilhado pelo núcleo Rust e pela interface. Tempos, MultiPV e limites de refinamento são definidos apenas nesse arquivo.
+**Atalhos na revisão:** `←` / `→` para o lance anterior ou seguinte;
+`Home` / `End` para o início ou fim da partida. A interface tem temas claro
+e escuro.
 
-## Stack
+## Rodar o projeto
 
-| Camada            | Tecnologias                                                                    |
-| ----------------- | ------------------------------------------------------------------------------ |
-| App               | Tauri **2**                                                                    |
-| Backend           | Rust (edição 2021), `tokio`, `rusqlite` (SQLite _bundled_), `sysinfo`, `serde` |
-| Frontend          | React **19**, TypeScript **6**, Effect **3**, Vite **8**, Tailwind CSS **4**   |
-| Xadrez            | `shakmaty` + `pgn-reader` (análise Rust), `chess.js` + `chessground` (interface)                                |
-| Motor             | Stockfish **18** (sidecar baixado em build/dev)                                |
-| Testes            | Vitest **4** + Effect TestClock (frontend), `cargo test` (backend)             |
-| Gestor de pacotes | **Bun**                                                                        |
+Você precisa de [Bun](https://bun.sh), Node.js, Rust com Cargo e das
+[dependências de sistema do Tauri 2](https://tauri.app/start/prerequisites/).
+O download inicial do Stockfish exige internet; depois disso, a revisão
+funciona offline.
 
-## Pré-requisitos
-
-- [Bun](https://bun.sh) e Node.js
-- Toolchain Rust (edição 2021) + `cargo`
-- [Dependências de sistema do Tauri 2](https://tauri.app/start/prerequisites/) para o seu SO
-- Conexão com a internet na primeira execução/build (para baixar o Stockfish)
-
-## Instalação
-
-Todos os comandos abaixo devem ser executados dentro de `app/`.
+Execute os comandos abaixo em `app/`:
 
 ```bash
-# 1. Instalar dependências do frontend
 bun install
-
-# 2. Baixar o sidecar do Stockfish 18 para a plataforma atual
 node scripts/fetch-stockfish.mjs
-# (idempotente: pula se src-tauri/binaries/stockfish-<triple> já existir)
+bun run tauri dev
 ```
 
-## Uso
+O script baixa o Stockfish para a plataforma atual e pula o download se o
+sidecar já existir. O Tauri inicia o Vite automaticamente.
+
+Para gerar o aplicativo e os instaladores nativos, também em `app/`:
 
 ```bash
-# Desenvolvimento (frontend + backend com hot-reload)
-bun run tauri dev
-
-# Build de produção (gera instaladores nativos)
 bun run tauri build
 ```
 
-## Scripts disponíveis
-
-| Script          | Comando                                               | Descrição                                       |
-| --------------- | ----------------------------------------------------- | ----------------------------------------------- |
-| `dev`           | `vite`                                                | Dev server do frontend (porta 1420)             |
-| `build`         | `tsc && vite build`                                   | Type-check + build de produção                  |
-| `preview`       | `vite preview`                                        | Pré-visualiza o build                           |
-| `tauri`         | `tauri`                                               | Pass-through para a CLI do Tauri                |
-| `test`          | `vitest run`                                          | Roda os testes do frontend uma vez              |
-| `test:watch`    | `vitest`                                              | Testes do frontend em modo _watch_              |
-| `typecheck`     | `tsc --noEmit && tsc --noEmit -p tsconfig.tests.json` | Type-check da aplicação e dos testes            |
-| `bench:rust`    | `cargo test --release --lib benchmark_analysis_overhead -- --ignored --nocapture` | Benchmark do pipeline Rust com engine falsa (script muda para `src-tauri/`) |
-| `bench:uci-ipc` | `tauri dev -- -- --bench-uci-ipc`                     | Benchmark do transporte UCI histórico (não da sessão Rust) |
-
-## Testes
-
-```bash
-# Frontend: lógica pura, adapters e lifecycle com fakes
-bun run lint
-bun run typecheck
-bun run test
-
-# Backend: núcleo, pipeline, sessões, SQLite e integração com Stockfish real
-cargo test                # dentro de app/src-tauri/
-```
-
-Para medir o custo do pipeline Rust (engine falsa, sem Stockfish/IPC/renderização):
-
-```bash
-bun run bench:rust
-```
-
-O teste `real_stockfish_sidecar_cache_history_reopen_and_live_cancellation` usa o
-plugin de shell real, SQLite em memória e o Stockfish embarcado. Ele exige o
-sidecar e verifica revisão manual/adaptativa, cache, histórico, reabertura,
-análise ao vivo e teardown; seus dados não são gravados no histórico do usuário.
-
-## Estrutura do projeto
-
-- `app/src-tauri/src/review/`: núcleo puro de xadrez/acurácia/fases/ECO,
-  seleção adaptativa, transporte UCI, pipeline injetável, repository e sessão.
-- `app/src-tauri/src/review/core/`: leitura de PGN, operações de posição,
-  detecção de fases/aberturas e montagem da revisão em módulos separados;
-  `core.rs` mantém a interface usada pelo pipeline.
-- `app/src-tauri/src/review/session/`: execução da sessão (`task.rs`),
-  validação de payloads (`validation.rs`) e testes (`tests.rs`);
-  `session.rs` contém o registro de sessões e os comandos IPC.
-- `app/src-tauri/src/db/`: cache, histórico, migrações e estatísticas SQLite.
-- Testes unitários ficam em arquivos `tests.rs` junto ao módulo correspondente
-  ou em `review/tests/`, com engines e repository falsos compartilhados.
-  `app/src-tauri/tests/` contém o teste de integração externo. Os módulos de
-  testes são compilados somente com `#[cfg(test)]`.
-- `app/src/lib/review-session.ts`: aquisição scoped da sessão e aplicação de
-  eventos ao store; `backend.ts` define o serviço `AnalysisSessions` e
-  `tauri-backend.ts` fornece o adapter IPC.
-- `app/src/lib/review-protocol.ts`: schemas dos resultados e eventos estruturados.
-- `app/src/lib/review-store.ts`: navegação e variações; `use-review.ts` faz a ponte React.
-- `app/src/data/eco.json`: dataset único, incorporado no backend Rust.
-- `app/src-tauri/src/engine.rs`: framing compartilhado de stdout e benchmark UCI histórico.
-
 ## Arquitetura
 
-- **Sessão de análise em Rust**: o backend possui o Stockfish e executa revisão
-  manual por tempo/profundidade, triagem/refinamento adaptativos, SAN, fases,
-  classificação, acurácia, cache e salvamento. React recebe progresso e resultados.
-- **Contrato de sessão**: `review_session_open` registra uma sessão pertencente à
-  janela; comandos posteriores solicitam análise ao vivo, cancelamento e fechamento.
-  Channels transmitem eventos com ID de sessão, sequência e ID do pedido ao vivo.
-  O frontend valida os schemas e descarta respostas antigas.
-- **Análise automática paralela**: até três workers persistentes dividem os
-  recursos de CPU/hash e começam a triagem em blocos de quatro posições
-  consecutivas. Um worker prefere refinamentos críticos disponíveis; os demais
-  avançam na triagem. Sem candidatos, todos ajudam na triagem; ao terminá-la,
-  todos atendem aos refinamentos, priorizando alta criticidade antes da média.
-  A base compara alternativas em todas as posições: MultiPV 3 por 180 ms
-  no rápido e MultiPV 5 por 450 ms no profundo. O refinamento concentra o
-  tempo em menos linhas: contexto usa MultiPV 1 por 500 ms / 1,8 s;
-  classificação incerta e complexidade usam MultiPV 2 por 750 ms / 2,7 s;
-  tática usa MultiPV 2 por 1 s / 3,6 s. Perdas/viradas fortes e promoções
-  usam MultiPV 2 por 2 s / 6 s; mate usa o mesmo tempo com MultiPV 1.
-  Cada refinamento busca todos os lances legais, podendo descobrir alternativas
-  ausentes na triagem. Ambas as etapas alimentam o cache geral por FEN.
-  As linhas da triagem são preservadas separadamente, com suas profundidades,
-  e exibidas como avaliações preliminares, sem misturá-las às linhas refinadas.
-  Um refinamento mais raso não substitui a avaliação da triagem.
-  Proximidade dos limites de classificação e instabilidade da busca são sinais
-  distintos: a última compara as duas últimas profundidades da PV principal,
-  procurando mudança de lance ou de pelo menos 2 pontos percentuais de avaliação.
-  A prioridade é mate, promoção, perda/virada, incerteza, tática,
-  complexidade e contexto; pares obrigatórios precedem os opcionais.
-  Pares críticos têm prioridade sobre todos os opcionais e não são descartados
-  pela cota. Perdas e incerteza refinam o par antes/depois; complexidade
-  isolada não expande vizinhos. O contexto segue a sequência jogada de capturas,
-  xeques, promoções e respostas forçadas, ou a avaliação ainda instável (variação
-  de pelo menos 2 pontos percentuais de chance de vitória). Para ao alcançar
-  um lance calmo e estável, com no máximo 2 passos no rápido e 4 no profundo.
-  Entregar pelo menos uma peça menor na resposta, com perda líquida de pelo
-  menos dois peões e sem queda maior que 5 pontos percentuais na avaliação,
-  sinaliza um possível sacrifício; trocas equilibradas não ativam esse sinal.
-  Esse sinal é uma heurística, sem afirmar que o sacrifício é correto.
-  O contexto tem orçamento simples e está sujeito à cota de 15% (mínimo 4) /
-  25% (mínimo 6), depois das decisões selecionadas.
-  Candidatos obrigatórios podem começar assim que o par antes/depois está pronto;
-  candidatos sujeitos à cota aguardam a classificação completa. Resultados
-  atualizam o gráfico na ordem de conclusão; triagem e refinamento alimentam
-  o buffer de cache. O prefetch inicial consulta apenas a triagem; refinamentos
-  consultam os alvos selecionados em lotes por orçamento. As buscas continuam
-  durante as gravações, feitas a cada oito posições e no final.
-  O modo manual usa uma única engine com os recursos configurados.
-- **Lifecycle estruturado**: um semáforo Rust é compartilhado entre sessões e o
-  probe das configurações. Um único dono controla todo o pool. As engines
-  interrompidas ou com falha são descartadas e a terminação de todos os processos
-  é aguardada antes de outra aquisição. A navegação mantém o pedido
-  mais recente. Fechar a sessão aguarda processo, persistência e operações de DB;
-  sair do aplicativo aguarda o teardown das sessões.
-- **Núcleo puro e I/O injetada**: o pipeline usa `EngineFactory`/`EnginePort` e
-  `Repository`. Testes com engines falsas verificam o comportamento do Rust,
-  enquanto o teste real usa o mesmo adapter shell da produção.
-- **Frontend Effect**: aquisição, IPC e cleanup permanecem scoped, com erros
-  tagged e schemas nas fronteiras. `review-store.ts` conserva estado e transições;
-  nenhum loop de busca, cálculo de revisão ou salvamento roda em React.
-- **SQLite compatível**: cache com PK `(fen, reached_depth, multipv)` e contexto
-  de origem. Pedidos de profundidade aceitam avaliações suficientemente profundas;
-  pedidos por tempo aceitam somente entradas de tempo com orçamento suficiente.
-  Consultas são em lote e gravações incrementais usam transações a cada oito
-  posições. Novas entradas registram a cobertura MultiPV efetivamente produzida
-  e a menor profundidade das linhas armazenadas. Posições com poucos lances
-  legais cobrem pedidos maiores quando todas as alternativas foram avaliadas.
-  O adapter rejeita payloads incompletos, slots duplicados e linhas rasas em
-  pedidos de profundidade, inclusive de entradas antigas. JSON corrompido vira
-  miss; erros de I/O continuam fatais.
-- **Histórico**: a sessão publica o resultado antes de salvar em best-effort.
-  `games_get_review_config` normaliza revisões antigas em Rust, preservando o
-  formato SQLite/JSON e a reabertura sem nova busca.
-- **Acurácia**: usa a avaliação real da posição inicial e da entrada de cada
-  fase, inclusive em partidas com FEN. Ao reabrir revisões de modelos anteriores,
-  recalcula a acurácia a partir das avaliações salvas, sem nova busca.
-- **PGN como fonte de verdade**: o backend revalida a linha principal e respeita
-  FEN de início. Metadados são derivados do PGN, sem novos campos duplicados.
-  `chess.js` permanece na prévia de importação e nas interações do tabuleiro.
-- **Tema pre-paint**: inicializado por script em `index.html`, antes do React.
+**Rust cuida da revisão; React cuida da interface.** O aplicativo usa Tauri 2
+para conectar as duas partes.
 
-## Configurações do usuário
+| Parte | Responsabilidade | Código |
+| --- | --- | --- |
+| Análise | PGN, regras de xadrez, classificação, acurácia, aberturas e seleção adaptativa | [`review/`](app/src-tauri/src/review/) |
+| Motor e sessões | Comunicação UCI com o Stockfish, fila de trabalho, análise ao vivo e encerramento dos processos | [`review/session/`](app/src-tauri/src/review/session/) |
+| Persistência | Cache de posições, histórico e migrações SQLite | [`db/`](app/src-tauri/src/db/) |
+| Integração frontend | IPC com Effect, validação de eventos e ciclo de vida da sessão | [`review-session.ts`](app/src/lib/review-session.ts) e [`review-protocol.ts`](app/src/lib/review-protocol.ts) |
+| Estado da revisão | Navegação e variações no tabuleiro | [`review-store.ts`](app/src/lib/review-store.ts) |
 
-Persistidas em `localStorage` na chave `engineroom.settings.v1`:
+O backend revalida o PGN e respeita posições iniciais definidas por FEN.
+A interface usa `chess.js` na prévia de importação e nas interações do
+tabuleiro, renderizado com Chessground.
 
-- **`theme`**: `"dark"` (padrão) ou `"light"`.
+A análise automática divide os recursos entre até três processos Stockfish;
+a manual usa um. As sessões têm acesso exclusivo ao motor e aguardam a
+limpeza dos processos ao encerrar. Na análise ao vivo, o pedido de navegação
+mais recente tem prioridade e eventos antigos são descartados.
+
+Os orçamentos dos perfis automáticos ficam em
+[`profiles.json`](app/src-tauri/src/review/profiles.json), compartilhado pelo
+backend e pela interface. O cache considera profundidade alcançada, orçamento
+de tempo e cobertura de linhas candidatas para decidir o que pode reutilizar.
+
+## Verificação
+
+Em `app/`, verifique o frontend:
+
+```bash
+bun run lint && bun run typecheck && bun run test
+```
+
+Em `app/src-tauri/`, verifique o backend:
+
+```bash
+cargo test
+```
+
+Os testes cobrem o núcleo, o pipeline, as sessões e a persistência com engines
+falsas, além da integração com o Stockfish real. Essa integração exige o
+sidecar baixado no setup.
 
 ## Licença
 
-GPL-3.0-or-later. Veja [LICENSE](LICENSE) e
+GPL-3.0-or-later. Veja [LICENSE](LICENSE) e os
 [avisos de terceiros](THIRD_PARTY_NOTICES.md).
