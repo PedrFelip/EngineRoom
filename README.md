@@ -98,6 +98,32 @@ plugin de shell real, SQLite em memória e o Stockfish embarcado. Ele exige o
 sidecar e verifica revisão manual/adaptativa, cache, histórico, reabertura,
 análise ao vivo e teardown; seus dados não são gravados no histórico do usuário.
 
+## Lançamento de versões
+
+O workflow `.github/workflows/release.yml` cria um **release em draft** quando
+um push ou merge na `main` altera a versão em `app/src-tauri/tauri.conf.json`.
+No mesmo commit, sincronize a versão em `app/package.json`,
+`app/src-tauri/Cargo.toml` e no pacote `app` de `app/src-tauri/Cargo.lock`.
+Versões divergentes interrompem o workflow antes da criação do release.
+
+A tag `v<versão>` aponta para o commit do bump. As builds de Linux x86_64
+(AppImage) e Windows x64 (NSIS/MSI), com Stockfish 18, são anexadas ao draft
+`EngineRoom v<versão>`. Aguarde o sucesso das duas builds e publique o draft
+manualmente pelo GitHub. Versões com sufixo, como `0.10.0-rc.1`, são marcadas
+como pre-release.
+
+O workflow também aceita push de uma tag `v<versão>` correspondente aos manifests
+ou execução manual no ref selecionado. Para retomar um draft incompleto,
+reexecute o workflow no mesmo commit/tag. Uma tag que aponta para outro commit
+ou um release já publicado impede novos uploads. Alterações nos manifests sem
+mudança de versão não criam um release automaticamente.
+
+Os testes do seletor de versões podem ser executados na raiz com Python 3.11+:
+
+```bash
+python3 -m unittest discover -s .github/scripts -p 'test_*.py'
+```
+
 ## Estrutura do projeto
 
 - `app/src-tauri/src/review/`: núcleo puro de xadrez/acurácia/fases/ECO,
