@@ -20,8 +20,6 @@ const PLOT_RADIUS = 8
 
 type PhaseBand = {
   key: 'opening' | 'middlegame' | 'endgame'
-  label: string
-  compactLabel: string
   x1: number
   x2: number
   opacity: number
@@ -63,24 +61,18 @@ export default function EvalGraph({
       ? [
           {
             key: 'opening',
-            label: 'Abertura',
-            compactLabel: 'Abr.',
             x1: x(0),
             x2: x(phases.openingEnd),
             opacity: 0.035,
           },
           {
             key: 'middlegame',
-            label: 'Meio-jogo',
-            compactLabel: 'Meio',
             x1: x(phases.openingEnd),
             x2: x(phases.middlegameEnd),
             opacity: 0.06,
           },
           {
             key: 'endgame',
-            label: 'Final',
-            compactLabel: 'Final',
             x1: x(phases.middlegameEnd),
             x2: x(n - 1),
             opacity: 0.035,
@@ -107,158 +99,128 @@ export default function EvalGraph({
   return (
     <div ref={ref} className='w-full min-w-0'>
       {ready && (
-        <>
-          <button
-            type='button'
-            onClick={handleClick}
-            className='eval-graph block w-full cursor-pointer select-none overflow-hidden rounded-[calc(var(--radius)+2px)] border border-border/70 bg-card/60 shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background'
-            aria-label='Gráfico de avaliação. Clique para navegar até um lance.'
+        <button
+          type='button'
+          onClick={handleClick}
+          className='eval-graph block w-full cursor-pointer select-none overflow-hidden rounded-[calc(var(--radius)+2px)] border border-border/70 bg-card/60 shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background'
+          aria-label='Gráfico de avaliação. Clique para navegar até um lance.'
+        >
+          <svg
+            width={w}
+            height={HEIGHT}
+            viewBox={`0 0 ${w} ${HEIGHT}`}
+            preserveAspectRatio='none'
+            role='img'
+            aria-hidden='true'
+            className='block h-[104px] w-full sm:h-[124px] lg:h-[136px]'
           >
-            <svg
-              width={w}
-              height={HEIGHT}
-              viewBox={`0 0 ${w} ${HEIGHT}`}
-              preserveAspectRatio='none'
-              role='img'
-              aria-hidden='true'
-              className='block h-[104px] w-full sm:h-[124px] lg:h-[136px]'
-            >
-              <defs>
-                <clipPath id='eval-graph-plot'>
-                  <rect
-                    x={0}
-                    y={0}
-                    width={w}
-                    height={HEIGHT}
-                    rx={PLOT_RADIUS}
-                  />
-                </clipPath>
-                <clipPath id='eval-graph-white-half'>
-                  <rect x={0} y={PLOT_TOP} width={w} height={PLOT_HEIGHT / 2} />
-                </clipPath>
-                <clipPath id='eval-graph-black-half'>
-                  <rect
-                    x={0}
-                    y={MIDLINE_Y}
-                    width={w}
-                    height={PLOT_HEIGHT / 2}
-                  />
-                </clipPath>
-              </defs>
+            <defs>
+              <clipPath id='eval-graph-plot'>
+                <rect x={0} y={0} width={w} height={HEIGHT} rx={PLOT_RADIUS} />
+              </clipPath>
+              <clipPath id='eval-graph-white-half'>
+                <rect x={0} y={PLOT_TOP} width={w} height={PLOT_HEIGHT / 2} />
+              </clipPath>
+              <clipPath id='eval-graph-black-half'>
+                <rect x={0} y={MIDLINE_Y} width={w} height={PLOT_HEIGHT / 2} />
+              </clipPath>
+            </defs>
 
-              <g clipPath='url(#eval-graph-plot)'>
-                {bands.map((b) => (
-                  <rect
-                    key={b.key}
-                    x={Math.min(b.x1, b.x2)}
-                    y={0}
-                    width={Math.max(0, b.x2 - b.x1)}
-                    height={HEIGHT}
-                    fill='var(--color-foreground)'
-                    opacity={b.opacity}
-                  />
-                ))}
-
-                {[25, 50, 75].map((pct) => (
-                  <line
-                    key={pct}
-                    x1={0}
-                    y1={graphY(pct)}
-                    x2={w}
-                    y2={graphY(pct)}
-                    stroke='var(--color-border)'
-                    strokeWidth={pct === 50 ? 1 : 0.75}
-                    strokeDasharray={pct === 50 ? undefined : '2 4'}
-                  />
-                ))}
-
-                {bands.slice(0, -1).map((b) => (
-                  <line
-                    key={`${b.key}-boundary`}
-                    x1={b.x2}
-                    y1={PLOT_TOP}
-                    x2={b.x2}
-                    y2={HEIGHT - PLOT_BOTTOM}
-                    stroke='var(--color-border)'
-                    strokeWidth={1}
-                    strokeDasharray='3 4'
-                  />
-                ))}
-
-                <path
-                  d={areaPath}
-                  fill='var(--evalgraph-white-fill)'
-                  clipPath='url(#eval-graph-white-half)'
+            <g clipPath='url(#eval-graph-plot)'>
+              {bands.map((b) => (
+                <rect
+                  key={b.key}
+                  x={Math.min(b.x1, b.x2)}
+                  y={0}
+                  width={Math.max(0, b.x2 - b.x1)}
+                  height={HEIGHT}
+                  fill='var(--color-foreground)'
+                  opacity={b.opacity}
                 />
-                <path
-                  d={areaPath}
-                  fill='var(--evalgraph-black-fill)'
-                  clipPath='url(#eval-graph-black-half)'
-                />
-
-                <path
-                  d={linePath}
-                  fill='none'
-                  stroke='var(--evalgraph-white-line)'
-                  strokeWidth={1.75}
-                  strokeLinejoin='round'
-                  strokeLinecap='round'
-                  clipPath='url(#eval-graph-white-half)'
-                />
-                <path
-                  d={linePath}
-                  fill='none'
-                  stroke='var(--evalgraph-black-line)'
-                  strokeWidth={1.75}
-                  strokeLinejoin='round'
-                  strokeLinecap='round'
-                  clipPath='url(#eval-graph-black-half)'
-                />
-
-                <line
-                  x1={cx}
-                  y1={PLOT_TOP}
-                  x2={cx}
-                  y2={HEIGHT - PLOT_BOTTOM}
-                  stroke='var(--color-ring)'
-                  strokeWidth={1}
-                />
-                {Number.isFinite(currentValue) && (
-                  <circle
-                    cx={cx}
-                    cy={cy}
-                    r={4}
-                    fill='var(--color-background)'
-                    stroke={
-                      cy <= MIDLINE_Y
-                        ? 'var(--evalgraph-white-line)'
-                        : 'var(--evalgraph-black-line)'
-                    }
-                    strokeWidth={1.75}
-                    className={pulse ? 'eval-graph-tip' : undefined}
-                  />
-                )}
-              </g>
-            </svg>
-          </button>
-          {bands.length > 0 ? (
-            <div className='mt-1.5 flex h-5 overflow-hidden rounded-[calc(var(--radius)-3px)] border border-border/70 bg-muted/40 px-0.5 text-[8px] font-medium tracking-wide text-muted-foreground uppercase sm:text-[9px]'>
-              {bands.map((band) => (
-                <span
-                  key={band.key}
-                  className='flex min-w-0 items-center justify-center truncate border-r border-border/70 last:border-r-0'
-                  style={{
-                    flexGrow: Math.max(0, band.x2 - band.x1),
-                    flexBasis: 0,
-                  }}
-                >
-                  <span className='sm:hidden'>{band.compactLabel}</span>
-                  <span className='hidden sm:inline'>{band.label}</span>
-                </span>
               ))}
-            </div>
-          ) : null}
-        </>
+
+              {[25, 50, 75].map((pct) => (
+                <line
+                  key={pct}
+                  x1={0}
+                  y1={graphY(pct)}
+                  x2={w}
+                  y2={graphY(pct)}
+                  stroke='var(--color-border)'
+                  strokeWidth={pct === 50 ? 1 : 0.75}
+                  strokeDasharray={pct === 50 ? undefined : '2 4'}
+                />
+              ))}
+
+              {bands.slice(0, -1).map((b) => (
+                <line
+                  key={`${b.key}-boundary`}
+                  x1={b.x2}
+                  y1={PLOT_TOP}
+                  x2={b.x2}
+                  y2={HEIGHT - PLOT_BOTTOM}
+                  stroke='var(--color-border)'
+                  strokeWidth={1}
+                  strokeDasharray='3 4'
+                />
+              ))}
+
+              <path
+                d={areaPath}
+                fill='var(--evalgraph-white-fill)'
+                clipPath='url(#eval-graph-white-half)'
+              />
+              <path
+                d={areaPath}
+                fill='var(--evalgraph-black-fill)'
+                clipPath='url(#eval-graph-black-half)'
+              />
+
+              <path
+                d={linePath}
+                fill='none'
+                stroke='var(--evalgraph-white-line)'
+                strokeWidth={1.75}
+                strokeLinejoin='round'
+                strokeLinecap='round'
+                clipPath='url(#eval-graph-white-half)'
+              />
+              <path
+                d={linePath}
+                fill='none'
+                stroke='var(--evalgraph-black-line)'
+                strokeWidth={1.75}
+                strokeLinejoin='round'
+                strokeLinecap='round'
+                clipPath='url(#eval-graph-black-half)'
+              />
+
+              <line
+                x1={cx}
+                y1={PLOT_TOP}
+                x2={cx}
+                y2={HEIGHT - PLOT_BOTTOM}
+                stroke='var(--color-ring)'
+                strokeWidth={1}
+              />
+              {Number.isFinite(currentValue) && (
+                <circle
+                  cx={cx}
+                  cy={cy}
+                  r={4}
+                  fill='var(--color-background)'
+                  stroke={
+                    cy <= MIDLINE_Y
+                      ? 'var(--evalgraph-white-line)'
+                      : 'var(--evalgraph-black-line)'
+                  }
+                  strokeWidth={1.75}
+                  className={pulse ? 'eval-graph-tip' : undefined}
+                />
+              )}
+            </g>
+          </svg>
+        </button>
       )}
     </div>
   )
