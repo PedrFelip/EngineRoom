@@ -10,6 +10,7 @@ import {
   type StorageStats,
 } from '../../lib/storage'
 import { useModalFocus } from '../../lib/use-modal-focus'
+import { SegmentedControl } from '../ui/segmented-control'
 import ReviewEngineSettings from './ReviewEngineSettings'
 import SettingsPreferences from './SettingsPreferences'
 
@@ -199,40 +200,38 @@ export default function SettingsModal({
           </button>
         </div>
 
-        <nav
-          aria-label='Seções das configurações'
-          className='grid shrink-0 grid-cols-3 gap-1 border-b border-edge-soft bg-panel-2/40 px-3 py-2 sm:px-5'
-        >
-          {[
-            { id: 'preferences', label: 'Preferências', icon: Palette },
-            { id: 'analysis', label: 'Análise', icon: Cpu },
-            { id: 'storage', label: 'Armazenamento', icon: Database },
-          ].map(({ id, label, icon: Icon }) => (
-            <button
-              key={id}
-              type='button'
-              aria-pressed={section === id}
-              aria-controls={
-                id === 'analysis'
-                  ? 'settings-analysis settings-engine'
-                  : `settings-${id}`
-              }
-              disabled={acting || confirmTarget !== null}
-              onClick={() => {
-                setSection(id)
-                contentRef.current?.scrollTo({ top: 0 })
-              }}
-              className={`flex min-w-0 flex-col items-center justify-center gap-1.5 rounded-xl px-1 py-2.5 text-[11px] font-medium transition sm:flex-row sm:gap-2 sm:px-3 sm:text-sm ${
-                section === id
-                  ? 'bg-brand/10 text-brand'
-                  : 'text-ink-dim hover:bg-panel-3 hover:text-ink'
-              }`}
-            >
-              <Icon size={15} aria-hidden='true' />
-              {label}
-            </button>
-          ))}
-        </nav>
+        <div className='shrink-0 border-b border-edge-soft px-3 py-2 sm:px-5'>
+          <SegmentedControl
+            label='Seções das configurações'
+            value={section}
+            disabled={acting || confirmTarget !== null}
+            stackedOnMobile
+            options={[
+              {
+                id: 'preferences',
+                label: 'Preferências',
+                icon: Palette,
+                controls: 'settings-preferences',
+              },
+              {
+                id: 'analysis',
+                label: 'Análise',
+                icon: Cpu,
+                controls: 'settings-analysis settings-engine',
+              },
+              {
+                id: 'storage',
+                label: 'Armazenamento',
+                icon: Database,
+                controls: 'settings-storage',
+              },
+            ]}
+            onChange={(nextSection) => {
+              setSection(nextSection)
+              contentRef.current?.scrollTo({ top: 0 })
+            }}
+          />
+        </div>
         <div
           ref={contentRef}
           className='grid min-h-0 gap-4 overflow-y-auto overscroll-contain px-3 py-4 sm:px-5'

@@ -10,6 +10,7 @@ import type { ReviewStore } from '../../lib/review-store'
 import { useSettings } from '../../lib/settings-context'
 import MoveList from '../MoveList'
 import ReviewSummary from '../ReviewSummary'
+import { SegmentedControl } from '../ui/segmented-control'
 
 interface Props {
   store: ReviewStore
@@ -29,6 +30,7 @@ export default memo(function ReviewSidebar({
   const [selectedView, setView] = useState<'moves' | 'analysis' | 'summary'>(
     'moves',
   )
+  const [learningColor, setLearningColor] = useState<'all' | 'w' | 'b'>('all')
   const view =
     !analysisEnabled && selectedView === 'analysis' ? 'moves' : selectedView
   const result = useStore(store, (state) => state.result)
@@ -43,33 +45,24 @@ export default memo(function ReviewSidebar({
       (move) =>
         move.classification === 'erro' || move.classification === 'blunder',
     ) ?? []
+  const filteredCriticalMoves = criticalMoves.filter(
+    (move) => learningColor === 'all' || move.color === learningColor,
+  )
+  const tabs = [
+    { id: 'moves', label: 'Lances', icon: ListOrdered },
+    ...(analysisEnabled
+      ? [{ id: 'analysis', label: 'Análise', icon: ListTree } as const]
+      : []),
+    { id: 'summary', label: 'Resumo', icon: ChartNoAxesCombined },
+  ] as const
   return (
     <aside className='flex min-w-0 flex-col gap-3'>
-      <fieldset
-        className='surface-glass flex gap-1 rounded-2xl border border-edge p-1.5'
-        aria-label='Painéis da revisão'
-      >
-        {(
-          [
-            { id: 'moves', label: 'Lances', icon: ListOrdered },
-            ...(analysisEnabled
-              ? [{ id: 'analysis', label: 'Análise', icon: ListTree } as const]
-              : []),
-            { id: 'summary', label: 'Resumo', icon: ChartNoAxesCombined },
-          ] as const
-        ).map(({ id, label, icon: Icon }) => (
-          <button
-            key={id}
-            type='button'
-            aria-pressed={view === id}
-            onClick={() => setView(id)}
-            className={`flex flex-1 items-center justify-center gap-1.5 rounded-xl px-2 py-2.5 text-xs font-medium transition ${view === id ? 'bg-panel-3 text-ink shadow-sm' : 'text-ink-faint hover:bg-panel-2 hover:text-ink'}`}
-          >
-            <Icon size={14} aria-hidden='true' />
-            {label}
-          </button>
-        ))}
-      </fieldset>
+      <SegmentedControl
+        label='Painéis da revisão'
+        value={view}
+        options={tabs}
+        onChange={setView}
+      />
       <div hidden={view !== 'analysis'}>{analysis}</div>
       {result && (
         <div hidden={view !== 'summary'}>
@@ -128,8 +121,25 @@ export default memo(function ReviewSidebar({
           <p className='mt-1.5 text-xs leading-relaxed text-ink-faint'>
             Volte aos erros e explore o que poderia ter sido jogado.
           </p>
+          <SegmentedControl
+            className='mt-3'
+            label='Filtrar momentos para aprender por cor'
+            value={learningColor}
+            options={[
+              { id: 'all', label: 'Todas' },
+              { id: 'w', label: 'Brancas' },
+              { id: 'b', label: 'Pretas' },
+            ]}
+            onChange={setLearningColor}
+          />
+          {filteredCriticalMoves.length === 0 && (
+            <p role='status' className='mt-3 text-xs text-ink-faint'>
+              Nenhum erro das {learningColor === 'w' ? 'brancas' : 'pretas'}{' '}
+              nesta partida.
+            </p>
+          )}
           <div className='mt-3 flex max-h-28 flex-wrap gap-1.5 overflow-y-auto'>
-            {criticalMoves.map((move) => (
+            {filteredCriticalMoves.map((move) => (
               <button
                 key={move.ply}
                 type='button'

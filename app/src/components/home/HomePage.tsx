@@ -29,6 +29,7 @@ import PgnImporter from '../PgnImporter'
 import ReviewedGamesList from '../ReviewedGamesList'
 import SettingsModal from '../settings/SettingsModal'
 import { Button } from '../ui/button'
+import { SegmentedControl } from '../ui/segmented-control'
 
 import HomeHeader from './HomeHeader'
 import HowItWorks from './HowItWorks'
@@ -386,30 +387,39 @@ export default function HomePage({ onStart, active = true }: Props) {
               </div>
               <ol
                 aria-label='Etapas da nova análise'
-                className='mb-3 flex gap-3 text-xs'
+                className='new-review-steps'
+                data-step={step}
               >
-                {(['import', 'configure'] as const).map((item, index) => (
-                  <li
-                    key={item}
-                    aria-current={step === item ? 'step' : undefined}
-                    className={
-                      step === item
-                        ? 'flex items-center gap-2 text-ink'
-                        : 'flex items-center gap-2 text-ink-faint'
-                    }
-                  >
-                    <span className='flex size-6 items-center justify-center rounded-full border border-edge bg-panel-2'>
-                      {step === 'configure' && index === 0 ? (
-                        <Check size={12} aria-hidden='true' />
-                      ) : (
-                        index + 1
+                {(['import', 'configure'] as const).map((item, index) => {
+                  let state = 'upcoming'
+                  if (step === item) state = 'current'
+                  else if (index === 0) state = 'complete'
+                  return (
+                    <li
+                      key={item}
+                      aria-current={step === item ? 'step' : undefined}
+                      className='new-review-step'
+                      data-state={state}
+                    >
+                      <span className='new-review-step-marker'>
+                        {step === 'configure' && index === 0 ? (
+                          <Check size={12} aria-hidden='true' />
+                        ) : (
+                          index + 1
+                        )}
+                      </span>
+                      {index === 0 ? 'Partida' : 'Análise'}
+                      {step === 'configure' && index === 0 && (
+                        <span className='sr-only'> — concluída</span>
                       )}
-                    </span>
-                    {index === 0 ? 'Partida' : 'Análise'}
-                  </li>
-                ))}
+                    </li>
+                  )
+                })}
               </ol>
-              <div hidden={step !== 'import'}>
+              <div
+                hidden={step !== 'import'}
+                className={step === 'import' ? 'new-review-stage' : undefined}
+              >
                 <PgnImporter
                   value={pgn}
                   onChange={setPgn}
@@ -481,39 +491,24 @@ export default function HomePage({ onStart, active = true }: Props) {
               </div>
 
               {step === 'configure' && (
-                <>
+                <div className='new-review-stage'>
                   <div className='my-3 h-px bg-edge-soft' />
 
-                  <div className='mb-3 grid grid-cols-2 gap-1 rounded-lg bg-panel-3/60 p-1'>
-                    <button
-                      type='button'
-                      aria-pressed={analysisKind !== 'manual'}
-                      onClick={() =>
-                        setAnalysisKind((current) =>
-                          current === 'manual' ? 'auto-fast' : current,
-                        )
-                      }
-                      className={`rounded-md px-3 py-2 text-sm font-semibold transition ${
-                        analysisKind !== 'manual'
-                          ? 'bg-panel text-ink shadow-sm'
-                          : 'text-ink-dim hover:text-ink'
-                      }`}
-                    >
-                      Automático
-                    </button>
-                    <button
-                      type='button'
-                      aria-pressed={analysisKind === 'manual'}
-                      onClick={() => setAnalysisKind('manual')}
-                      className={`rounded-md px-3 py-2 text-sm font-semibold transition ${
-                        analysisKind === 'manual'
-                          ? 'bg-panel text-ink shadow-sm'
-                          : 'text-ink-dim hover:text-ink'
-                      }`}
-                    >
-                      Manual
-                    </button>
-                  </div>
+                  <SegmentedControl
+                    className='mb-3'
+                    label='Modo de análise'
+                    value={analysisKind === 'manual' ? 'manual' : 'auto'}
+                    options={[
+                      { id: 'auto', label: 'Automático' },
+                      { id: 'manual', label: 'Manual' },
+                    ]}
+                    onChange={(value) =>
+                      setAnalysisKind((current) => {
+                        if (value === 'manual') return 'manual'
+                        return current === 'manual' ? 'auto-fast' : current
+                      })
+                    }
+                  />
 
                   {analysisKind === 'manual' ? (
                     <EngineTierSelector
@@ -574,7 +569,7 @@ export default function HomePage({ onStart, active = true }: Props) {
                       </p>
                     </div>
                   )}
-                </>
+                </div>
               )}
               <Button
                 disabled={!canStart}

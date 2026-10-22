@@ -19,7 +19,7 @@ export function ReviewNavButton({
       disabled={disabled}
       aria-label={label}
       title={label}
-      variant='ghost'
+      variant='outline'
       size='icon'
       className='rounded-xl text-ink-dim transition hover:bg-panel-3 disabled:opacity-30'
     >
