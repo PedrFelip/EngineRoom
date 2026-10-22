@@ -6,6 +6,13 @@ export function selectVariationMove(state: ReviewStoreSnapshot) {
   return variation ? nodeAtPath(variation.roots, variation.path) : null
 }
 
+export function selectDisplayedPly(state: ReviewStoreSnapshot) {
+  const variation = state.variation
+  return variation
+    ? variation.basePly + variation.path.length
+    : state.currentPly
+}
+
 export function selectDisplayedFen(state: ReviewStoreSnapshot) {
   return (
     selectVariationMove(state)?.fen ??

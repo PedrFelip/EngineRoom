@@ -50,7 +50,7 @@ const ReviewSummary = memo(function ReviewSummary({
   const blackCounts = countBy(blackMoves)
 
   return (
-    <Card className='overflow-hidden bg-card/75 shadow-sm'>
+    <Card className='surface-glass overflow-hidden rounded-2xl bg-card/75 shadow-sm'>
       <div className='flex items-start justify-between gap-4 border-b border-border px-4 py-4'>
         <div>
           <h2 className='text-sm font-semibold text-foreground'>
@@ -133,10 +133,13 @@ function AccuracyPanel({
     <div
       className={
         isWhite
-          ? 'flex h-20 min-w-0 items-center justify-center bg-white px-3 text-center text-black'
-          : 'flex h-20 min-w-0 items-center justify-center bg-black px-3 text-center text-white'
+          ? 'flex h-24 min-w-0 flex-col gap-2 items-center justify-center bg-white px-3 text-center text-black'
+          : 'flex h-24 min-w-0 flex-col gap-2 items-center justify-center bg-black px-3 text-center text-white'
       }
     >
+      <span className='text-[10px] font-semibold uppercase tracking-widest opacity-60'>
+        {isWhite ? 'Brancas' : 'Pretas'}
+      </span>
       <span className='font-mono text-2xl font-bold leading-none tabular-nums'>
         {value.toFixed(1)}%
       </span>

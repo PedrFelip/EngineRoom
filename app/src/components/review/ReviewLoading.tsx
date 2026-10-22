@@ -1,5 +1,5 @@
-import { Clock3 } from 'lucide-react'
-import { type ReactNode, useMemo } from 'react'
+import { ArrowLeft, Clock3 } from 'lucide-react'
+import { type ReactNode, useEffect, useMemo, useRef } from 'react'
 import { ThinkingOrb } from 'thinking-orbs'
 import { formatEngineTag } from '../../lib/engine-tag'
 import type { ReviewProgress } from '../../lib/review-session'
@@ -25,6 +25,7 @@ interface Props {
   elapsedSeconds: number
   partialWinPcts: readonly number[]
   progress: ReviewProgress
+  onCancel: () => void
 }
 
 export default function ReviewLoading({
@@ -32,7 +33,14 @@ export default function ReviewLoading({
   elapsedSeconds,
   partialWinPcts,
   progress,
+  onCancel,
 }: Props) {
+  const titleRef = useRef<HTMLHeadingElement>(null)
+  useEffect(() => {
+    titleRef.current?.focus({ preventScroll: true })
+    titleRef.current?.scrollIntoView({ block: 'nearest' })
+  }, [])
+
   const graphValues = useMemo(() => {
     const values = [...partialWinPcts]
     values.length = Math.max(values.length, config.meta.plies + 1)
@@ -50,6 +58,14 @@ export default function ReviewLoading({
   return (
     <div className='flex min-h-full items-center justify-center px-4 py-10'>
       <div className='w-full max-w-3xl'>
+        <button
+          type='button'
+          onClick={onCancel}
+          className='mb-8 flex items-center gap-2 rounded-xl px-3 py-2 text-sm text-ink-dim transition hover:bg-panel-3 hover:text-ink'
+        >
+          <ArrowLeft size={15} aria-hidden='true' />
+          Cancelar e voltar
+        </button>
         <div
           className='mb-4 hidden justify-center motion-safe:flex'
           aria-hidden='true'
@@ -59,7 +75,11 @@ export default function ReviewLoading({
         <div className='mb-2 text-center text-xs font-semibold tracking-[0.14em] text-brand uppercase'>
           Engine em análise
         </div>
-        <h1 className='mb-1 text-center text-xl font-bold text-ink'>
+        <h1
+          ref={titleRef}
+          tabIndex={-1}
+          className='mb-1 scroll-mt-24 rounded text-center text-xl font-bold text-ink focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-brand'
+        >
           {config.meta.white} <span className='text-ink-faint'>vs</span>{' '}
           {config.meta.black}
         </h1>
@@ -76,7 +96,7 @@ export default function ReviewLoading({
           })}
         </p>
 
-        <div className='elev-card mb-4 rounded-2xl border border-edge bg-panel-2/70 p-5'>
+        <div className='surface-glass elev-card mb-4 rounded-3xl border border-edge p-5 sm:p-7'>
           <div className='mb-3 flex items-end justify-between gap-4'>
             <div>
               <p className='text-sm font-semibold text-ink'>{stageLabel}</p>

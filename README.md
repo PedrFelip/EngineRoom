@@ -6,6 +6,9 @@ Aplicativo desktop para **revisão de partidas de xadrez** com o motor **Stockfi
 
 ## Funcionalidades
 
+- **Interface** minimalista com a paleta original, navegação fixa durante a rolagem para nova análise e histórico, fluxo de importação em duas etapas e configurações organizadas por seção.
+- **Histórico navegável** com busca por jogador nas partidas carregadas e confirmação antes de excluir uma revisão.
+- **Revisão guiada** com painéis de lances, análise e resumo, atalhos para erros e cancelamento durante a análise com preservação do rascunho de importação. Linhas candidatas e gráfico ficam nos painéis laterais para reduzir a rolagem sem diminuir o tabuleiro.
 - **Importação de PGN** por arrastar e soltar, seletor de arquivos (`.pgn`, `.txt`) ou colagem direta, com validação ao vivo (nomes, Elos, resultado, número de lances).
 - **Análise com Stockfish 18** em profundidade fixa por posição, com três níveis de qualidade (Rápido / Equilibrado / Profundo) e de 1 a 5 linhas candidatas por lance.
 - **Classificação de lances** no estilo chess.com: Melhor / Excelente / Bom / Imprecisão / Erro / Erro Grave / Livro, com acurácia percentual por cor.
