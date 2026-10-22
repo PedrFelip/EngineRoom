@@ -1,4 +1,4 @@
-import { Check, CircleAlert, Cpu, Database, X } from 'lucide-react'
+import { Check, CircleAlert, Cpu, Database, Palette, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { runUi } from '../../lib/effect/ui-runtime'
 import { type ProbeResult, probeEngine } from '../../lib/engine'
@@ -9,6 +9,7 @@ import {
   getStorageStats,
   type StorageStats,
 } from '../../lib/storage'
+import { useModalFocus } from '../../lib/use-modal-focus'
 import ReviewEngineSettings from './ReviewEngineSettings'
 import SettingsPreferences from './SettingsPreferences'
 
@@ -26,6 +27,9 @@ export default function SettingsModal({
   onClose,
   onGamesCleared,
 }: Props) {
+  const [section, setSection] = useState('preferences')
+  const dialogRef = useRef<HTMLDivElement>(null)
+  const contentRef = useRef<HTMLDivElement>(null)
   const [testing, setTesting] = useState(false)
   const [result, setResult] = useState<ProbeResult | null>(null)
   const [stats, setStats] = useState<StorageStats | null>(null)
@@ -50,6 +54,37 @@ export default function SettingsModal({
       probeController.current?.abort()
     }
   }, [isOpen])
+
+  const cancelRef = useRef<HTMLButtonElement>(null)
+  const clearCacheRef = useRef<HTMLButtonElement>(null)
+  const clearGamesRef = useRef<HTMLButtonElement>(null)
+  const previousConfirmation = useRef<ConfirmTarget | null>(null)
+
+  function requestClose() {
+    if (acting) return
+    if (confirmTarget) setConfirmTarget(null)
+    else onClose()
+  }
+
+  useModalFocus(isOpen, dialogRef, requestClose)
+
+  useEffect(() => {
+    if (!isOpen) return
+    setConfirmTarget(null)
+    setResult(null)
+    setStats(null)
+  }, [isOpen])
+
+  useEffect(() => {
+    if (!isOpen) return
+    if (confirmTarget) cancelRef.current?.focus()
+    else if (previousConfirmation.current) {
+      const trigger =
+        previousConfirmation.current === 'cache' ? clearCacheRef : clearGamesRef
+      trigger.current?.focus()
+    }
+    previousConfirmation.current = confirmTarget
+  }, [confirmTarget, isOpen])
 
   if (!isOpen) return null
 
@@ -114,27 +149,49 @@ export default function SettingsModal({
   }
 
   return (
-    <div className='fixed inset-0 z-50 flex items-center justify-center p-4'>
+    <div className='fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4'>
       <button
         type='button'
         aria-label='Fechar'
-        onClick={onClose}
+        onClick={requestClose}
         className='dialog-backdrop absolute inset-0 cursor-default'
       />
       <div
+        ref={dialogRef}
+        tabIndex={-1}
         role='dialog'
         aria-modal='true'
         aria-labelledby='settings-title'
-        className='surface-glass elev-dialog relative z-10 w-full max-w-lg overflow-hidden rounded-2xl border border-edge'
+        className='surface-glass elev-dialog relative z-10 flex max-h-[calc(100dvh-1rem)] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-edge outline-none sm:max-h-[calc(100dvh-2rem)] sm:rounded-3xl'
       >
+        <div
+          className='sr-only'
+          role='status'
+          aria-live='polite'
+          aria-atomic='true'
+        >
+          {storageError}
+          {result &&
+            (result.ok
+              ? (result.name ?? 'Engine respondeu (uciok)')
+              : (result.error ?? 'Falhou'))}
+        </div>
         {/* Header */}
-        <div className='flex items-center justify-between border-b border-edge-soft px-5 py-4'>
-          <h2 id='settings-title' className='text-base font-bold text-ink'>
-            Configurações
-          </h2>
+        <div className='flex shrink-0 items-center justify-between gap-3 border-b border-edge-soft px-4 py-3 sm:px-5 sm:py-4'>
+          <div>
+            <h2
+              id='settings-title'
+              className='text-lg font-semibold tracking-tight text-ink sm:text-xl'
+            >
+              Configurações
+            </h2>
+            <p className='mt-1 text-xs text-ink-dim'>
+              Ajustes salvos automaticamente neste computador.
+            </p>
+          </div>
           <button
             type='button'
-            onClick={onClose}
+            onClick={requestClose}
             className='rounded-md p-1.5 text-ink-dim transition hover:bg-panel-3 hover:text-ink'
             aria-label='Fechar'
           >
@@ -142,10 +199,51 @@ export default function SettingsModal({
           </button>
         </div>
 
-        <div className='max-h-[70vh] space-y-6 overflow-y-auto px-5 py-5'>
-          <SettingsPreferences />
+        <nav
+          aria-label='Seções das configurações'
+          className='grid shrink-0 grid-cols-3 gap-1 border-b border-edge-soft bg-panel-2/40 px-3 py-2 sm:px-5'
+        >
+          {[
+            { id: 'preferences', label: 'Preferências', icon: Palette },
+            { id: 'analysis', label: 'Análise', icon: Cpu },
+            { id: 'storage', label: 'Armazenamento', icon: Database },
+          ].map(({ id, label, icon: Icon }) => (
+            <button
+              key={id}
+              type='button'
+              aria-pressed={section === id}
+              aria-controls={
+                id === 'analysis'
+                  ? 'settings-analysis settings-engine'
+                  : `settings-${id}`
+              }
+              disabled={acting || confirmTarget !== null}
+              onClick={() => {
+                setSection(id)
+                contentRef.current?.scrollTo({ top: 0 })
+              }}
+              className={`flex min-w-0 flex-col items-center justify-center gap-1.5 rounded-xl px-1 py-2.5 text-[11px] font-medium transition sm:flex-row sm:gap-2 sm:px-3 sm:text-sm ${
+                section === id
+                  ? 'bg-brand/10 text-brand'
+                  : 'text-ink-dim hover:bg-panel-3 hover:text-ink'
+              }`}
+            >
+              <Icon size={15} aria-hidden='true' />
+              {label}
+            </button>
+          ))}
+        </nav>
+        <div
+          ref={contentRef}
+          className='grid min-h-0 gap-4 overflow-y-auto overscroll-contain px-3 py-4 sm:px-5'
+        >
+          <div id='settings-preferences' hidden={section !== 'preferences'}>
+            <div className='grid gap-4 sm:grid-cols-2'>
+              <SettingsPreferences />
+            </div>
+          </div>
 
-          <section>
+          <section id='settings-analysis' hidden={section !== 'analysis'}>
             <h3 className='mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-ink-dim'>
               <Cpu size={13} strokeWidth={2.2} aria-hidden='true' />
               Análise na revisão
@@ -154,13 +252,13 @@ export default function SettingsModal({
           </section>
 
           {/* Engine */}
-          <section>
+          <section id='settings-engine' hidden={section !== 'analysis'}>
             <h3 className='mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-ink-dim'>
               <Cpu size={13} strokeWidth={2.2} aria-hidden='true' />
               Engine Stockfish
             </h3>
 
-            <div className='rounded-lg border border-edge-soft p-3'>
+            <div className='rounded-2xl border border-edge-soft bg-panel-2/40 p-4'>
               <span>
                 <span className='block text-sm font-medium text-ink'>
                   Stockfish embarcado
@@ -171,7 +269,7 @@ export default function SettingsModal({
               </span>
             </div>
 
-            <div className='mt-3 flex items-center gap-3'>
+            <div className='mt-3 flex flex-wrap items-center gap-3'>
               <button
                 type='button'
                 onClick={test}
@@ -205,12 +303,12 @@ export default function SettingsModal({
           </section>
 
           {/* Armazenamento */}
-          <section>
+          <section id='settings-storage' hidden={section !== 'storage'}>
             <h3 className='mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-ink-dim'>
               <Database size={13} strokeWidth={2.2} aria-hidden='true' />
               Armazenamento
             </h3>
-            <div className='rounded-lg border border-edge-soft p-3'>
+            <div className='rounded-2xl border border-edge-soft bg-panel-2/40 p-4'>
               <dl className='space-y-1.5 text-sm'>
                 <div className='flex items-center justify-between gap-3'>
                   <dt className='text-ink-dim'>Cache de posições</dt>
@@ -242,11 +340,12 @@ export default function SettingsModal({
                   <p className='text-blunder'>
                     {confirmTarget === 'cache'
                       ? 'Apagar todo o cache de posições? As próximas análises vão precisar recalcular.'
-                      : 'Apagar TODO o histórico de partidas? Esta ação não pode ser desfeita.'}
+                      : 'Apagar todo o histórico de partidas? Esta ação não pode ser desfeita.'}
                   </p>
                   <div className='mt-2 flex justify-end gap-2'>
                     <button
                       type='button'
+                      ref={cancelRef}
                       onClick={() => setConfirmTarget(null)}
                       disabled={acting}
                       className='rounded-md border border-edge bg-panel-2 px-3 py-1 font-medium text-ink-dim transition hover:bg-panel-3 hover:text-ink disabled:opacity-60'
@@ -273,6 +372,7 @@ export default function SettingsModal({
                 <div className='mt-3 flex flex-wrap gap-2'>
                   <button
                     type='button'
+                    ref={clearCacheRef}
                     onClick={() => setConfirmTarget('cache')}
                     disabled={acting}
                     className='rounded-md border border-edge bg-panel-2 px-3 py-1.5 text-xs font-medium text-ink-dim transition hover:bg-blunder/15 hover:text-blunder disabled:opacity-60'
@@ -281,6 +381,7 @@ export default function SettingsModal({
                   </button>
                   <button
                     type='button'
+                    ref={clearGamesRef}
                     onClick={() => setConfirmTarget('games')}
                     disabled={acting}
                     className='rounded-md border border-edge bg-panel-2 px-3 py-1.5 text-xs font-medium text-ink-dim transition hover:bg-blunder/15 hover:text-blunder disabled:opacity-60'
@@ -293,10 +394,10 @@ export default function SettingsModal({
           </section>
         </div>
 
-        <div className='flex justify-end border-t border-edge-soft px-5 py-3'>
+        <div className='flex shrink-0 justify-end border-t border-edge-soft px-5 py-3'>
           <button
             type='button'
-            onClick={onClose}
+            onClick={requestClose}
             className='rounded-lg bg-brand px-5 py-2 text-sm font-semibold text-bg transition hover:bg-brand-strong'
           >
             Concluído
