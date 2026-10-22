@@ -365,23 +365,6 @@
   );
 }
 
-.brand-mark {
-  position: relative;
-  overflow: hidden;
-  box-shadow: 0 8px 22px -10px color-mix(in srgb, var(--brand) 80%, transparent);
-}
-.brand-mark::after {
-  position: absolute;
-  right: -0.45rem;
-  bottom: -0.45rem;
-  width: 1.35rem;
-  height: 1.35rem;
-  content: '';
-  border: 3px solid color-mix(in srgb, var(--bg) 80%, transparent);
-  border-radius: 0.3rem;
-  opacity: 0.75;
-}
-
 .section-kicker {
   font-size: 0.6875rem;
   font-weight: 700;
@@ -389,10 +372,6 @@
   line-height: 1;
   text-transform: uppercase;
   color: var(--brand);
-}
-
-.analysis-surface {
-  position: relative;
 }
 
 .board-frame {
@@ -594,4 +573,159 @@
 }
 .eval-graph-tip {
   animation: eval-graph-tip-pulse 1.15s ease-in-out infinite;
+}
+
+/* Floating navigation and layered surfaces use the existing theme palette. */
+.home-screen {
+  min-height: 100dvh;
+  background: var(--bg);
+}
+
+.home-navigation {
+  position: sticky;
+  top: 1rem;
+  z-index: 30;
+  border: 1px solid var(--edge);
+  border-radius: 1.25rem;
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
+  backdrop-filter: blur(20px) saturate(1.1);
+  -webkit-backdrop-filter: blur(20px) saturate(1.1);
+  box-shadow: var(--elev-dialog), inset 0 1px 0 var(--edge-soft);
+}
+
+.home-nav-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  min-height: 2.5rem;
+  padding: 0.5rem 0.875rem;
+  border-radius: 0.75rem;
+  color: var(--ink-dim);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  transition: color 160ms ease, background-color 160ms ease;
+}
+
+.home-nav-link:hover {
+  background: var(--panel-2);
+  color: var(--ink);
+}
+
+.home-nav-link:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 3px;
+}
+
+.home-screen section[id],
+.home-screen aside[id],
+.home-screen h1[tabindex],
+.home-screen h2[tabindex] {
+  scroll-margin-top: 7rem;
+}
+
+@supports not (backdrop-filter: blur(1px)) {
+  .home-navigation {
+    background: var(--panel);
+  }
+}
+
+.home-surface {
+  border: 1px solid var(--edge);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--panel) 92%, transparent);
+  box-shadow: 0 2px 5px rgb(0 0 0 / 3%), 0 16px 40px -30px rgb(0 0 0 / 22%);
+}
+
+.home-screen .home-import-tabs {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  gap: 4px;
+}
+
+.home-screen .home-import-tabs button[aria-pressed='true'] {
+  background: var(--panel-2);
+  color: var(--ink);
+  border-color: transparent;
+  box-shadow: inset 0 -2px var(--brand);
+}
+
+.home-screen .home-dropzone {
+  border-radius: 12px;
+}
+
+.home-screen button {
+  transition: background-color 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.home-screen button:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 3px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .home-screen button,
+  .home-nav-link {
+    transition: none;
+  }
+}
+
+.home-nav-link[aria-current='page'] {
+  background: var(--panel-3);
+  color: var(--ink);
+  box-shadow: inset 0 1px 0 var(--edge-soft);
+}
+
+.review-shell > header {
+  border: 1px solid var(--edge);
+  border-radius: 1.25rem;
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
+  padding: clamp(0.875rem, 2vw, 1.25rem);
+  box-shadow: var(--elev-card);
+}
+
+.review-shell button:focus-visible,
+[role='dialog'] button:focus-visible,
+[role='dialog'] input:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 3px;
+}
+
+@media (max-width: 639px) {
+  .home-navigation {
+    top: 0.5rem;
+    gap: 0.5rem;
+    padding: 0.5rem;
+  }
+
+  .home-nav-link {
+    min-width: 2.5rem;
+    padding: 0.5rem;
+  }
+}
+
+/* Leave more room for the board on short desktop windows. */
+@media (min-width: 1024px) and (max-height: 700px) {
+  .review-shell {
+    gap: 1rem;
+    padding-top: 1rem;
+    padding-bottom: 1rem;
+  }
+
+  .review-shell > header {
+    padding: 0.875rem 1rem;
+  }
+
+  .review-shell > header .section-kicker {
+    margin-bottom: 0.375rem;
+  }
+}
+
+@layer components {
+  h1[tabindex='-1']:focus,
+  h2[tabindex='-1']:focus {
+    outline: 2px solid var(--brand);
+    outline-offset: 4px;
+  }
 }

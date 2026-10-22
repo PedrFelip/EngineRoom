@@ -1,10 +1,13 @@
 import { Check, ClipboardPaste, FileUp, Upload } from 'lucide-react'
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Badge } from './ui/badge'
 import { Button } from './ui/button'
 
 interface Props {
   value: string
+  active?: boolean
+  valid?: boolean
+  onReadingChange?: (reading: boolean) => void
   onChange: (pgn: string) => void
   /** Arquivos são validados imediatamente, sem aguardar o debounce da digitação. */
   onImport?: (pgn: string) => void
@@ -21,33 +24,89 @@ function readFile(file: File): Promise<string> {
   })
 }
 
-export default function PgnImporter({ value, onChange, onImport }: Props) {
-  const [mode, setMode] = useState<Mode>('file')
+export default function PgnImporter({
+  value,
+  active = true,
+  valid = false,
+  onReadingChange,
+  onChange,
+  onImport,
+}: Props) {
+  const [mode, setMode] = useState<Mode>(value.trim() ? 'paste' : 'file')
   const [dragActive, setDragActive] = useState(false)
   const [fileName, setFileName] = useState<string | null>(null)
+  const [reading, setReading] = useState(false)
+  const [readError, setReadError] = useState<string | null>(null)
+  const readRequest = useRef(0)
   const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (!active) {
+      readRequest.current++
+      setReading(false)
+      onReadingChange?.(false)
+    }
+    return () => {
+      readRequest.current++
+      onReadingChange?.(false)
+    }
+  }, [active, onReadingChange])
 
   const handleFile = useCallback(
     async (file: File) => {
-      if (!file) return
-      const text = await readFile(file)
-      setFileName(file.name)
-      const change = onImport ?? onChange
-      change(text)
+      const request = ++readRequest.current
+      setReading(true)
+      onReadingChange?.(true)
+      setFileName(null)
+      setReadError(null)
+      try {
+        const text = await readFile(file)
+        if (request !== readRequest.current) return
+        if (!text.trim()) {
+          setReadError('O arquivo está vazio. Escolha um PGN com uma partida.')
+          return
+        }
+        setFileName(file.name)
+        const change = onImport ?? onChange
+        change(text)
+      } catch {
+        if (request === readRequest.current) {
+          setReadError(
+            'Não foi possível ler o arquivo. Tente selecioná-lo novamente.',
+          )
+        }
+      } finally {
+        if (request === readRequest.current) {
+          setReading(false)
+          onReadingChange?.(false)
+        }
+      }
     },
-    [onChange, onImport],
+    [onChange, onImport, onReadingChange],
   )
+  let importStatus = ''
+  if (reading) importStatus = 'Lendo arquivo PGN…'
+  else if (fileName && valid) importStatus = `Arquivo carregado: ${fileName}`
 
   return (
     <div>
-      <div className='mb-3 flex w-fit rounded-[calc(var(--control-radius)+2px)] border border-edge bg-panel-2/60 p-1'>
+      <div className='home-import-tabs mb-3 flex w-fit rounded-[calc(var(--control-radius)+2px)] border border-edge bg-panel-2/60 p-1'>
         {(['file', 'paste'] as Mode[]).map((m) => (
           <Button
             key={m}
-            onClick={() => setMode(m)}
+            aria-pressed={mode === m}
+            onClick={() => {
+              setMode(m)
+              setReadError(null)
+              if (m === 'paste') {
+                readRequest.current++
+                setReading(false)
+                onReadingChange?.(false)
+              }
+            }}
             size='sm'
             variant={mode === m ? 'default' : 'ghost'}
-            className={`h-8 px-3 ${mode === m ? '' : 'text-ink-faint hover:text-ink'}`}
+            className={`h-8 px-2.5 sm:px-3 ${mode === m ? '' : 'text-ink-faint hover:text-ink'}`}
           >
             {m === 'file' ? (
               <>
@@ -80,16 +139,16 @@ export default function PgnImporter({ value, onChange, onImport }: Props) {
               if (file) void handleFile(file)
             }}
             onClick={() => inputRef.current?.click()}
-            className={`flex w-full cursor-pointer flex-col items-center justify-center rounded-[var(--control-radius)] border border-dashed px-6 py-8 text-center outline-none transition focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg ${
+            className={`home-dropzone flex w-full cursor-pointer flex-col items-center justify-center rounded-[var(--control-radius)] border border-dashed px-4 py-6 text-center outline-none transition focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg sm:px-6 sm:py-6 ${
               dragActive
                 ? 'border-brand bg-brand/10'
                 : 'border-edge bg-panel-2/40 hover:border-ink-faint hover:bg-panel-2/70'
             }`}
           >
             <Upload
-              size={36}
+              size={28}
               strokeWidth={1.6}
-              className='mb-3 text-ink-faint'
+              className='mb-3 text-brand'
               aria-hidden='true'
             />
 
@@ -98,10 +157,10 @@ export default function PgnImporter({ value, onChange, onImport }: Props) {
               <span className='font-semibold text-brand'>.pgn</span>
             </p>
             <p className='mt-0.5 text-xs text-ink-faint'>
-              ou clique para procurar
+              {reading ? 'Lendo arquivo…' : 'ou clique para procurar'}
             </p>
 
-            {fileName && (
+            {fileName && valid && (
               <Badge variant='outline' className='mt-3'>
                 <Check size={12} strokeWidth={2.5} aria-hidden='true' />
                 {fileName}
@@ -125,12 +184,17 @@ export default function PgnImporter({ value, onChange, onImport }: Props) {
         <div className='relative'>
           <textarea
             value={value}
-            onChange={(e) => onChange(e.target.value)}
+            onChange={(e) => {
+              setFileName(null)
+              setReadError(null)
+              onChange(e.target.value)
+            }}
+            aria-label='Notação PGN da partida'
             spellCheck={false}
             placeholder={
               '[Event "Partida amistosa"]\n[White "Magnus Carlsen"]\n[Black "Hikaru Nakamura"]\n\n1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6 5. O-O Be7 *'
             }
-            className='h-44 w-full resize-none rounded-[var(--control-radius)] border border-edge bg-panel-2/40 p-3 font-mono text-[13px] leading-relaxed text-ink outline-none transition-[border-color,box-shadow] placeholder:text-ink-faint focus:border-brand focus:ring-2 focus:ring-brand/25'
+            className='h-36 w-full resize-y rounded-[var(--control-radius)] border border-edge bg-panel-2/40 p-3 font-mono text-[13px] leading-relaxed text-ink outline-none transition-[border-color,box-shadow] placeholder:text-ink-faint focus:border-brand focus:ring-2 focus:ring-brand/25'
           />
           {value && (
             <span className='absolute bottom-2.5 right-3 rounded bg-panel-3/80 px-1.5 py-0.5 font-mono text-[10px] text-ink-faint'>
@@ -138,6 +202,14 @@ export default function PgnImporter({ value, onChange, onImport }: Props) {
             </span>
           )}
         </div>
+      )}
+      <p className='sr-only' role='status'>
+        {importStatus}
+      </p>
+      {readError && (
+        <p role='alert' className='mt-3 text-sm text-blunder'>
+          {readError}
+        </p>
       )}
     </div>
   )
