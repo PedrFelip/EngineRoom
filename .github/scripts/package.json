@@ -1,0 +1,10 @@
+{
+  "name": "engineroom-release-checks",
+  "private": true,
+  "scripts": {
+    "test": "node --test *.test.cjs"
+  },
+  "devDependencies": {
+    "release-please": "17.3.0"
+  }
+}

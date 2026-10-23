@@ -2,12 +2,93 @@ name: Release
 
 on:
   push:
-    tags:
-      - 'v*'
+    branches: [main]
   workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag da release a retomar (por exemplo v1.0.0)
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+# Serialize release preparation, uploads, publication and retries.
+concurrency:
+  group: release-main
+  cancel-in-progress: false
 
 jobs:
+  prepare:
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      actions: write
+    outputs:
+      should_release: ${{ steps.draft.outputs.should_release }}
+      release_id: ${{ steps.draft.outputs.release_id }}
+      sha: ${{ steps.draft.outputs.sha }}
+      tag: ${{ steps.draft.outputs.tag }}
+      published: ${{ steps.draft.outputs.published }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Require main
+        env:
+          WORKFLOW_REF: ${{ github.ref }}
+        run: test "$WORKFLOW_REF" = refs/heads/main
+      - name: Prepare version PR or draft release
+        if: github.event_name == 'push'
+        id: release
+        uses: googleapis/release-please-action@8b8fd2cc23b2e18957157a9d923d75aa0c6f6ad5 # v4.4.1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          target-branch: main
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+      - name: Run CI on bot PRs
+        if: github.event_name == 'push'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await require('./.github/scripts/automation.cjs').checkReleasePRs({ github, context })
+      - name: Select or resume draft at its immutable commit
+        id: draft
+        uses: actions/github-script@v7
+        env:
+          RELEASE_TAG: ${{ inputs.tag || steps.release.outputs['app--tag_name'] }}
+        with:
+          script: |
+            await require('./.github/scripts/automation.cjs').selectDraft({ github, context, core }, process.env.RELEASE_TAG)
+      - name: Checkout exact release commit
+        if: steps.draft.outputs.should_release == 'true'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.draft.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        if: steps.draft.outputs.should_release == 'true'
+        with:
+          python-version: '3.12'
+      - name: Validate tag, manifests and changelog
+        if: steps.draft.outputs.should_release == 'true'
+        env:
+          RELEASE_TAG: ${{ steps.draft.outputs.tag }}
+        run: python .github/scripts/release_version.py --tag "$RELEASE_TAG"
+
+  checks:
+    needs: prepare
+    if: needs.prepare.outputs.should_release == 'true'
+    uses: ./.github/workflows/checks.yml
+    with:
+      ref: ${{ needs.prepare.outputs.sha }}
+
   build:
+    needs: [prepare, checks]
+    if: needs.prepare.outputs.should_release == 'true'
     permissions:
       contents: write
     strategy:
@@ -17,10 +98,13 @@ jobs:
           - platform: ubuntu-22.04
             args: --bundles appimage
           - platform: windows-latest
-            args: ''
+            args: --bundles nsis,msi
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          persist-credentials: false
 
       - name: Install Linux dependencies
         if: matrix.platform == 'ubuntu-22.04'
@@ -30,6 +114,12 @@ jobs:
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.3'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -43,19 +133,68 @@ jobs:
         run: bun install --frozen-lockfile
         working-directory: app
 
+      - name: Restore Stockfish sidecar cache
+        id: stockfish-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: app/src-tauri/binaries/stockfish-*
+          key: stockfish-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('app/scripts/fetch-stockfish.mjs') }}
+
       - name: Fetch Stockfish sidecar
         run: bun scripts/fetch-stockfish.mjs
         working-directory: app
 
-      - name: Build and release
+      # Save immediately so a later app build failure does not lose the download.
+      - name: Save Stockfish sidecar cache
+        if: steps.stockfish-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: app/src-tauri/binaries/stockfish-*
+          key: ${{ steps.stockfish-cache.outputs.cache-primary-key }}
+
+      - name: Build and upload to draft
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           projectPath: app
-          tagName: ${{ github.ref_name }}
-          releaseName: 'EngineRoom ${{ github.ref_name }}'
-          releaseBody: 'Instaladores para Windows (NSIS/MSI) e Linux (AppImage). Inclui Stockfish 18 como sidecar.'
-          releaseDraft: true
-          prerelease: false
+          releaseId: ${{ needs.prepare.outputs.release_id }}
           args: ${{ matrix.args }}
+
+  publish:
+    needs: [prepare, checks, build]
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Publish only with all installers present
+        uses: actions/github-script@v7
+        env:
+          RELEASE_ID: ${{ needs.prepare.outputs.release_id }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+          RELEASE_SHA: ${{ needs.prepare.outputs.sha }}
+        with:
+          script: |
+            await require('./.github/scripts/automation.cjs').publish(
+              { github, context }, process.env.RELEASE_ID, process.env.RELEASE_TAG, process.env.RELEASE_SHA)
+
+  sync:
+    needs: [prepare, publish]
+    if: always() && (needs.publish.result == 'success' || needs.prepare.outputs.published == 'true')
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+      pull-requests: write
+      actions: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Open synchronization PR and run its CI
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await require('./.github/scripts/automation.cjs').syncDevelop({ github, context })
