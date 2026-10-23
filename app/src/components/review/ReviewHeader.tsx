@@ -1,4 +1,5 @@
 import { ArrowLeft, MoreHorizontal } from 'lucide-react'
+import { useEffect, useRef } from 'react'
 import { formatEngineTag } from '../../lib/engine-tag'
 import { resultLabel } from '../../lib/pgn'
 import { useSettings } from '../../lib/settings-context'
@@ -19,20 +20,30 @@ export default function ReviewHeader({
   onExit,
   onOpenAnalysisSettings,
 }: Props) {
+  const titleRef = useRef<HTMLHeadingElement>(null)
+  useEffect(() => {
+    titleRef.current?.focus({ preventScroll: true })
+    titleRef.current?.scrollIntoView({ block: 'nearest' })
+  }, [])
+
   const reviewEngineEnabled = useSettings(
     (state) => state.settings.reviewEngineEnabled,
   )
   const updateSettings = useSettings((state) => state.updateSettings)
 
   return (
-    <header className='flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4'>
+    <header className='flex flex-col gap-3 border-b border-edge-soft pb-3 sm:flex-row sm:items-center sm:justify-between sm:gap-6'>
       <div className='min-w-0'>
         <p className='section-kicker mb-1'>análise de partida</p>
-        <h1 className='truncate text-lg font-bold text-ink'>
+        <h1
+          ref={titleRef}
+          tabIndex={-1}
+          className='scroll-mt-24 truncate rounded text-xl font-semibold tracking-tight text-ink focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-brand sm:text-2xl'
+        >
           {config.meta.white} <span className='text-ink-faint'>vs</span>{' '}
           {config.meta.black}
         </h1>
-        <p className='truncate text-sm text-ink-dim'>
+        <p className='mt-1 text-xs leading-relaxed text-ink-dim'>
           {resultLabel(config.meta.result)} · {Math.ceil(config.meta.plies / 2)}{' '}
           lances ·{' '}
           {formatEngineTag({
@@ -76,11 +87,12 @@ export default function ReviewHeader({
         </div>
         <Button
           onClick={onExit}
+          aria-label='Voltar e analisar uma nova partida'
           variant='outline'
           className='ml-auto bg-panel-2 sm:ml-0'
         >
           <ArrowLeft size={16} strokeWidth={2} aria-hidden='true' />
-          <span className='hidden sm:inline'>Nova partida</span>
+          <span>Nova partida</span>
         </Button>
       </div>
     </header>

@@ -25,7 +25,7 @@ export default function SettingsPreferences() {
           <Palette size={13} strokeWidth={2.2} aria-hidden='true' />
           Aparência
         </h3>
-        <div className='inline-flex rounded-lg border border-edge bg-panel-2 p-1'>
+        <div className='flex rounded-2xl border border-edge-soft bg-panel-2/40 p-1.5'>
           {(['dark', 'light'] as Theme[]).map((t) => {
             const active = settings.theme === t
             return (
@@ -33,8 +33,11 @@ export default function SettingsPreferences() {
                 key={t}
                 type='button'
                 onClick={() => setTheme(t)}
-                className={`flex items-center gap-2 rounded-md px-4 py-1.5 text-sm font-medium transition ${
-                  active ? 'bg-brand text-bg' : 'text-ink-dim hover:text-ink'
+                aria-pressed={active}
+                className={`flex min-w-0 flex-1 items-center justify-center gap-2 rounded-xl px-2 py-3 text-sm font-medium transition sm:px-4 ${
+                  active
+                    ? 'bg-brand/15 text-brand'
+                    : 'text-ink-dim hover:text-ink'
                 }`}
               >
                 {t === 'dark' ? (
@@ -55,7 +58,7 @@ export default function SettingsPreferences() {
           <Volume2 size={13} strokeWidth={2.2} aria-hidden='true' />
           Som
         </h3>
-        <div className='rounded-lg border border-edge-soft p-3'>
+        <div className='rounded-2xl border border-edge-soft bg-panel-2/40 p-4'>
           <label className='flex cursor-pointer items-center justify-between gap-3'>
             <span className='min-w-0 flex-1'>
               <span className='block text-sm font-medium text-ink'>
@@ -74,11 +77,13 @@ export default function SettingsPreferences() {
             />
           </label>
           <label
-            className={`mt-3 flex items-center gap-3 ${
+            className={`mt-3 flex items-center gap-2 sm:gap-3 ${
               settings.soundEnabled ? '' : 'cursor-not-allowed opacity-50'
             }`}
           >
-            <span className='w-16 shrink-0 text-xs text-ink-dim'>Volume</span>
+            <span className='w-14 shrink-0 text-xs text-ink-dim sm:w-16'>
+              Volume
+            </span>
             <input
               type='range'
               min={0}
@@ -95,7 +100,7 @@ export default function SettingsPreferences() {
               aria-label='Volume do som'
             />
             <span className='w-10 shrink-0 text-right font-mono text-xs text-ink-dim'>
-              {Math.round(settings.soundVolume * 100)}
+              {Math.round(settings.soundVolume * 100)}%
             </span>
           </label>
         </div>
