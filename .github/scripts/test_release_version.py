@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 import unittest
 
-from release_version import CONFIG, select_release, validate_versions
+from release_version import CONFIG, validate_release, validate_versions
 
 
 class ReleaseVersionTests(unittest.TestCase):
@@ -20,9 +20,7 @@ class ReleaseVersionTests(unittest.TestCase):
     def test_repository_manifests_are_synchronized(self):
         root = Path(__file__).resolve().parents[2]
         version = validate_versions(lambda path: (root / path).read_text())
-        self.assertEqual(
-            select_release(version, "workflow_dispatch", {})["tag"], f"v{version}"
-        )
+        self.assertIsInstance(version, str)
 
     def test_valid_manifests(self):
         for version in ["1.2.3", "0.10.0-rc.1", "1.2.3+build.7"]:
@@ -48,40 +46,40 @@ class ReleaseVersionTests(unittest.TestCase):
             with self.subTest(version=version), self.assertRaises(ValueError):
                 validate_versions(self.manifests(version).__getitem__)
 
-    def test_branch_push_only_releases_changed_version(self):
-        event = {"ref": "refs/heads/main"}
-        self.assertEqual(
-            select_release("1.2.3", "push", event, "1.2.3")["should_release"], "false"
-        )
-        self.assertEqual(
-            select_release("1.2.3", "push", event, "1.2.2")["should_release"], "true"
-        )
+    def release_files(self):
+        files = self.manifests()
+        files[".release-please-manifest.json"] = '{"app": "1.2.3"}'
+        files["app/CHANGELOG.md"] = "# Changelog\n\n## [1.2.3](https://example.com) (2026-10-23)\n\nCorreções"
+        return files
 
-    def test_manual_run_uses_version_not_branch(self):
-        result = select_release(
-            "1.2.3", "workflow_dispatch", {"ref": "refs/heads/main"}
-        )
-        self.assertEqual(result["tag"], "v1.2.3")
-        self.assertEqual(result["should_release"], "true")
+    def test_release_snapshot(self):
+        self.assertEqual(validate_release(self.release_files().__getitem__, "v1.2.3"), "1.2.3")
 
-    def test_tag_must_match_version(self):
-        self.assertEqual(
-            select_release("1.2.3", "push", {"ref": "refs/tags/v1.2.3"})[
-                "should_release"
-            ],
-            "true",
-        )
+    def test_mismatched_tag_or_missing_release_metadata(self):
+        for path, value in [
+            (".release-please-manifest.json", '{"app": "1.2.2"}'),
+            ("app/CHANGELOG.md", "# Changelog\n\n## 1.2.30\n"),
+        ]:
+            with self.subTest(path=path), self.assertRaises(ValueError):
+                files = self.release_files()
+                files[path] = value
+                validate_release(files.__getitem__, "v1.2.3")
         with self.assertRaises(ValueError):
-            select_release("1.2.3", "push", {"ref": "refs/tags/v1.2.4"})
+            validate_release(self.release_files().__getitem__, "v1.2.4")
 
-    def test_prerelease_excludes_build_metadata(self):
-        self.assertEqual(
-            select_release("1.2.3-rc.1", "workflow_dispatch", {})["prerelease"], "true"
-        )
-        self.assertEqual(
-            select_release("1.2.3+build-test", "workflow_dispatch", {})["prerelease"],
-            "false",
-        )
+    def test_only_stable_releases(self):
+        with self.assertRaises(ValueError):
+            validate_release(self.manifests("1.2.3-beta.1").__getitem__, "v1.2.3-beta.1")
+
+    def test_duplicate_or_missing_local_app_is_rejected(self):
+        for lock in [
+            '[[package]]\nname = "app"\nversion = "1.2.3"\nsource = "registry+example"',
+            '[[package]]\nname = "app"\nversion = "1.2.3"\n' * 2,
+        ]:
+            with self.subTest(lock=lock), self.assertRaises(ValueError):
+                files = self.manifests()
+                files["app/src-tauri/Cargo.lock"] = lock
+                validate_versions(files.__getitem__)
 
 
 if __name__ == "__main__":

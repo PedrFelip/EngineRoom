@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+    types: [opened, synchronize, reopened, edited, ready_for_review]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: PR do bot a validar (opcional)
+        type: string
+        required: false
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}-${{ github.event_name }}
+  cancel-in-progress: true
+
+jobs:
+  policy:
+    name: PR policy
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            await require('./.github/scripts/automation.cjs').checkPullRequest({ github, context })
+  checks:
+    uses: ./.github/workflows/checks.yml
+    with:
+      ref: ${{ github.sha }}
+  required:
+    name: CI passed
+    if: always()
+    needs: [policy, checks]
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Require every check
+        env:
+          POLICY: ${{ needs.policy.result }}
+          CHECKS: ${{ needs.checks.result }}
+        run: test "$POLICY" = success && test "$CHECKS" = success

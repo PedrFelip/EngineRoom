@@ -1,10 +1,9 @@
-"""Validate release manifests and select version-based GitHub Actions outputs."""
+"""Validate synchronized app versions and the snapshot selected for release."""
 
 import json
-import os
+import argparse
 from pathlib import Path
 import re
-import subprocess
 import tomllib
 
 
@@ -39,48 +38,27 @@ def validate_versions(read):
     return version
 
 
-def select_release(version, event_name, event, previous_version=None):
-    tag = f"v{version}"
-    if event_name == "push" and event["ref"].startswith("refs/tags/"):
-        if event["ref"] != f"refs/tags/{tag}":
-            raise ValueError(f"Tag must match the app version: {tag}")
-        should_release = True
-    elif event_name == "push":
-        if event["ref"] != "refs/heads/main":
-            raise ValueError("Automatic releases require the main branch")
-        should_release = previous_version != version
-    elif event_name == "workflow_dispatch":
-        should_release = True
-    else:
-        raise ValueError(f"Unsupported event: {event_name}")
-    return {
-        "should_release": str(should_release).lower(),
-        "version": version,
-        "tag": tag,
-        "prerelease": str("-" in version.split("+")[0]).lower(),
-    }
+
+def validate_release(read, tag):
+    version = validate_versions(read)
+    if tag != f"v{version}" or not re.fullmatch(r"v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)", tag):
+        raise ValueError("Release tag must match the stable app version")
+    manifest = json.loads(read(".release-please-manifest.json"))
+    if manifest.get("app") != version:
+        raise ValueError("Release Please manifest differs from the app version")
+    changelog = read("app/CHANGELOG.md")
+    if not re.search(r"^#{1,2} \[?" + re.escape(version) + r"(?:\]|\s|$)", changelog, re.MULTILINE):
+        raise ValueError("Changelog must contain the selected release version")
+    return version
 
 
 def main():
-    version = validate_versions(lambda path: Path(path).read_text())
-    event_name = os.environ["GITHUB_EVENT_NAME"]
-    event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text())
-    previous_version = None
-    if event_name == "push" and event["ref"] == "refs/heads/main":
-        before = event["before"]
-        if before != "0" * 40:
-            previous_config = subprocess.check_output(
-                ["git", "show", f"{before}:{CONFIG}"], text=True
-            )
-            previous_version = json.loads(previous_config)["version"]
-    outputs = select_release(version, event_name, event, previous_version)
-    outputs["sha"] = subprocess.check_output(
-        ["git", "rev-parse", "HEAD"], text=True
-    ).strip()
-    with open(os.environ["GITHUB_OUTPUT"], "a") as output:
-        for key, value in outputs.items():
-            output.write(f"{key}={value}\n")
-    print(json.dumps(outputs))
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--tag", help="Also validate the release manifest and changelog")
+    args = parser.parse_args()
+    read = lambda path: Path(path).read_text()
+    version = validate_release(read, args.tag) if args.tag else validate_versions(read)
+    print(f"Validated app version: {version}")
 
 
 if __name__ == "__main__":

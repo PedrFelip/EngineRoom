@@ -95,6 +95,16 @@ Os testes cobrem o núcleo, o pipeline, as sessões e a persistência com engine
 falsas, além da integração com o Stockfish real. Essa integração exige o
 sidecar baixado no setup.
 
+## Desenvolvimento e releases
+
+Use branches de funcionalidade com PR para `develop`; promova mudanças prontas
+para `main` preservando os commits. O bot prepara um PR com versão e changelog.
+Ao fazer merge desse PR, os testes e builds geram e publicam os instaladores
+para Windows e Linux automaticamente.
+
+Veja o [guia de branches, commits e releases](docs/releases.md) para os tipos de
+merge, Conventional Commits, sincronização e retomada de builds.
+
 ## Licença
 
 GPL-3.0-or-later. Veja [LICENSE](LICENSE) e os
