@@ -14,10 +14,10 @@ const read = file => fs.readFileSync(path.join(root, file), 'utf8');
 const config = JSON.parse(read('release-please-config.json')).packages.app;
 const logger = { info() {}, warn() {}, debug() {}, error() {} };
 
-async function candidate(message, previous = '1.0.0') {
+async function candidate(message, previous = '1.0.0', readFile = read) {
   const github = {
     repository: { owner: 'PedrFelip', repo: 'EngineRoom', defaultBranch: 'main' },
-    getFileContentsOnBranch: async file => ({ parsedContent: read(file) }),
+    getFileContentsOnBranch: async file => ({ parsedContent: readFile(file) }),
   };
   const strategy = new Node({
     github, path: 'app', targetBranch: 'main', logger,
@@ -48,23 +48,44 @@ test('administrative-only changes do not open a version PR', async () => {
   }
 });
 
-test('real Release Please updaters synchronize all manifests without changing dependencies', async () => {
-  const pr = await candidate('feat(ci): automatiza releases\n\nRelease-As: 1.0.0', '0.9.1');
+async function verifyManifestUpdates(readFile) {
+  const current = JSON.parse(readFile('app/package.json')).version;
+  const [major, minor, patch] = current.split('.').map(Number);
+  const next = `${major}.${minor}.${patch + 1}`;
+  const pr = await candidate('fix: corrige importação', current, readFile);
+  assert.equal(pr.version.toString(), next);
   const outputs = {};
   for (const update of pr.updates) {
     if (fs.existsSync(path.join(root, update.path))) {
-      outputs[update.path] = update.updater.updateContent(read(update.path), logger);
+      outputs[update.path] = update.updater.updateContent(readFile(update.path), logger);
     }
   }
-  assert.equal(JSON.parse(outputs['app/package.json']).version, '1.0.0');
-  assert.equal(JSON.parse(outputs['app/src-tauri/tauri.conf.json']).version, '1.0.0');
-  assert.equal(parseToml(outputs['app/src-tauri/Cargo.toml']).package.version, '1.0.0');
-  const original = read('app/src-tauri/Cargo.lock');
-  const expected = original.replace(/(\[\[package\]\]\nname = "app"\nversion = ")[^"]+"/, '$11.0.0"');
-  assert.notEqual(expected, original);
-  assert.equal(outputs['app/src-tauri/Cargo.lock'], expected);
-  assert.match(outputs['app/CHANGELOG.md'], /1\.0\.0/);
-  assert.match(outputs['app/CHANGELOG.md'], /Funcionalidades/);
+  assert.equal(JSON.parse(outputs['app/package.json']).version, next);
+  assert.equal(JSON.parse(outputs['app/src-tauri/tauri.conf.json']).version, next);
+  assert.equal(parseToml(outputs['app/src-tauri/Cargo.toml']).package.version, next);
+  const original = readFile('app/src-tauri/Cargo.lock');
+  const expected = original.replace(/(\[\[package\]\]\nname = "app"\nversion = ")[^"]+"/, (_, prefix) => `${prefix}${next}"`);
+  assert.ok(expected !== original, 'The fixture must exercise an actual version change');
+  // Keep failure output short: a full lockfile diff obscures the actual CI error.
+  assert.ok(outputs['app/src-tauri/Cargo.lock'] === expected, 'Only the local app version may change in Cargo.lock');
+  assert.ok(outputs['app/CHANGELOG.md'].includes(next));
+  assert.match(outputs['app/CHANGELOG.md'], /Correções/);
+}
+
+test('real Release Please updaters synchronize all manifests without changing dependencies', async () => {
+  await verifyManifestUpdates(read);
+});
+
+test('manifest checks also work inside the 1.0.0 release PR and later releases', async () => {
+  for (const version of ['1.0.0', '2.3.4']) {
+    const files = {
+      'app/package.json': JSON.stringify({ ...JSON.parse(read('app/package.json')), version }),
+      'app/src-tauri/tauri.conf.json': JSON.stringify({ ...JSON.parse(read('app/src-tauri/tauri.conf.json')), version }),
+      'app/src-tauri/Cargo.toml': read('app/src-tauri/Cargo.toml').replace(/(\[package\][\s\S]*?\nversion = ")[^"]+"/, (_, prefix) => `${prefix}${version}"`),
+      'app/src-tauri/Cargo.lock': read('app/src-tauri/Cargo.lock').replace(/(\[\[package\]\]\nname = "app"\nversion = ")[^"]+"/, (_, prefix) => `${prefix}${version}"`),
+    };
+    await verifyManifestUpdates(file => files[file] ?? read(file));
+  }
 });
 
 test('Cargo.lock updater distinguishes a registry dependency also named app', async () => {

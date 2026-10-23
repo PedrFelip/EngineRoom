@@ -81,8 +81,10 @@ async function selectDraft({ github, context, core }, requestedTag) {
   // Release Please creates drafts at the merged release PR's immutable commit.
   const sha = release.target_commitish;
   if (!SHA.test(sha)) throw new Error('O rascunho precisa apontar para um SHA completo.');
+  // A historical tag is also named "main". Resolve branches before comparing refs.
+  const main = (await github.rest.repos.getBranch({ ...context.repo, branch: 'main' })).data.commit.sha;
   const comparison = (await github.rest.repos.compareCommitsWithBasehead({
-    ...context.repo, basehead: `${sha}...main`,
+    ...context.repo, basehead: `${sha}...${main}`,
   })).data;
   if (!['ahead', 'identical'].includes(comparison.status)) {
     throw new Error('O commit da release não pertence ao histórico da main.');
@@ -129,8 +131,10 @@ async function publish({ github, context }, id, tag, sha) {
 }
 
 async function syncDevelop({ github, context }) {
+  const [develop, main] = await Promise.all(['develop', 'main'].map(async branch =>
+    (await github.rest.repos.getBranch({ ...context.repo, branch })).data.commit.sha));
   const comparison = (await github.rest.repos.compareCommitsWithBasehead({
-    ...context.repo, basehead: 'develop...main',
+    ...context.repo, basehead: `${develop}...${main}`,
   })).data;
   if (comparison.ahead_by === 0) return;
   const prs = (await github.rest.pulls.list({

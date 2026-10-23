@@ -129,6 +129,12 @@ jobs:
         with:
           workspaces: app/src-tauri -> target
 
+      - name: Cache Bun packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-v1-${{ runner.os }}-${{ runner.arch }}-1.4.3-app-${{ hashFiles('app/bun.lock') }}
+          restore-keys: bun-v1-${{ runner.os }}-${{ runner.arch }}-1.4.3-app-
       - name: Install frontend dependencies
         run: bun install --frozen-lockfile
         working-directory: app
@@ -159,7 +165,7 @@ jobs:
         with:
           projectPath: app
           releaseId: ${{ needs.prepare.outputs.release_id }}
-          args: ${{ matrix.args }}
+          args: ${{ matrix.args }} -- --locked
 
   publish:
     needs: [prepare, checks, build]
