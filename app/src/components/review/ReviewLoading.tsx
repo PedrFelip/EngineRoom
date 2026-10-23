@@ -142,11 +142,15 @@ export default function ReviewLoading({
         </div>
 
         {partialWinPcts.length >= 2 ? (
-          <div className='eval-graph-loading elev-card rounded-2xl border border-edge bg-panel-2/60 p-5'>
+          <div className='surface-glass elev-card rounded-2xl border border-edge p-4 sm:p-5'>
+            <p className='mb-4 text-xs font-semibold text-ink'>
+              Avaliação em andamento
+            </p>
             <EvalGraph
               winPcts={graphValues}
               currentPly={progress.currentPly}
               onSelect={() => {}}
+              interactive={false}
               pulse
             />
           </div>

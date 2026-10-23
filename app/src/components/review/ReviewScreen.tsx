@@ -493,14 +493,14 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
           graph={
             result &&
             graph && (
-              <div className='surface-glass rounded-2xl border border-edge p-4 sm:p-5'>
-                <div className='mb-2 flex flex-col gap-1 px-1 sm:flex-row sm:items-center sm:justify-between'>
-                  <span className='flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-ink-faint'>
+              <div className='surface-glass elev-card rounded-2xl border border-edge p-4 sm:p-5'>
+                <div className='mb-4 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between'>
+                  <span className='flex items-center gap-1.5 text-xs font-semibold text-ink'>
                     <ChartLine size={12} strokeWidth={2.2} aria-hidden='true' />
-                    Ritmo da partida
+                    Avaliação da partida
                   </span>
                   <span className='hidden text-[11px] text-ink-faint sm:block'>
-                    clique para pular até o lance
+                    Explore lance a lance
                   </span>
                 </div>
                 <EvalGraph
