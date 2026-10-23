@@ -416,10 +416,7 @@ export default function HomePage({ onStart, active = true }: Props) {
                   )
                 })}
               </ol>
-              <div
-                hidden={step !== 'import'}
-                className={step === 'import' ? 'new-review-stage' : undefined}
-              >
+              <div hidden={step !== 'import'}>
                 <PgnImporter
                   value={pgn}
                   onChange={setPgn}
@@ -491,7 +488,7 @@ export default function HomePage({ onStart, active = true }: Props) {
               </div>
 
               {step === 'configure' && (
-                <div className='new-review-stage'>
+                <div>
                   <div className='my-3 h-px bg-edge-soft' />
 
                   <SegmentedControl

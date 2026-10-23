@@ -717,7 +717,7 @@
 
 .segmented-indicator {
   position: absolute;
-  z-index: -1;
+  z-index: 0;
   inset: 6px auto 6px 6px;
   width: calc((100% - 12px) / var(--tab-count));
   border: 1px solid color-mix(in srgb, var(--brand) 45%, var(--edge));
@@ -737,6 +737,8 @@
 }
 
 .segmented-button {
+  position: relative;
+  z-index: 1;
   color: var(--ink-faint);
   transition: color 180ms ease, background-color 180ms ease, transform 120ms ease;
 }
@@ -748,7 +750,6 @@
 
 .segmented-button[aria-pressed='true'] {
   color: var(--ink);
-  font-weight: 650;
 }
 
 .segmented-button[aria-pressed='true'] svg {
@@ -774,6 +775,8 @@
   [data-slot='switch-thumb'],
   .segmented-indicator,
   .segmented-button {
+  position: relative;
+  z-index: 1;
     transition: none !important;
   }
 
@@ -902,31 +905,10 @@
   box-shadow: 0 2px 5px rgb(0 0 0 / 18%);
 }
 
-.new-review-stage,
-.import-mode-content {
-  animation: new-review-stage-in 260ms ease-out both;
-}
-
-@keyframes new-review-stage-in {
-  from {
-    opacity: 0;
-    transform: translateY(6px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
 @media (prefers-reduced-motion: reduce) {
   .new-review-step,
   .new-review-step::after,
   .new-review-step-marker {
     transition: none;
-  }
-
-  .new-review-stage,
-  .import-mode-content {
-    animation: none;
   }
 }

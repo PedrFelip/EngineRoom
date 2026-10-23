@@ -109,7 +109,7 @@ export default function PgnImporter({
         }}
       />
 
-      <div key={mode} className='import-mode-content'>
+      <div>
         {mode === 'file' ? (
           <div className='relative'>
             <button

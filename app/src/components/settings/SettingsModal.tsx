@@ -163,7 +163,7 @@ export default function SettingsModal({
         role='dialog'
         aria-modal='true'
         aria-labelledby='settings-title'
-        className='surface-glass elev-dialog relative z-10 flex max-h-[calc(100dvh-1rem)] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-edge outline-none sm:max-h-[calc(100dvh-2rem)] sm:rounded-3xl'
+        className='surface-glass elev-dialog relative z-10 flex h-[min(42rem,calc(100dvh-1rem))] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-edge outline-none sm:h-[min(42rem,calc(100dvh-2rem))] sm:rounded-3xl'
       >
         <div
           className='sr-only'
@@ -234,7 +234,7 @@ export default function SettingsModal({
         </div>
         <div
           ref={contentRef}
-          className='grid min-h-0 gap-4 overflow-y-auto overscroll-contain px-3 py-4 sm:px-5'
+          className='grid min-h-0 flex-1 content-start gap-4 overflow-y-auto overscroll-contain px-3 py-4 sm:px-5'
         >
           <div id='settings-preferences' hidden={section !== 'preferences'}>
             <div className='grid gap-4 sm:grid-cols-2'>

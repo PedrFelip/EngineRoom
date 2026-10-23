@@ -52,7 +52,7 @@ export function SegmentedControl<Value extends string>({
           aria-controls={controls}
           onClick={() => onChange(id)}
           className={cn(
-            'segmented-button flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-xl px-2 py-2.5 text-xs font-medium',
+            'segmented-button flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-xl px-2 py-2.5 text-xs font-semibold',
             stackedOnMobile &&
               'flex-col px-1 text-[11px] sm:flex-row sm:px-3 sm:text-sm',
           )}
