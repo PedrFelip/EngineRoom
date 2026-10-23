@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { graphPaths } from '../lib/eval-graph'
 
 interface EvalGraphProps {
   winPcts: readonly number[]
   currentPly: number
   onSelect: (ply: number) => void
+  interactive?: boolean
   /** Pulsa o ponto da posição atual — usado no loading pra sinalizar análise ao vivo. */
   pulse?: boolean
   /** Fronteiras de fase (plis finais de Abertura/Meio-jogo) p/ desenhar faixas de fundo. */
@@ -20,8 +21,6 @@ const PLOT_RADIUS = 8
 
 type PhaseBand = {
   key: 'opening' | 'middlegame' | 'endgame'
-  label: string
-  compactLabel: string
   x1: number
   x2: number
   opacity: number
@@ -35,18 +34,24 @@ export default function EvalGraph({
   winPcts,
   currentPly,
   onSelect,
+  interactive = true,
   pulse = false,
   phases,
 }: EvalGraphProps) {
+  const id = useId()
+  const plotId = `${id}-plot`
+  const whiteHalfId = `${id}-white`
+  const blackHalfId = `${id}-black`
   const ref = useRef<HTMLDivElement>(null)
   const [w, setW] = useState(0)
 
   useEffect(() => {
     const el = ref.current
     if (!el) return
-    const ro = new ResizeObserver((entries) =>
-      setW(entries[0].contentRect.width),
-    )
+    const ro = new ResizeObserver((entries) => {
+      const width = entries[0].contentRect.width
+      if (width > 0) setW(width)
+    })
     ro.observe(el)
     setW(el.clientWidth)
     return () => ro.disconnect()
@@ -63,24 +68,18 @@ export default function EvalGraph({
       ? [
           {
             key: 'opening',
-            label: 'Abertura',
-            compactLabel: 'Abr.',
             x1: x(0),
             x2: x(phases.openingEnd),
             opacity: 0.035,
           },
           {
             key: 'middlegame',
-            label: 'Meio-jogo',
-            compactLabel: 'Meio',
             x1: x(phases.openingEnd),
             x2: x(phases.middlegameEnd),
             opacity: 0.06,
           },
           {
             key: 'endgame',
-            label: 'Final',
-            compactLabel: 'Final',
             x1: x(phases.middlegameEnd),
             x2: x(n - 1),
             opacity: 0.035,
@@ -93,7 +92,7 @@ export default function EvalGraph({
   const { n, x, ready, linePath, areaPath, bands } = geometry
 
   const handleClick = (e: React.MouseEvent<HTMLButtonElement>) => {
-    if (n <= 1) return
+    if (n <= 1 || e.detail === 0) return
     const rect = e.currentTarget.getBoundingClientRect()
     const ratio = (e.clientX - rect.left) / rect.width
     const ply = Math.round(ratio * (n - 1))
@@ -105,14 +104,59 @@ export default function EvalGraph({
   const cy = graphY(currentValue ?? 50)
 
   return (
-    <div ref={ref} className='w-full min-w-0'>
-      {ready && (
-        <>
+    <div className='eval-timeline min-w-0'>
+      <div className='mb-3 flex flex-wrap items-center justify-between gap-2'>
+        <div className='flex items-center gap-3 text-[11px] text-ink-dim'>
+          <span className='inline-flex items-center gap-1.5'>
+            <span className='eval-timeline-side eval-timeline-side-white' />
+            Brancas
+          </span>
+          <span className='inline-flex items-center gap-1.5'>
+            <span className='eval-timeline-side eval-timeline-side-black' />
+            Pretas
+          </span>
+        </div>
+        <span className='rounded-lg border border-edge-soft bg-panel-2/70 px-2 py-1 font-mono text-[10px] tabular-nums text-ink-dim'>
+          {currentPly === 0 ? 'Posição inicial' : `Posição ${currentPly}`}
+        </span>
+      </div>
+      <div
+        ref={ref}
+        className='min-h-[106px] w-full min-w-0 sm:min-h-[126px] lg:min-h-[138px]'
+      >
+        {ready && (
           <button
             type='button'
             onClick={handleClick}
-            className='eval-graph block w-full cursor-pointer select-none overflow-hidden rounded-[calc(var(--radius)+2px)] border border-border/70 bg-card/60 shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background'
-            aria-label='Gráfico de avaliação. Clique para navegar até um lance.'
+            disabled={!interactive}
+            className='eval-timeline-plot block w-full cursor-crosshair select-none overflow-hidden rounded-xl border border-edge outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-default'
+            aria-label={
+              interactive
+                ? 'Gráfico de avaliação das brancas. Clique ou use as setas, Home e End para navegar entre posições.'
+                : 'Gráfico de avaliação das brancas. Análise em andamento.'
+            }
+            onKeyDown={(event) => {
+              let ply: number
+              switch (event.key) {
+                case 'ArrowLeft':
+                  ply = currentPly - 1
+                  break
+                case 'ArrowRight':
+                  ply = currentPly + 1
+                  break
+                case 'Home':
+                  ply = 0
+                  break
+                case 'End':
+                  ply = n - 1
+                  break
+                default:
+                  return
+              }
+              event.preventDefault()
+              event.stopPropagation()
+              onSelect(Math.max(0, Math.min(n - 1, ply)))
+            }}
           >
             <svg
               width={w}
@@ -124,7 +168,7 @@ export default function EvalGraph({
               className='block h-[104px] w-full sm:h-[124px] lg:h-[136px]'
             >
               <defs>
-                <clipPath id='eval-graph-plot'>
+                <clipPath id={plotId}>
                   <rect
                     x={0}
                     y={0}
@@ -133,10 +177,10 @@ export default function EvalGraph({
                     rx={PLOT_RADIUS}
                   />
                 </clipPath>
-                <clipPath id='eval-graph-white-half'>
+                <clipPath id={whiteHalfId}>
                   <rect x={0} y={PLOT_TOP} width={w} height={PLOT_HEIGHT / 2} />
                 </clipPath>
-                <clipPath id='eval-graph-black-half'>
+                <clipPath id={blackHalfId}>
                   <rect
                     x={0}
                     y={MIDLINE_Y}
@@ -146,7 +190,7 @@ export default function EvalGraph({
                 </clipPath>
               </defs>
 
-              <g clipPath='url(#eval-graph-plot)'>
+              <g clipPath={`url(#${plotId})`}>
                 {bands.map((b) => (
                   <rect
                     key={b.key}
@@ -188,31 +232,31 @@ export default function EvalGraph({
                 <path
                   d={areaPath}
                   fill='var(--evalgraph-white-fill)'
-                  clipPath='url(#eval-graph-white-half)'
+                  clipPath={`url(#${whiteHalfId})`}
                 />
                 <path
                   d={areaPath}
                   fill='var(--evalgraph-black-fill)'
-                  clipPath='url(#eval-graph-black-half)'
+                  clipPath={`url(#${blackHalfId})`}
                 />
 
                 <path
                   d={linePath}
                   fill='none'
                   stroke='var(--evalgraph-white-line)'
-                  strokeWidth={1.75}
+                  strokeWidth={2}
                   strokeLinejoin='round'
                   strokeLinecap='round'
-                  clipPath='url(#eval-graph-white-half)'
+                  clipPath={`url(#${whiteHalfId})`}
                 />
                 <path
                   d={linePath}
                   fill='none'
                   stroke='var(--evalgraph-black-line)'
-                  strokeWidth={1.75}
+                  strokeWidth={2}
                   strokeLinejoin='round'
                   strokeLinecap='round'
-                  clipPath='url(#eval-graph-black-half)'
+                  clipPath={`url(#${blackHalfId})`}
                 />
 
                 <line
@@ -223,6 +267,15 @@ export default function EvalGraph({
                   stroke='var(--color-ring)'
                   strokeWidth={1}
                 />
+                {Number.isFinite(currentValue) && (
+                  <circle
+                    cx={cx}
+                    cy={cy}
+                    r={9}
+                    fill='var(--ink)'
+                    opacity={0.08}
+                  />
+                )}
                 {Number.isFinite(currentValue) && (
                   <circle
                     cx={cx}
@@ -241,25 +294,17 @@ export default function EvalGraph({
               </g>
             </svg>
           </button>
-          {bands.length > 0 ? (
-            <div className='mt-1.5 flex h-5 overflow-hidden rounded-[calc(var(--radius)-3px)] border border-border/70 bg-muted/40 px-0.5 text-[8px] font-medium tracking-wide text-muted-foreground uppercase sm:text-[9px]'>
-              {bands.map((band) => (
-                <span
-                  key={band.key}
-                  className='flex min-w-0 items-center justify-center truncate border-r border-border/70 last:border-r-0'
-                  style={{
-                    flexGrow: Math.max(0, band.x2 - band.x1),
-                    flexBasis: 0,
-                  }}
-                >
-                  <span className='sm:hidden'>{band.compactLabel}</span>
-                  <span className='hidden sm:inline'>{band.label}</span>
-                </span>
-              ))}
-            </div>
-          ) : null}
-        </>
-      )}
+        )}
+      </div>
+      <div className='mt-2.5 flex items-center justify-between gap-2 text-[10px] text-ink-dim'>
+        <span>Início</span>
+        <span className='font-mono tabular-nums'>
+          {Number.isFinite(currentValue)
+            ? `${Math.round(currentValue)}% · avaliação das brancas`
+            : 'Aguardando avaliação'}
+        </span>
+        <span>{pulse ? 'Analisando…' : 'Fim'}</span>
+      </div>
     </div>
   )
 }

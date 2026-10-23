@@ -22,6 +22,11 @@ As posições analisadas ficam em um cache local para reaproveitar resultados
 compatíveis em novas revisões. O histórico permite reabrir, reanalisar e
 excluir partidas.
 
+A importação tem duas etapas e preserva o rascunho ao voltar da revisão.
+Os painéis de lances, análise e resumo dão mais espaço ao tabuleiro; atalhos
+levam aos erros da partida. O histórico permite buscar jogadores nas partidas
+carregadas, e as configurações são organizadas por seção.
+
 **Atalhos na revisão:** `←` / `→` para o lance anterior ou seguinte;
 `Home` / `End` para o início ou fim da partida. A interface tem temas claro
 e escuro.

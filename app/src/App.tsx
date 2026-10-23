@@ -21,26 +21,26 @@ export default function App() {
   if (benchmarkEnabled === null) return null
   if (benchmarkEnabled) return <UciIpcBenchmark />
 
-  if (view === 'home' || !config) {
-    return (
-      <main className='app-canvas min-h-full'>
+  const homeActive = view === 'home' || !config
+
+  return (
+    <main className='app-canvas min-h-full'>
+      <div hidden={!homeActive}>
         <HomePage
+          active={homeActive}
           onStart={(cfg) => {
             setConfig(cfg)
             setView('review')
           }}
         />
-      </main>
-    )
-  }
-
-  return (
-    <main className='app-canvas min-h-full'>
-      <ReviewScreen
-        key={config.pgn + config.engine.id}
-        config={config}
-        onExit={() => setView('home')}
-      />
+      </div>
+      {!homeActive && config && (
+        <ReviewScreen
+          key={config.pgn + config.engine.id}
+          config={config}
+          onExit={() => setView('home')}
+        />
+      )}
     </main>
   )
 }

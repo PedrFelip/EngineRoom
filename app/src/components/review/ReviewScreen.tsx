@@ -13,6 +13,7 @@ import { evalLabel } from '../../lib/eval-label'
 import { phaseBoundaries } from '../../lib/phase'
 import {
   selectDisplayedFen,
+  selectDisplayedPly,
   selectDisplayedPosition,
   selectVariationMove,
 } from '../../lib/review-selectors'
@@ -61,6 +62,7 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
     review
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
   const [analysisModalOpen, setAnalysisModalOpen] = useState(false)
+  const closeAnalysisModal = useCallback(() => setAnalysisModalOpen(false), [])
   const [isExploringLine, setIsExploringLine] = useState(false)
   const exploreTimerRef = useRef<number | null>(null)
 
@@ -137,6 +139,7 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
   }, [status])
 
   const variationMove = useStore(review.store, selectVariationMove)
+  const displayedPly = useStore(review.store, selectDisplayedPly)
   const displayedFen = useStore(review.store, selectDisplayedFen)
   const displayedPosition = useStore(review.store, selectDisplayedPosition)
   const evalBarPositionRef = useRef(displayedPosition)
@@ -275,12 +278,13 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
         elapsedSeconds={elapsedSeconds}
         partialWinPcts={partialWinPcts}
         progress={review.progress}
+        onCancel={onExit}
       />
     )
   }
 
   return (
-    <div className='mx-auto flex min-h-full max-w-6xl flex-col gap-4 px-4 py-6'>
+    <div className='review-shell mx-auto flex min-h-full max-w-7xl flex-col gap-4 px-4 py-4 sm:px-6 sm:py-5'>
       <ReviewHeader
         config={config}
         opening={opening}
@@ -293,11 +297,14 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
 
       <ReviewAnalysisModal
         open={analysisModalOpen}
-        onClose={() => setAnalysisModalOpen(false)}
+        onClose={closeAnalysisModal}
       />
 
       {status === 'error' && (
-        <div className='flex items-center gap-2.5 rounded-xl border border-blunder/50 bg-blunder/10 p-4 text-sm text-blunder'>
+        <div
+          role='alert'
+          className='flex items-center gap-2.5 rounded-xl border border-blunder/50 bg-blunder/10 p-4 text-sm text-blunder'
+        >
           <TriangleAlert
             size={16}
             strokeWidth={2}
@@ -308,9 +315,9 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
         </div>
       )}
 
-      <div className='grid flex-1 grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_360px]'>
+      <div className='grid flex-1 grid-cols-1 items-start gap-5 lg:grid-cols-[minmax(0,1fr)_340px] xl:gap-7 xl:grid-cols-[minmax(0,1fr)_380px]'>
         <div className='flex flex-col gap-3'>
-          <div className='flex flex-col gap-1'>
+          <div className='mx-auto w-full rounded-2xl border border-edge-soft bg-panel-2/40 p-2 sm:p-3 '>
             <PlayerTag
               name={
                 orientation === 'white' ? config.meta.black : config.meta.white
@@ -363,54 +370,7 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
             />
           </div>
 
-          {settings.reviewEngineEnabled && displayedPosition?.lines?.length ? (
-            <CandidateLines
-              lines={displayedPosition.lines.slice(
-                0,
-                settings.reviewAnalysisLines,
-              )}
-              selectedMultipv={selectedMultipv}
-              onSelect={(multipv) => {
-                stopExplorePlayback()
-                setSelectedMultipv(multipv)
-              }}
-              fen={displayedPosition.fen}
-              onExplore={exploreLineSlowly}
-            />
-          ) : null}
-
-          {settings.reviewEngineEnabled && displayedPosition?.triageLines ? (
-            <details className='rounded-xl border border-border p-3 text-xs'>
-              <summary className='cursor-pointer text-muted-foreground'>
-                Linhas da triagem — avaliação preliminar
-              </summary>
-              <div className='mt-2 flex flex-col gap-1'>
-                {displayedPosition.triageLines
-                  .slice(0, settings.reviewAnalysisLines)
-                  .map((line) => (
-                    <button
-                      key={line.multipv}
-                      type='button'
-                      className='rounded px-2 py-1 text-left hover:bg-accent'
-                      onClick={() => exploreLineSlowly(line.pv)}
-                    >
-                      {line.san ?? '—'} · {line.winPct.toFixed(1)}%
-                      {line.depth !== undefined ? ` · d${line.depth}` : ''}
-                    </button>
-                  ))}
-              </div>
-            </details>
-          ) : null}
-
-          {isExploringLine ? (
-            <p className='px-1 text-xs text-ink-faint' role='status'>
-              Reproduzindo linha · avaliando lances…
-            </p>
-          ) : null}
-
-          {!isExploringLine && <ReviewLiveStatus store={review.store} />}
-
-          <div className='surface-glass elev-card flex items-center justify-center gap-2 rounded-xl border border-edge p-2'>
+          <div className='surface-glass elev-card mx-auto flex w-full max-w-md items-center justify-center gap-1 rounded-2xl border border-edge p-2'>
             <ReviewNavButton
               onClick={() => {
                 stopExplorePlayback()
@@ -461,38 +421,102 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
             >
               <SkipForward size={18} strokeWidth={2} aria-hidden='true' />
             </ReviewNavButton>
+            <span className='min-w-16 px-1 text-center font-mono text-xs tabular-nums text-ink-faint'>
+              {displayedPly} / {result?.moves.length ?? 0}
+            </span>
             <div className='mx-1 h-5 w-px bg-edge' />
             <ReviewNavButton onClick={review.flip} label='Virar o tabuleiro'>
               <ArrowUpDown size={17} strokeWidth={2} aria-hidden='true' />
             </ReviewNavButton>
           </div>
-        </div>
+          {isExploringLine ? (
+            <p className='px-1 text-xs text-ink-faint' role='status'>
+              Reproduzindo linha · avaliando lances…
+            </p>
+          ) : null}
 
-        <ReviewSidebar store={review.store} onNavigate={stopExplorePlayback} />
+          {!isExploringLine && <ReviewLiveStatus store={review.store} />}
+        </div>
+        <ReviewSidebar
+          store={review.store}
+          onNavigate={stopExplorePlayback}
+          analysisEnabled={settings.reviewEngineEnabled}
+          analysis={
+            <div className='flex flex-col gap-3'>
+              {settings.reviewEngineEnabled &&
+              displayedPosition?.lines?.length ? (
+                <CandidateLines
+                  lines={displayedPosition.lines.slice(
+                    0,
+                    settings.reviewAnalysisLines,
+                  )}
+                  selectedMultipv={selectedMultipv}
+                  onSelect={(multipv) => {
+                    stopExplorePlayback()
+                    setSelectedMultipv(multipv)
+                  }}
+                  fen={displayedPosition.fen}
+                  onExplore={exploreLineSlowly}
+                />
+              ) : (
+                <p className='rounded-2xl border border-edge bg-panel-2/40 p-4 text-sm text-ink-faint'>
+                  As linhas candidatas aparecem quando a posição é avaliada.
+                  Selecione um lance ou mova uma peça para explorar.
+                </p>
+              )}
+
+              {settings.reviewEngineEnabled &&
+              displayedPosition?.triageLines ? (
+                <details className='rounded-xl border border-border p-3 text-xs'>
+                  <summary className='cursor-pointer text-muted-foreground'>
+                    Linhas da triagem — avaliação preliminar
+                  </summary>
+                  <div className='mt-2 flex flex-col gap-1'>
+                    {displayedPosition.triageLines
+                      .slice(0, settings.reviewAnalysisLines)
+                      .map((line) => (
+                        <button
+                          key={line.multipv}
+                          type='button'
+                          className='rounded px-2 py-1 text-left hover:bg-accent'
+                          onClick={() => exploreLineSlowly(line.pv)}
+                        >
+                          {line.san ?? '—'} · {line.winPct.toFixed(1)}%
+                          {line.depth !== undefined ? ` · d${line.depth}` : ''}
+                        </button>
+                      ))}
+                  </div>
+                </details>
+              ) : null}
+            </div>
+          }
+          graph={
+            result &&
+            graph && (
+              <div className='surface-glass elev-card rounded-2xl border border-edge p-4 sm:p-5'>
+                <div className='mb-4 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between'>
+                  <span className='flex items-center gap-1.5 text-xs font-semibold text-ink'>
+                    <ChartLine size={12} strokeWidth={2.2} aria-hidden='true' />
+                    Avaliação da partida
+                  </span>
+                  <span className='hidden text-[11px] text-ink-faint sm:block'>
+                    Explore lance a lance
+                  </span>
+                </div>
+                <EvalGraph
+                  winPcts={graph.winPcts}
+                  currentPly={currentPly}
+                  onSelect={(ply) => {
+                    stopExplorePlayback()
+                    review.goTo(ply)
+                  }}
+                  phases={graph.phases}
+                />
+              </div>
+            )
+          }
+        />
       </div>
-
-      {result && graph && (
-        <div className='rounded-xl border border-edge bg-panel-2/60 p-3 sm:p-4'>
-          <div className='mb-2 flex flex-col gap-1 px-1 sm:flex-row sm:items-center sm:justify-between'>
-            <span className='flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-ink-faint'>
-              <ChartLine size={12} strokeWidth={2.2} aria-hidden='true' />
-              Avaliação
-            </span>
-            <span className='hidden text-[11px] text-ink-faint sm:block'>
-              clique para pular até o lance
-            </span>
-          </div>
-          <EvalGraph
-            winPcts={graph.winPcts}
-            currentPly={currentPly}
-            onSelect={(ply) => {
-              stopExplorePlayback()
-              review.goTo(ply)
-            }}
-            phases={graph.phases}
-          />
-        </div>
-      )}
     </div>
   )
 }

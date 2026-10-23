@@ -43,8 +43,10 @@ export default function ReviewEngineSettings() {
   const disabled = !settings.reviewEngineEnabled
 
   return (
-    <div className='rounded-lg border border-edge-soft p-3'>
-      <div className={`space-y-4 ${disabled ? 'opacity-45' : ''}`}>
+    <div className='rounded-2xl border border-edge-soft bg-panel-2/40 p-4'>
+      <div
+        className={`grid gap-4 sm:grid-cols-2 sm:gap-x-6 ${disabled ? 'opacity-45' : ''}`}
+      >
         <SettingRange
           icon={<Timer size={13} aria-hidden='true' />}
           label='Tempo de busca'
@@ -57,9 +59,62 @@ export default function ReviewEngineSettings() {
             updateSettings({ reviewSearchSeconds })
           }
         />
+        <SettingRange
+          icon={<Split size={13} aria-hidden='true' />}
+          label='Linhas de análise'
+          value={settings.reviewAnalysisLines}
+          suffix=' / 5'
+          min={1}
+          max={5}
+          disabled={disabled}
+          onChange={(reviewAnalysisLines) =>
+            updateSettings({ reviewAnalysisLines })
+          }
+        />
+        <div>
+          <SettingRange
+            icon={<Cpu size={13} aria-hidden='true' />}
+            label='Threads'
+            value={threads}
+            suffix={` / ${maxThreads}`}
+            min={1}
+            max={maxThreads}
+            disabled={disabled || settings.reviewThreadsAuto}
+            onChange={(reviewThreads) => updateSettings({ reviewThreads })}
+          />
+          <label className='mt-2 flex flex-wrap items-center gap-2 text-xs text-ink-dim'>
+            <input
+              type='checkbox'
+              checked={settings.reviewThreadsAuto}
+              disabled={disabled}
+              onChange={(event) => {
+                const reviewThreadsAuto = event.target.checked
+                updateSettings({
+                  reviewThreadsAuto,
+                  ...(reviewThreadsAuto
+                    ? { reviewThreads: recommendedReviewThreads(maxThreads) }
+                    : {}),
+                })
+              }}
+              className='accent-[var(--brand)]'
+            />
+            Adaptar ao computador
+          </label>
+        </div>
+        <SettingRange
+          icon={<MemoryStick size={13} aria-hidden='true' />}
+          label='Memória'
+          value={settings.reviewMemoryMb}
+          suffix=' MB'
+          min={16}
+          max={1024}
+          step={16}
+          disabled={disabled}
+          onChange={(reviewMemoryMb) => updateSettings({ reviewMemoryMb })}
+        />
         <label
           htmlFor='review-move-feedback-switch'
-          className='flex items-center justify-between gap-3 text-xs text-ink-dim'
+          className='flex items-center justify-between gap-3 border-t border-edge-soft pt-3 text-xs text-ink-dim sm:col-span-2'
         >
           <span>
             <span className='block font-medium text-ink'>
@@ -80,57 +135,6 @@ export default function ReviewEngineSettings() {
             aria-label='Feedback dos movimentos'
           />
         </label>
-        <SettingRange
-          icon={<Split size={13} aria-hidden='true' />}
-          label='Linhas de análise'
-          value={settings.reviewAnalysisLines}
-          suffix=' / 5'
-          min={1}
-          max={5}
-          disabled={disabled}
-          onChange={(reviewAnalysisLines) =>
-            updateSettings({ reviewAnalysisLines })
-          }
-        />
-        <SettingRange
-          icon={<Cpu size={13} aria-hidden='true' />}
-          label='Threads'
-          value={threads}
-          suffix={` / ${maxThreads}`}
-          min={1}
-          max={maxThreads}
-          disabled={disabled || settings.reviewThreadsAuto}
-          onChange={(reviewThreads) => updateSettings({ reviewThreads })}
-        />
-        <label className='flex items-center justify-end gap-2 text-xs text-ink-dim'>
-          <input
-            type='checkbox'
-            checked={settings.reviewThreadsAuto}
-            disabled={disabled}
-            onChange={(event) => {
-              const reviewThreadsAuto = event.target.checked
-              updateSettings({
-                reviewThreadsAuto,
-                ...(reviewThreadsAuto
-                  ? { reviewThreads: recommendedReviewThreads(maxThreads) }
-                  : {}),
-              })
-            }}
-            className='accent-[var(--brand)]'
-          />
-          Adaptar ao computador
-        </label>
-        <SettingRange
-          icon={<MemoryStick size={13} aria-hidden='true' />}
-          label='Memória'
-          value={settings.reviewMemoryMb}
-          suffix=' MB'
-          min={16}
-          max={1024}
-          step={16}
-          disabled={disabled}
-          onChange={(reviewMemoryMb) => updateSettings({ reviewMemoryMb })}
-        />
       </div>
     </div>
   )
@@ -151,12 +155,12 @@ interface SettingRangeProps {
 function SettingRange(props: SettingRangeProps) {
   return (
     <label className='block'>
-      <span className='mb-1.5 flex items-center justify-between text-xs text-ink-dim'>
-        <span className='flex items-center gap-1.5'>
+      <span className='mb-1.5 flex items-center justify-between gap-3 text-xs text-ink-dim'>
+        <span className='flex min-w-0 items-center gap-1.5'>
           {props.icon}
           {props.label}
         </span>
-        <span className='font-mono text-ink'>
+        <span className='shrink-0 font-mono tabular-nums text-ink'>
           {props.value}
           {props.suffix}
         </span>

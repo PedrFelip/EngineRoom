@@ -2,7 +2,11 @@ import { Schema } from 'effect'
 import { describe, expect, it } from 'vitest'
 import reviewFixture from './__tests__/fixtures/review.json'
 import { ReviewResultSchema } from './review-protocol'
-import { selectSourceFen, selectSourcePosition } from './review-selectors'
+import {
+  selectDisplayedPly,
+  selectSourceFen,
+  selectSourcePosition,
+} from './review-selectors'
 import { createReviewStore } from './review-store'
 
 const existingResult = () =>
@@ -39,5 +43,24 @@ describe('posição anterior de uma variação', () => {
     if (!fen) throw new Error('FEN do pai esperado')
     store.setLiveAnalysis(fen, result.positions[0])
     expect(selectSourcePosition(store.getState())).toBeUndefined()
+  })
+})
+
+describe('ply exibido', () => {
+  it('acompanha a navegação na linha principal e em variações', () => {
+    const store = createReviewStore()
+    store.setResult(existingResult())
+    store.goTo(2)
+    expect(selectDisplayedPly(store.getState())).toBe(2)
+
+    store.makeMove('d2', 'd4')
+    expect(store.getState().currentPly).toBe(2)
+    expect(selectDisplayedPly(store.getState())).toBe(3)
+    store.makeMove('d7', 'd5')
+    expect(selectDisplayedPly(store.getState())).toBe(4)
+    store.prev()
+    expect(selectDisplayedPly(store.getState())).toBe(3)
+    store.goTo(1)
+    expect(selectDisplayedPly(store.getState())).toBe(1)
   })
 })

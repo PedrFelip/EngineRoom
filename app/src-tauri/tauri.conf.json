@@ -15,8 +15,8 @@
         "title": "EngineRoom",
         "width": 1180,
         "height": 800,
-        "minWidth": 940,
-        "minHeight": 640
+        "minWidth": 640,
+        "minHeight": 480
       }
     ],
     "security": {

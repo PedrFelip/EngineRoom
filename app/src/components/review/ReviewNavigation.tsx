@@ -19,9 +19,9 @@ export function ReviewNavButton({
       disabled={disabled}
       aria-label={label}
       title={label}
-      variant='ghost'
+      variant='outline'
       size='icon'
-      className='text-ink-dim disabled:opacity-30'
+      className='rounded-xl text-ink-dim transition hover:bg-panel-3 disabled:opacity-30'
     >
       {children}
     </Button>
@@ -38,7 +38,7 @@ export function PlayerTag({
   color: 'w' | 'b'
 }) {
   return (
-    <div className='flex items-center gap-2 px-1 text-sm'>
+    <div className='flex min-w-0 items-center gap-2.5 px-1 py-2.5 text-sm'>
       <span
         className='flex h-5 w-5 shrink-0 items-center justify-center rounded-full ring-1 ring-edge'
         style={{
@@ -50,9 +50,11 @@ export function PlayerTag({
       >
         <Crown size={11} strokeWidth={2.5} aria-hidden='true' />
       </span>
-      <span className='font-medium text-ink'>{name}</span>
+      <span className='truncate font-medium text-ink'>{name}</span>
       {elo ? (
-        <span className='font-mono text-xs text-ink-dim'>({elo})</span>
+        <span className='ml-auto shrink-0 rounded-md bg-panel-3/70 px-2 py-1 font-mono text-[11px] text-ink-dim'>
+          {elo}
+        </span>
       ) : null}
     </div>
   )
