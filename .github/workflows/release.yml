@@ -2,100 +2,92 @@ name: Release
 
 on:
   push:
-    branches:
-      - main
-    tags:
-      - 'v*'
-    paths:
-      - app/package.json
-      - app/src-tauri/tauri.conf.json
-      - app/src-tauri/Cargo.toml
-      - app/src-tauri/Cargo.lock
+    branches: [main]
   workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag da release a retomar (por exemplo v1.0.0)
+        type: string
+        required: true
 
 permissions:
   contents: read
 
-# Serialize duplicate events and manual reruns for the same commit.
+# Serialize release preparation, uploads, publication and retries.
 concurrency:
-  group: release-${{ github.sha }}
+  group: release-main
   cancel-in-progress: false
 
 jobs:
   prepare:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     permissions:
       contents: write
+      pull-requests: write
+      issues: write
+      actions: write
     outputs:
-      should_release: ${{ steps.version.outputs.should_release }}
-      release_id: ${{ steps.release.outputs.result }}
-      sha: ${{ steps.version.outputs.sha }}
+      should_release: ${{ steps.draft.outputs.should_release }}
+      release_id: ${{ steps.draft.outputs.release_id }}
+      sha: ${{ steps.draft.outputs.sha }}
+      tag: ${{ steps.draft.outputs.tag }}
+      published: ${{ steps.draft.outputs.published }}
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - name: Test release version selection
-        run: python -m unittest discover -s .github/scripts -p 'test_*.py'
-
-      - name: Validate versions and detect bump
-        id: version
-        run: python .github/scripts/release_version.py
-
-      - name: Create or resume version draft
-        if: steps.version.outputs.should_release == 'true'
-        id: release
-        uses: actions/github-script@v7
+          persist-credentials: false
+      - name: Require main
         env:
-          RELEASE_TAG: ${{ steps.version.outputs.tag }}
-          RELEASE_PRERELEASE: ${{ steps.version.outputs.prerelease }}
-          RELEASE_SHA: ${{ steps.version.outputs.sha }}
+          WORKFLOW_REF: ${{ github.ref }}
+        run: test "$WORKFLOW_REF" = refs/heads/main
+      - name: Prepare version PR or draft release
+        if: github.event_name == 'push'
+        id: release
+        uses: googleapis/release-please-action@8b8fd2cc23b2e18957157a9d923d75aa0c6f6ad5 # v4.4.1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          target-branch: main
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+      - name: Run CI on bot PRs
+        if: github.event_name == 'push'
+        uses: actions/github-script@v7
         with:
           script: |
-            const { owner, repo } = context.repo
-            const tag = process.env.RELEASE_TAG
-            const sha = process.env.RELEASE_SHA
-            let ref
-            try {
-              ref = (await github.rest.git.getRef({ owner, repo, ref: `tags/${tag}` })).data
-            } catch (error) {
-              if (error.status !== 404) throw error
-            }
-            if (ref) {
-              let object = ref.object
-              while (object.type === 'tag') {
-                object = (await github.rest.git.getTag({ owner, repo, tag_sha: object.sha })).data.object
-              }
-              if (object.type !== 'commit' || object.sha !== sha) {
-                throw new Error(`${tag} already points to a different commit`)
-              }
-            } else {
-              await github.rest.git.createRef({ owner, repo, ref: `refs/tags/${tag}`, sha })
-            }
-            // Drafts are included for the authenticated token; paginate for older drafts.
-            const releases = await github.paginate(github.rest.repos.listReleases, { owner, repo, per_page: 100 })
-            const existing = releases.find(release => release.tag_name === tag)
-            if (existing) {
-              if (!existing.draft) throw new Error(`${tag} is already published`)
-              return existing.id
-            }
-            const release = await github.rest.repos.createRelease({
-              owner, repo,
-              tag_name: tag,
-              target_commitish: sha,
-              name: `EngineRoom ${tag}`,
-              body: 'Instaladores para Windows (NSIS/MSI) e Linux (AppImage). Inclui Stockfish 18 como sidecar.',
-              draft: true,
-              prerelease: process.env.RELEASE_PRERELEASE === 'true',
-            })
-            return release.data.id
+            await require('./.github/scripts/automation.cjs').checkReleasePRs({ github, context })
+      - name: Select or resume draft at its immutable commit
+        id: draft
+        uses: actions/github-script@v7
+        env:
+          RELEASE_TAG: ${{ inputs.tag || steps.release.outputs['app--tag_name'] }}
+        with:
+          script: |
+            await require('./.github/scripts/automation.cjs').selectDraft({ github, context, core }, process.env.RELEASE_TAG)
+      - name: Checkout exact release commit
+        if: steps.draft.outputs.should_release == 'true'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.draft.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        if: steps.draft.outputs.should_release == 'true'
+        with:
+          python-version: '3.12'
+      - name: Validate tag, manifests and changelog
+        if: steps.draft.outputs.should_release == 'true'
+        env:
+          RELEASE_TAG: ${{ steps.draft.outputs.tag }}
+        run: python .github/scripts/release_version.py --tag "$RELEASE_TAG"
+
+  checks:
+    needs: prepare
+    if: needs.prepare.outputs.should_release == 'true'
+    uses: ./.github/workflows/checks.yml
+    with:
+      ref: ${{ needs.prepare.outputs.sha }}
 
   build:
-    needs: prepare
+    needs: [prepare, checks]
     if: needs.prepare.outputs.should_release == 'true'
     permissions:
       contents: write
@@ -106,12 +98,13 @@ jobs:
           - platform: ubuntu-22.04
             args: --bundles appimage
           - platform: windows-latest
-            args: ''
+            args: --bundles nsis,msi
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ needs.prepare.outputs.sha }}
+          persist-credentials: false
 
       - name: Install Linux dependencies
         if: matrix.platform == 'ubuntu-22.04'
@@ -121,6 +114,12 @@ jobs:
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.3'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -161,3 +160,41 @@ jobs:
           projectPath: app
           releaseId: ${{ needs.prepare.outputs.release_id }}
           args: ${{ matrix.args }}
+
+  publish:
+    needs: [prepare, checks, build]
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Publish only with all installers present
+        uses: actions/github-script@v7
+        env:
+          RELEASE_ID: ${{ needs.prepare.outputs.release_id }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+          RELEASE_SHA: ${{ needs.prepare.outputs.sha }}
+        with:
+          script: |
+            await require('./.github/scripts/automation.cjs').publish(
+              { github, context }, process.env.RELEASE_ID, process.env.RELEASE_TAG, process.env.RELEASE_SHA)
+
+  sync:
+    needs: [prepare, publish]
+    if: always() && (needs.publish.result == 'success' || needs.prepare.outputs.published == 'true')
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+      pull-requests: write
+      actions: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Open synchronization PR and run its CI
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await require('./.github/scripts/automation.cjs').syncDevelop({ github, context })

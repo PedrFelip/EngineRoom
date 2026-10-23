@@ -260,6 +260,7 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
     return () => window.removeEventListener('keydown', onKey)
   }, [
     result,
+    analysisModalOpen,
     review.prev,
     review.next,
     review.first,

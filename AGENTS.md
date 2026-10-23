@@ -13,7 +13,7 @@ Tauri 2 desktop app (Rust + React 19) that reviews chess games locally with Stoc
 
 From `app/`: `bun run lint && bun run typecheck && bun run test`.
 From `app/src-tauri/`: `cargo test`.
-There is no CI/pre-commit hook. `typecheck` checks the app and `tsconfig.tests.json`; Vitest transpilation alone does not type-check tests.
+CI runs the app suite on PRs/pushes to main/develop and at the immutable release commit before building installers. Run verification locally too. `typecheck` checks the app and `tsconfig.tests.json`; Vitest transpilation alone does not type-check tests.
 Vitest 4 uses `node`, not jsdom. Use Effect TestContext/TestClock directly; do not install `@effect/vitest` 0.30 (requires Vitest 3).
 
 ## Architecture and resource ownership
@@ -48,3 +48,11 @@ Vitest 4 uses `node`, not jsdom. Use Effect TestContext/TestClock directly; do n
 Session commands: `review_session_open`, `review_session_analyze_position`, `review_session_cancel_live`, `review_session_close`, `engine_probe`, `games_get_review_config`.
 Existing cache/history/storage/system commands remain registered for administration and compatibility. Raw engine spawn/send/stop commands are no longer public. UCI benchmark commands are restricted to `--bench-uci-ipc` and describe the historical transport, not the new session.
 `bun run bench:rust` measures the Rust fake-engine pipeline in release mode. It excludes Stockfish, IPC and rendering; do not present those figures as end-to-end game speedups.
+
+## Releases
+
+- Keep versions synchronized in package.json, tauri.conf.json, Cargo.toml and the local app entry in Cargo.lock. `.github/scripts/release_version.py` enforces this; Release Please updates all four in its version PR.
+- Use feature/fix PRs into `develop` with Conventional Commit titles and squash merges. Promote `develop` to `main` with merge commits; preserve history when merging the automatic `main` → `develop` synchronization PR. Hotfix PRs may target main directly.
+- Merging the Release Please PR creates a draft; tests and all Linux/Windows installer builds must pass before automatic publication. Manual dispatch from main resumes an existing tag; tag pushes and manual version bumps do not independently publish releases. See `docs/releases.md`.
+- Workflows use `GITHUB_TOKEN` and explicitly dispatch CI for bot PRs. Keep the `CI passed` branch-protection check and its terminal gate that fails on skipped/failed dependencies.
+- From the root: `python -m unittest discover -s .github/scripts -p 'test_*.py'` (Python 3.11+). From `.github/scripts/`: `bun install --frozen-lockfile && bun run test`; the pinned Release Please library must match the pinned action.
