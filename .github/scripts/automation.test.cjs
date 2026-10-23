@@ -21,6 +21,7 @@ function fixture({ draft = true, assets, tagSha = sha, tag = 'v1.0.0' } = {}) {
       repos: {
         listReleases: 'releases', listReleaseAssets: 'assets',
         getRelease: async () => ({ data: release }),
+        getBranch: async ({ branch }) => ({ data: { commit: { sha: branch === 'main' ? 'c'.repeat(40) : 'd'.repeat(40) } } }),
         compareCommitsWithBasehead: async () => ({ data: { status: 'ahead', ahead_by: 1 } }),
         updateRelease: async data => { calls.push(['publish', data]); release.draft = false; },
       },
@@ -86,6 +87,15 @@ test('retry uses existing tag and refuses mismatches or commits outside main', a
   await assert.rejects(selectDraft(f, 'v1.0.0'), /histórico/);
 });
 
+test('release ancestry uses the main branch SHA even when a tag is also named main', async () => {
+  const f = fixture();
+  f.github.rest.repos.compareCommitsWithBasehead = async ({ basehead }) => {
+    assert.equal(basehead, `${sha}...${'c'.repeat(40)}`);
+    return { data: { status: 'ahead' } };
+  };
+  await selectDraft(f, 'v1.0.0');
+});
+
 test('manual retry cannot invent a release or run from develop', async () => {
   const f = fixture();
   await assert.rejects(selectDraft({ ...f, context: { ...context, eventName: 'workflow_dispatch' } }, 'v9.9.9'), /existente/);
@@ -115,6 +125,10 @@ test('published release retry resumes synchronization without rebuilding', async
 
 test('synchronization reuses its open PR and dispatches CI', async () => {
   const f = fixture();
+  f.github.rest.repos.compareCommitsWithBasehead = async ({ basehead }) => {
+    assert.equal(basehead, `${'d'.repeat(40)}...${'c'.repeat(40)}`);
+    return { data: { ahead_by: 1 } };
+  };
   f.github.rest.pulls.list = async () => ({ data: [pr({ head: { ref: 'main' } })] });
   await syncDevelop(f);
   assert.deepEqual(f.calls.map(([type]) => type), ['ci']);
