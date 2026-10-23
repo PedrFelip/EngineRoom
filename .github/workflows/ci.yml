@@ -34,6 +34,7 @@ jobs:
           script: |
             await require('./.github/scripts/automation.cjs').checkPullRequest({ github, context })
   checks:
+    needs: policy
     uses: ./.github/workflows/checks.yml
     with:
       ref: ${{ github.sha }}
