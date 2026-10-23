@@ -51,6 +51,17 @@ histórico é a tag `v0.9.1`; as releases anteriores são preservadas.
 
 `CI` executa em PRs e pushes para main/develop. Inclui lint, typecheck, testes do
 frontend, `cargo test --locked` com Stockfish real e testes dos scripts de release.
+A política do PR é validada antes dos jobs de testes; uma falha bloqueia o gate
+`CI passed`, inclusive quando os testes são pulados. O evento `edited` revalida o
+título Conventional Commits. Pushes validam o resultado integrado em main/develop;
+a release repete os checks no seu SHA imutável antes de gerar instaladores.
+
+O cache global de pacotes Bun é separado por sistema, arquitetura, versão do Bun
+e lockfile, com reaproveitamento dos pacotes ao mudar o lockfile. A instalação
+continua usando `--frozen-lockfile`. Rust mantém o cache de dependências e compilação
+por job, separando testes (debug) dos instaladores (release). Os builds usam
+`--locked` para preservar o Cargo.lock. O Stockfish usa uma chave que inclui o
+script de download e é salvo logo após o download, antes dos testes/builds.
 O sidecar é baixado antes dos testes Rust. Os testes do downloader também são
 executados quando incluídos no comando `bun run test` do app.
 
