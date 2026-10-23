@@ -6,57 +6,21 @@
 ### ⚠ BREAKING CHANGES
 
 * **ui:** a nova interface reorganiza a preparação, a revisão e as configurações das partidas e inaugura o EngineRoom 2.0.
-* **ui:** a nova interface reorganiza a preparação, a revisão e as configurações das partidas e inaugura o EngineRoom 2.0.
-* **ui:** a nova interface reorganiza a preparação, a revisão e as configurações das partidas e inaugura o EngineRoom 2.0.
-* **ui:** a nova interface reorganiza a preparação, a revisão e as configurações das partidas e inaugura o EngineRoom 2.0.
-* **ui:** a nova interface reorganiza a preparação, a revisão e as configurações das partidas e inaugura o EngineRoom 2.0.
 
 ### Funcionalidades
 
 * **ui:** apresenta a nova interface do EngineRoom 2.0 ([de172d5](https://github.com/PedrFelip/EngineRoom/commit/de172d5abb323733d7ec69dbc78eb14cd3a9c178))
-* **ui:** apresenta a nova interface do EngineRoom 2.0 ([a7c935b](https://github.com/PedrFelip/EngineRoom/commit/a7c935b85bc00d9a0f1bc9f2b789d0778579cc70))
-* **ui:** apresenta a nova interface do EngineRoom 2.0 ([cd015de](https://github.com/PedrFelip/EngineRoom/commit/cd015dee8e873d65787266dabbd08a6e385c6e4f))
-* **ui:** apresenta a nova interface do EngineRoom 2.0 ([1025529](https://github.com/PedrFelip/EngineRoom/commit/10255290ce6d336ed73ddbff15658223de007696))
-* **ui:** apresenta a nova interface do EngineRoom 2.0 ([0492984](https://github.com/PedrFelip/EngineRoom/commit/049298466a5de3377af5152832d2c2a1adbb7991))
 * **ui:** dá mais espaço ao tabuleiro com painéis de lances, análise e resumo e atalhos para os momentos críticos ([de172d5](https://github.com/PedrFelip/EngineRoom/commit/de172d5abb323733d7ec69dbc78eb14cd3a9c178))
-* **ui:** dá mais espaço ao tabuleiro com painéis de lances, análise e resumo e atalhos para os momentos críticos ([a7c935b](https://github.com/PedrFelip/EngineRoom/commit/a7c935b85bc00d9a0f1bc9f2b789d0778579cc70))
-* **ui:** dá mais espaço ao tabuleiro com painéis de lances, análise e resumo e atalhos para os momentos críticos ([cd015de](https://github.com/PedrFelip/EngineRoom/commit/cd015dee8e873d65787266dabbd08a6e385c6e4f))
-* **ui:** dá mais espaço ao tabuleiro com painéis de lances, análise e resumo e atalhos para os momentos críticos ([1025529](https://github.com/PedrFelip/EngineRoom/commit/10255290ce6d336ed73ddbff15658223de007696))
-* **ui:** dá mais espaço ao tabuleiro com painéis de lances, análise e resumo e atalhos para os momentos críticos ([0492984](https://github.com/PedrFelip/EngineRoom/commit/049298466a5de3377af5152832d2c2a1adbb7991))
 * **ui:** facilita retomar partidas com busca por jogador no histórico e confirmação antes de excluir ([de172d5](https://github.com/PedrFelip/EngineRoom/commit/de172d5abb323733d7ec69dbc78eb14cd3a9c178))
-* **ui:** facilita retomar partidas com busca por jogador no histórico e confirmação antes de excluir ([a7c935b](https://github.com/PedrFelip/EngineRoom/commit/a7c935b85bc00d9a0f1bc9f2b789d0778579cc70))
-* **ui:** facilita retomar partidas com busca por jogador no histórico e confirmação antes de excluir ([cd015de](https://github.com/PedrFelip/EngineRoom/commit/cd015dee8e873d65787266dabbd08a6e385c6e4f))
-* **ui:** facilita retomar partidas com busca por jogador no histórico e confirmação antes de excluir ([1025529](https://github.com/PedrFelip/EngineRoom/commit/10255290ce6d336ed73ddbff15658223de007696))
-* **ui:** facilita retomar partidas com busca por jogador no histórico e confirmação antes de excluir ([0492984](https://github.com/PedrFelip/EngineRoom/commit/049298466a5de3377af5152832d2c2a1adbb7991))
 * **ui:** moderniza a barra e o gráfico de avaliação com valores mais legíveis e navegação por teclado ([de172d5](https://github.com/PedrFelip/EngineRoom/commit/de172d5abb323733d7ec69dbc78eb14cd3a9c178))
-* **ui:** moderniza a barra e o gráfico de avaliação com valores mais legíveis e navegação por teclado ([a7c935b](https://github.com/PedrFelip/EngineRoom/commit/a7c935b85bc00d9a0f1bc9f2b789d0778579cc70))
-* **ui:** moderniza a barra e o gráfico de avaliação com valores mais legíveis e navegação por teclado ([cd015de](https://github.com/PedrFelip/EngineRoom/commit/cd015dee8e873d65787266dabbd08a6e385c6e4f))
-* **ui:** moderniza a barra e o gráfico de avaliação com valores mais legíveis e navegação por teclado ([1025529](https://github.com/PedrFelip/EngineRoom/commit/10255290ce6d336ed73ddbff15658223de007696))
-* **ui:** moderniza a barra e o gráfico de avaliação com valores mais legíveis e navegação por teclado ([0492984](https://github.com/PedrFelip/EngineRoom/commit/049298466a5de3377af5152832d2c2a1adbb7991))
 * **ui:** organiza preferências, análise e armazenamento em configurações por seção, com navegação por teclado ([de172d5](https://github.com/PedrFelip/EngineRoom/commit/de172d5abb323733d7ec69dbc78eb14cd3a9c178))
-* **ui:** organiza preferências, análise e armazenamento em configurações por seção, com navegação por teclado ([a7c935b](https://github.com/PedrFelip/EngineRoom/commit/a7c935b85bc00d9a0f1bc9f2b789d0778579cc70))
-* **ui:** organiza preferências, análise e armazenamento em configurações por seção, com navegação por teclado ([cd015de](https://github.com/PedrFelip/EngineRoom/commit/cd015dee8e873d65787266dabbd08a6e385c6e4f))
-* **ui:** organiza preferências, análise e armazenamento em configurações por seção, com navegação por teclado ([1025529](https://github.com/PedrFelip/EngineRoom/commit/10255290ce6d336ed73ddbff15658223de007696))
-* **ui:** organiza preferências, análise e armazenamento em configurações por seção, com navegação por teclado ([0492984](https://github.com/PedrFelip/EngineRoom/commit/049298466a5de3377af5152832d2c2a1adbb7991))
 * **ui:** simplifica a importação em duas etapas e preserva a partida e os ajustes ao voltar da revisão ([de172d5](https://github.com/PedrFelip/EngineRoom/commit/de172d5abb323733d7ec69dbc78eb14cd3a9c178))
-* **ui:** simplifica a importação em duas etapas e preserva a partida e os ajustes ao voltar da revisão ([a7c935b](https://github.com/PedrFelip/EngineRoom/commit/a7c935b85bc00d9a0f1bc9f2b789d0778579cc70))
-* **ui:** simplifica a importação em duas etapas e preserva a partida e os ajustes ao voltar da revisão ([cd015de](https://github.com/PedrFelip/EngineRoom/commit/cd015dee8e873d65787266dabbd08a6e385c6e4f))
-* **ui:** simplifica a importação em duas etapas e preserva a partida e os ajustes ao voltar da revisão ([1025529](https://github.com/PedrFelip/EngineRoom/commit/10255290ce6d336ed73ddbff15658223de007696))
-* **ui:** simplifica a importação em duas etapas e preserva a partida e os ajustes ao voltar da revisão ([0492984](https://github.com/PedrFelip/EngineRoom/commit/049298466a5de3377af5152832d2c2a1adbb7991))
 * **ui:** unifica o visual de painéis e controles e adapta a interface a janelas menores ([de172d5](https://github.com/PedrFelip/EngineRoom/commit/de172d5abb323733d7ec69dbc78eb14cd3a9c178))
-* **ui:** unifica o visual de painéis e controles e adapta a interface a janelas menores ([a7c935b](https://github.com/PedrFelip/EngineRoom/commit/a7c935b85bc00d9a0f1bc9f2b789d0778579cc70))
-* **ui:** unifica o visual de painéis e controles e adapta a interface a janelas menores ([cd015de](https://github.com/PedrFelip/EngineRoom/commit/cd015dee8e873d65787266dabbd08a6e385c6e4f))
-* **ui:** unifica o visual de painéis e controles e adapta a interface a janelas menores ([1025529](https://github.com/PedrFelip/EngineRoom/commit/10255290ce6d336ed73ddbff15658223de007696))
-* **ui:** unifica o visual de painéis e controles e adapta a interface a janelas menores ([0492984](https://github.com/PedrFelip/EngineRoom/commit/049298466a5de3377af5152832d2c2a1adbb7991))
 
 
 ### Correções
 
 * **ui:** elimina piscadas e deslocamentos ao alternar abas e mantém o gráfico estável ([de172d5](https://github.com/PedrFelip/EngineRoom/commit/de172d5abb323733d7ec69dbc78eb14cd3a9c178))
-* **ui:** elimina piscadas e deslocamentos ao alternar abas e mantém o gráfico estável ([a7c935b](https://github.com/PedrFelip/EngineRoom/commit/a7c935b85bc00d9a0f1bc9f2b789d0778579cc70))
-* **ui:** elimina piscadas e deslocamentos ao alternar abas e mantém o gráfico estável ([cd015de](https://github.com/PedrFelip/EngineRoom/commit/cd015dee8e873d65787266dabbd08a6e385c6e4f))
-* **ui:** elimina piscadas e deslocamentos ao alternar abas e mantém o gráfico estável ([1025529](https://github.com/PedrFelip/EngineRoom/commit/10255290ce6d336ed73ddbff15658223de007696))
-* **ui:** elimina piscadas e deslocamentos ao alternar abas e mantém o gráfico estável ([0492984](https://github.com/PedrFelip/EngineRoom/commit/049298466a5de3377af5152832d2c2a1adbb7991))
 
 ## [1.0.0](https://github.com/PedrFelip/EngineRoom/compare/v0.9.1...v1.0.0) (2026-10-23)
 
