@@ -63,7 +63,10 @@ por job, separando testes (debug) dos instaladores (release). O job Rust salva
 esse cache mesmo quando um teste falha, para reaproveitar a compilação na próxima
 execução. A instalação das bibliotecas Linux dos testes usa
 `--no-install-recommends`: mantém dependências obrigatórias e evita os pacotes
-recomendados, sem remover testes ou mudar o runner da release. Os builds usam
+recomendados. Ayatana AppIndicator e libxdo não são instalados nesse job porque
+as features correspondentes não estão ativas no grafo Cargo atual; ao habilitar
+tray-icon ou linux-libxdo, revise essa lista. A cobertura e o setup dos instaladores
+permanecem os mesmos. Os builds usam
 `--locked` para preservar o Cargo.lock. O Stockfish usa uma chave que inclui o
 script de download e é salvo logo após o download, antes dos testes/builds.
 O sidecar é baixado antes dos testes Rust. Os testes do downloader também são
