@@ -1,0 +1,103 @@
+name: Checks
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.3'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Cache Bun packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-v1-${{ runner.os }}-${{ runner.arch }}-1.4.3-app-${{ hashFiles('app/bun.lock') }}
+          restore-keys: bun-v1-${{ runner.os }}-${{ runner.arch }}-1.4.3-app-
+      - run: bun install --frozen-lockfile
+        working-directory: app
+      - run: bun run lint && bun run typecheck && bun run test
+        working-directory: app
+
+  rust:
+    name: Rust and Stockfish
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - name: Install Tauri dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev build-essential libssl-dev librsvg2-dev
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: app/src-tauri -> target
+          cache-on-failure: true
+      - name: Restore Stockfish sidecar cache
+        id: stockfish-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: app/src-tauri/binaries/stockfish-*
+          key: stockfish-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('app/scripts/fetch-stockfish.mjs') }}
+      - run: node scripts/fetch-stockfish.mjs
+        working-directory: app
+      # Preserve the download even if compilation or tests fail later.
+      - name: Save Stockfish sidecar cache
+        if: steps.stockfish-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: app/src-tauri/binaries/stockfish-*
+          key: ${{ steps.stockfish-cache.outputs.cache-primary-key }}
+      - run: cargo test --locked
+        working-directory: app/src-tauri
+
+  automation:
+    name: Release automation
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.3'
+      - run: python -m unittest discover -s .github/scripts -p 'test_*.py'
+      - run: python .github/scripts/release_version.py
+      - name: Cache Bun packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-v1-${{ runner.os }}-${{ runner.arch }}-1.4.3-automation-${{ hashFiles('.github/scripts/bun.lock') }}
+          restore-keys: bun-v1-${{ runner.os }}-${{ runner.arch }}-1.4.3-automation-
+      - run: bun install --frozen-lockfile && bun run test
+        working-directory: .github/scripts

@@ -35,6 +35,11 @@ abrir a aba, suas partidas são buscadas automaticamente. Você pode trocar ou
 esquecer o usuário salvo, filtrar a lista carregada por ritmo e ver os
 resultados de sua perspectiva (vitória, derrota ou empate).
 
+A importação tem duas etapas e preserva o rascunho ao voltar da revisão.
+Os painéis de lances, análise e resumo dão mais espaço ao tabuleiro; atalhos
+levam aos erros da partida. O histórico permite buscar jogadores nas partidas
+carregadas, e as configurações são organizadas por seção.
+
 **Atalhos na revisão:** `←` / `→` para o lance anterior ou seguinte;
 `Home` / `End` para o início ou fim da partida. A interface tem temas claro
 e escuro.
@@ -109,6 +114,16 @@ cargo test
 Os testes cobrem o núcleo, o pipeline, as sessões e a persistência com engines
 falsas, além da integração com o Stockfish real. Essa integração exige o
 sidecar baixado no setup.
+
+## Desenvolvimento e releases
+
+Use branches de funcionalidade com PR para `develop`; promova mudanças prontas
+para `main` preservando os commits. O bot prepara um PR com versão e changelog.
+Ao fazer merge desse PR, os testes e builds geram e publicam os instaladores
+para Windows e Linux automaticamente.
+
+Veja o [guia de branches, commits e releases](docs/releases.md) para os tipos de
+merge, Conventional Commits, sincronização e retomada de builds.
 
 ## Licença
 

@@ -35,7 +35,9 @@ const dateFormat = new Intl.DateTimeFormat('pt-BR', {
 
 export default function ChessComImporter({
   onImport,
+  active = true,
 }: {
+  active?: boolean
   onImport: (pgn: string) => void
 }) {
   const {
@@ -46,7 +48,7 @@ export default function ChessComImporter({
     cancel,
     select,
     forgetUsername,
-  } = useChessComImport(onImport)
+  } = useChessComImport(onImport, active)
   const id = useId()
   const [filter, setFilter] = useState<string | null>(null)
   const games = filter
@@ -305,7 +307,8 @@ export default function ChessComImporter({
                 aria-hidden='true'
               />
               <span>
-                Partida selecionada. Tudo pronto para <strong>analisar</strong>.
+                Partida selecionada. Clique em <strong>Continuar</strong> para
+                configurar a análise.
               </span>
             </div>
           )}

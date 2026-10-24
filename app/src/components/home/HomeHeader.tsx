@@ -1,36 +1,63 @@
-import { Bot, Settings } from 'lucide-react'
+import { Archive, Blocks, FilePlus2, Settings } from 'lucide-react'
 import { Button } from '../ui/button'
 
 interface Props {
+  view: 'new' | 'history'
+  onViewChange: (view: 'new' | 'history') => void
   onOpenSettings: () => void
 }
 
-export default function HomeHeader({ onOpenSettings }: Props) {
+export default function HomeHeader({
+  view,
+  onViewChange,
+  onOpenSettings,
+}: Props) {
   return (
-    <header className='mb-8 flex w-full max-w-xl items-center justify-between md:max-w-6xl'>
-      <div className='flex items-center gap-2.5'>
-        <div className='brand-mark flex h-9 w-9 items-center justify-center rounded-lg bg-brand text-bg'>
-          <Bot size={20} strokeWidth={2} aria-hidden='true' />
+    <header className='home-navigation flex w-full max-w-6xl flex-nowrap items-center justify-between gap-2 p-2.5 sm:gap-3 sm:p-3 md:px-4'>
+      <div className='flex min-w-0 shrink items-center gap-2.5 pl-1'>
+        <div className='flex size-9 shrink-0 items-center justify-center rounded-xl bg-brand/10 text-brand'>
+          <Blocks size={19} strokeWidth={1.8} aria-hidden='true' />
         </div>
-        <div className='leading-tight'>
-          <h1 className='text-lg font-bold tracking-tight text-ink'>
-            EngineRoom
-          </h1>
-          <p className='text-[11px] font-medium tracking-wide text-ink-faint'>
-            LOCAL CHESS INTELLIGENCE
-          </p>
-        </div>
+        <h1 className='whitespace-nowrap text-sm font-semibold tracking-tight text-ink max-[359px]:sr-only'>
+          EngineRoom
+        </h1>
       </div>
-      <Button
-        onClick={onOpenSettings}
-        variant='ghost'
-        size='icon'
-        className='border-edge bg-panel-2/60'
-        aria-label='Configurações'
-        title='Configurações'
+      <nav
+        aria-label='Menu principal'
+        className='flex shrink-0 items-center gap-0.5 sm:gap-1'
       >
-        <Settings size={18} strokeWidth={1.8} aria-hidden='true' />
-      </Button>
+        <button
+          type='button'
+          onClick={() => onViewChange('new')}
+          aria-current={view === 'new' ? 'page' : undefined}
+          className='home-nav-link'
+        >
+          <FilePlus2 size={16} strokeWidth={1.8} aria-hidden='true' />
+          <span className='hidden sm:inline'>Nova análise</span>
+          <span className='sr-only sm:hidden'>Nova análise</span>
+        </button>
+        <button
+          type='button'
+          onClick={() => onViewChange('history')}
+          aria-current={view === 'history' ? 'page' : undefined}
+          className='home-nav-link'
+        >
+          <Archive size={16} strokeWidth={1.8} aria-hidden='true' />
+          <span className='hidden sm:inline'>Histórico</span>
+          <span className='sr-only sm:hidden'>Histórico</span>
+        </button>
+        <span aria-hidden='true' className='mx-1 h-5 w-px bg-edge' />
+        <Button
+          onClick={onOpenSettings}
+          variant='ghost'
+          size='icon'
+          className='size-10 rounded-xl'
+          aria-label='Configurações'
+          title='Configurações'
+        >
+          <Settings size={18} strokeWidth={1.8} aria-hidden='true' />
+        </Button>
+      </nav>
     </header>
   )
 }

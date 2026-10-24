@@ -13,8 +13,9 @@ Tauri 2 desktop app (Rust + React 19) that reviews chess games locally with Stoc
 
 From `app/`: `bun run lint && bun run typecheck && bun run test`.
 From `app/src-tauri/`: `cargo test`.
-- Release CI builds installers but does not run the app lint/test suite; run verification locally. `typecheck` includes `tsconfig.tests.json`; Vitest transpilation alone does not type-check tests.
-- `bun run test` runs Node downloader tests before Vitest. Focused frontend: `bunx vitest run src/lib/settings.test.ts`; downloader: `node --test scripts/fetch-stockfish.test.mjs` (both from `app/`). Rust: `cargo test <name-filter>`; real session: `cargo test real_stockfish_sidecar_cache_history_reopen_and_live_cancellation`.
+
+- CI runs the app suite on PRs/pushes to main/develop and at the immutable release commit before building installers. Run verification locally too. `typecheck` checks the app and `tsconfig.tests.json`; Vitest transpilation alone does not type-check tests.
+- `bun run test` runs Node downloader tests before Vitest. Downloader: `node --test scripts/fetch-stockfish.test.mjs` from `app/`; real session: `cargo test real_stockfish_sidecar_cache_history_reopen_and_live_cancellation`.
 - Vitest 4 uses `node`, not jsdom. Use Effect TestContext/TestClock directly; do not install `@effect/vitest` 0.30 (requires Vitest 3).
 
 ## Architecture and resource ownership
@@ -52,5 +53,8 @@ Existing cache/history/storage/system commands remain registered for administrat
 
 ## Releases
 
-- Keep versions synchronized in `app/package.json`, `app/src-tauri/tauri.conf.json`, `app/src-tauri/Cargo.toml` and the local app entry in `app/src-tauri/Cargo.lock`. `.github/scripts/release_version.py` enforces this.
-- A version bump on `main`, matching `v*` tag, or manual workflow dispatch creates/resumes a **draft** release (Linux AppImage and Windows installers). Release-script tests, from the repo root: `python -m unittest discover -s .github/scripts -p 'test_*.py'` (Python 3.11+ for `tomllib`).
+- Keep versions synchronized in package.json, tauri.conf.json, Cargo.toml and the local app entry in Cargo.lock. `.github/scripts/release_version.py` enforces this; Release Please updates all four in its version PR.
+- Use feature/fix PRs into `develop` with Conventional Commit titles and squash merges. Promote `develop` to `main` with merge commits; preserve history when merging the automatic `main` → `develop` synchronization PR. Hotfix PRs may target main directly.
+- Merging the Release Please PR creates a draft; tests and all Linux/Windows installer builds must pass before automatic publication. Manual dispatch from main resumes an existing tag; tag pushes and manual version bumps do not independently publish releases. See `docs/releases.md`.
+- Workflows use `GITHUB_TOKEN` and explicitly dispatch CI for bot PRs. Keep the `CI passed` branch-protection check and its terminal gate that fails on skipped/failed dependencies.
+- From the root: `python -m unittest discover -s .github/scripts -p 'test_*.py'` (Python 3.11+). From `.github/scripts/`: `bun install --frozen-lockfile && bun run test`; the pinned Release Please library must match the pinned action.

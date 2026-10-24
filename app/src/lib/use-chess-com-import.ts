@@ -8,7 +8,10 @@ import {
 import { useSettings } from './settings-context'
 
 /** A fresh owner per effect setup also supports React StrictMode's replay. */
-export function useChessComImport(onImport: (pgn: string) => void) {
+export function useChessComImport(
+  onImport: (pgn: string) => void,
+  active = true,
+) {
   const savedUsername = useSettings((state) => state.settings.chessComUsername)
   const updateSettings = useSettings((state) => state.updateSettings)
   const [initialUsername] = useState(savedUsername)
@@ -34,13 +37,25 @@ export function useChessComImport(onImport: (pgn: string) => void) {
       },
     )
     owner.current = controller
-    // Replayed mounts wait for the previous owner's acknowledged IPC cleanup.
-    void closing.current.then(() => controller.start())
     return () => {
       owner.current = null
       closing.current = controller.dispose()
     }
   }, [store, initialUsername, updateSettings])
+  useEffect(() => {
+    let cancelled = false
+    if (active) {
+      // Replayed mounts wait for the previous owner's acknowledged IPC cleanup.
+      void closing.current.then(() => {
+        if (!cancelled) return owner.current?.start()
+      })
+    } else {
+      owner.current?.cancel()
+    }
+    return () => {
+      cancelled = true
+    }
+  }, [active])
   return {
     state,
     savedUsername,
