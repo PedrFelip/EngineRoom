@@ -39,9 +39,11 @@ fn target_triple() -> String {
 
 fn sidecar_path() -> PathBuf {
     let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| ".".to_string());
-    PathBuf::from(manifest)
-        .join("binaries")
-        .join(format!("stockfish-{}", target_triple()))
+    PathBuf::from(manifest).join("binaries").join(format!(
+        "stockfish-{}{}",
+        target_triple(),
+        std::env::consts::EXE_SUFFIX
+    ))
 }
 
 const TIMEOUT: Duration = Duration::from_secs(15);
@@ -91,7 +93,7 @@ async fn stockfish_uci_handshake_and_bestmove() {
         }
     }
     assert!(got_uciok, "engine não respondeu `uciok` a tempo");
-    assert!(name.contains("Stockfish"), "id name inesperado: {name:?}");
+    assert_eq!(name, "Stockfish 19", "id name inesperado: {name:?}");
 
     // 2) Ask for a move from the start position.
     stdin

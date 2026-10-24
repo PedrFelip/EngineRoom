@@ -1,10 +1,13 @@
 import { Schema } from 'effect'
+import { normalizeChessComUsername } from './chess-com-account'
 import { SettingsInputSchema } from './effect/schemas'
 
 export type Theme = 'dark' | 'light'
 
 export interface Settings {
   theme: Theme
+  /** Último usuário pesquisado com sucesso na importação online. */
+  chessComUsername: string | null
   /** Toca som ao avançar um lance na revisão. */
   soundEnabled: boolean
   /** Volume do som de movimentação, em [0, 1]. */
@@ -24,6 +27,7 @@ export const SETTINGS_KEY = 'engineroom.settings.v1'
 
 export const DEFAULT_SETTINGS: Settings = {
   theme: 'dark',
+  chessComUsername: null,
   soundEnabled: true,
   soundVolume: 0.7,
   reviewEngineEnabled: true,
@@ -58,6 +62,7 @@ export function loadSettings(): Settings {
     const parsed = Schema.decodeUnknownSync(SettingsInputSchema)(raw)
     return {
       theme: parsed.theme === 'light' ? 'light' : 'dark',
+      chessComUsername: normalizeChessComUsername(parsed.chessComUsername),
       soundEnabled: parsed.soundEnabled !== false,
       soundVolume: clampVolume(parsed.soundVolume),
       reviewEngineEnabled: parsed.reviewEngineEnabled !== false,

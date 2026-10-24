@@ -9,7 +9,7 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "test": "vitest run",
+    "test": "node --test scripts/fetch-stockfish.test.mjs && vitest run",
     "test:watch": "vitest",
     "bench:rust": "cd src-tauri && cargo test --release --lib benchmark_analysis_overhead -- --ignored --nocapture",
     "bench:uci-ipc": "tauri dev -- -- --bench-uci-ipc",

@@ -88,7 +88,7 @@ jobs:
               tag_name: tag,
               target_commitish: sha,
               name: `EngineRoom ${tag}`,
-              body: 'Instaladores para Windows (NSIS/MSI) e Linux (AppImage). Inclui Stockfish 18 como sidecar.',
+              body: 'Instaladores para Windows (NSIS/MSI) e Linux (AppImage). Inclui Stockfish 19 como sidecar.',
               draft: true,
               prerelease: process.env.RELEASE_PRERELEASE === 'true',
             })

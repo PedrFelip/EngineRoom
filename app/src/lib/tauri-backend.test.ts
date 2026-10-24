@@ -180,8 +180,8 @@ describe('session IPC acquisition and validation', () => {
     expect(
       Schema.decodeUnknownSync(ProbeResultSchema)({
         ok: true,
-        name: 'Stockfish 18',
+        name: 'Stockfish 19',
       }),
-    ).toEqual({ ok: true, name: 'Stockfish 18' })
+    ).toEqual({ ok: true, name: 'Stockfish 19' })
   })
 })

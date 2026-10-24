@@ -1,13 +1,15 @@
 # EngineRoom
 
-Revise suas partidas de xadrez com **Stockfish 18**, direto no computador.
+Revise suas partidas de xadrez com **Stockfish 19**, direto no computador.
 Importe um PGN, analise os lances e explore as alternativas no tabuleiro.
 A análise é local: seu PGN não é enviado a um servidor.
 
 ## Como funciona
 
 1. **Importe a partida** arrastando um arquivo `.pgn` ou `.txt`, usando o
-   seletor de arquivos ou colando o PGN.
+   seletor de arquivos, colando o PGN ou buscando pelo nome de usuário na
+   aba **Chess.com**. Selecionar uma partida já preenche a prévia, sem um
+   botão extra de importação.
 2. **Escolha a análise.** O modo automático oferece os perfis Rápido e
    Profundo: avalia todas as posições e dedica mais tempo às decisões críticas.
    No modo manual, você define profundidade ou tempo por posição e o número
@@ -21,6 +23,17 @@ A análise é local: seu PGN não é enviado a um servidor.
 As posições analisadas ficam em um cache local para reaproveitar resultados
 compatíveis em novas revisões. O histórico permite reabrir, reanalisar e
 excluir partidas.
+
+A busca no Chess.com usa a API pública, sem login, e exige internet. Carrega
+até 20 partidas concluídas de xadrez padrão por consulta, com **Buscar
+anteriores** para continuar (até 100 na lista). Cada consulta percorre até
+três arquivos mensais e tem limites de tempo e tamanho; resultados parciais
+são indicados na interface. Partidas recém-terminadas podem demorar para
+aparecer na API. Depois da importação, a análise continua local e offline.
+O último username pesquisado com sucesso fica salvo neste dispositivo; ao
+abrir a aba, suas partidas são buscadas automaticamente. Você pode trocar ou
+esquecer o usuário salvo, filtrar a lista carregada por ritmo e ver os
+resultados de sua perspectiva (vitória, derrota ou empate).
 
 **Atalhos na revisão:** `←` / `→` para o lance anterior ou seguinte;
 `Home` / `End` para o início ou fim da partida. A interface tem temas claro
@@ -41,8 +54,9 @@ node scripts/fetch-stockfish.mjs
 bun run tauri dev
 ```
 
-O script baixa o Stockfish para a plataforma atual e pula o download se o
-sidecar já existir. O Tauri inicia o Vite automaticamente.
+O script baixa o Stockfish 19 universal para a plataforma atual, atualiza
+sidecars de versões anteriores e pula o download se a versão correta já
+estiver instalada. O Tauri inicia o Vite automaticamente.
 
 Para gerar o aplicativo e os instaladores nativos, também em `app/`:
 
@@ -60,6 +74,7 @@ para conectar as duas partes.
 | Análise | PGN, regras de xadrez, classificação, acurácia, aberturas e seleção adaptativa | [`review/`](app/src-tauri/src/review/) |
 | Motor e sessões | Comunicação UCI com o Stockfish, fila de trabalho, análise ao vivo e encerramento dos processos | [`review/session/`](app/src-tauri/src/review/session/) |
 | Persistência | Cache de posições, histórico e migrações SQLite | [`db/`](app/src-tauri/src/db/) |
+| Importação online | API Chess.com, validação e buscas limitadas por janela | [`imports/`](app/src-tauri/src/imports/) e [`chess-com-import.ts`](app/src/lib/chess-com-import.ts) |
 | Integração frontend | IPC com Effect, validação de eventos e ciclo de vida da sessão | [`review-session.ts`](app/src/lib/review-session.ts) e [`review-protocol.ts`](app/src/lib/review-protocol.ts) |
 | Estado da revisão | Navegação e variações no tabuleiro | [`review-store.ts`](app/src/lib/review-store.ts) |
 

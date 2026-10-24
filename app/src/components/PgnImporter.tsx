@@ -1,5 +1,6 @@
-import { Check, ClipboardPaste, FileUp, Upload } from 'lucide-react'
+import { Check, ClipboardPaste, FileUp, Globe, Upload } from 'lucide-react'
 import { useCallback, useRef, useState } from 'react'
+import ChessComImporter from './ChessComImporter'
 import { Badge } from './ui/badge'
 import { Button } from './ui/button'
 
@@ -10,7 +11,7 @@ interface Props {
   onImport?: (pgn: string) => void
 }
 
-type Mode = 'file' | 'paste'
+type Mode = 'file' | 'paste' | 'chesscom'
 
 function readFile(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -40,24 +41,30 @@ export default function PgnImporter({ value, onChange, onImport }: Props) {
 
   return (
     <div>
-      <div className='mb-3 flex w-fit rounded-[calc(var(--control-radius)+2px)] border border-edge bg-panel-2/60 p-1'>
-        {(['file', 'paste'] as Mode[]).map((m) => (
+      <div className='mb-3 grid grid-cols-3 gap-1 rounded-xl border border-border bg-muted/40 p-1'>
+        {(['file', 'paste', 'chesscom'] as Mode[]).map((m) => (
           <Button
             key={m}
             onClick={() => setMode(m)}
+            aria-pressed={mode === m}
             size='sm'
             variant={mode === m ? 'default' : 'ghost'}
-            className={`h-8 px-3 ${mode === m ? '' : 'text-ink-faint hover:text-ink'}`}
+            className={`h-9 min-w-0 gap-1.5 px-2 text-[11px] sm:text-xs ${mode === m ? 'shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
           >
             {m === 'file' ? (
               <>
                 <FileUp size={14} strokeWidth={2} aria-hidden='true' />
                 Arquivo PGN
               </>
-            ) : (
+            ) : m === 'paste' ? (
               <>
                 <ClipboardPaste size={14} strokeWidth={2} aria-hidden='true' />
                 Colar PGN
+              </>
+            ) : (
+              <>
+                <Globe size={14} strokeWidth={2} aria-hidden='true' />
+                Chess.com
               </>
             )}
           </Button>
@@ -121,6 +128,8 @@ export default function PgnImporter({ value, onChange, onImport }: Props) {
             }}
           />
         </div>
+      ) : mode === 'chesscom' ? (
+        <ChessComImporter onImport={onImport ?? onChange} />
       ) : (
         <div className='relative'>
           <textarea
