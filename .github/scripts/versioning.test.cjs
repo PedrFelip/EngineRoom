@@ -52,7 +52,7 @@ test('administrative-only changes do not open a version PR', async () => {
 });
 
 test('AppImage packaging fixes produce a patch release through manifest path filtering', async () => {
-  const script = 'app/scripts/prepare_appimage.py';
+  const script = 'app/scripts/verify_appimage.py';
   assert.ok(fs.existsSync(path.join(root, script)), 'The packaging script must live in the released app path');
   const message = 'fix: corrige inicialização do AppImage com Mesa recente\n\nRelease-As: 2.1.1';
   const files = [script, '.github/workflows/release.yml'];
