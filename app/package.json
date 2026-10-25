@@ -24,7 +24,7 @@
     "chessground": "^9.2.1",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
-    "effect": "3.22.1",
+    "effect": "4.0.6",
     "lucide-react": "^1.61.0",
     "radix-ui": "^1.8.1",
     "react": "^19.3.1",
@@ -41,9 +41,9 @@
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.2",
     "tailwindcss": "^4.3.3",
-    "typescript": "~6.0.3",
+    "typescript": "~7.0.2",
     "vite": "^8.3.5",
-    "vitest": "^4.1.12"
+    "vitest": "^5.0.5"
   },
   "packageManager": "bun@1.4.4"
 }
