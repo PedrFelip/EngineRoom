@@ -88,6 +88,32 @@ gh workflow run ci.yml --ref NOME_DA_BRANCH -f pr_number=NUMERO_DO_PR
 
 ## Falhas e retomada
 
+### Compatibilidade gráfica do AppImage
+
+O build Linux continua no Ubuntu 22.04, mas o AppImage usa a biblioteca
+`libwayland-client.so.0` do sistema de destino. A cópia antiga incluída pelo
+linuxdeploy pode impedir o carregamento do Mesa atual por símbolos ausentes
+(`wl_fixes_interface`, por exemplo), levando o WebKit a abortar com
+`Could not create default EGL display: EGL_BAD_PARAMETER`, inclusive via XWayland.
+
+Depois do build, `.github/scripts/prepare_appimage.py` remove somente as cópias
+de `libwayland-client.so*`, preserva o runtime e o formato SquashFS e extrai o
+arquivo final para conferir a exclusão. Só depois os instaladores são enviados
+ao rascunho. Uma falha impede a publicação. Os testes da automação exercitam o
+reempacotamento real com `squashfs-tools`, incluindo preservação dos outros
+arquivos e falha sem sobrescrever o original.
+
+O Linux de destino precisa fornecer `libwayland-client.so.0` (pacote
+`libwayland-client0` no Ubuntu/Debian; `wayland` no Arch). Builds locais para
+distribuição também devem executar, na raiz, antes de assinar ou enviar:
+
+```bash
+python3 .github/scripts/prepare_appimage.py app/src-tauri/target/release/bundle/appimage/*.AppImage
+```
+
+Não aplique `LD_PRELOAD` global nem desative a aceleração gráfica para contornar
+essa incompatibilidade de empacotamento.
+
 Falhas em testes ou em qualquer plataforma mantêm a release como rascunho.
 A publicação exige os três instaladores completos. Todos são construídos no SHA
 imutável da release; uma tag apontando para outro commit causa falha.
@@ -103,6 +129,9 @@ histórico da main. Se já estiver publicada, somente retoma a sincronização c
 develop. Não move tags nem cria uma nova versão.
 
 ## Verificar alterações na automação
+
+Os testes de reempacotamento do AppImage exigem `squashfs-tools` instalado.
+Sem essas ferramentas, esses testes são pulados; o CI instala e executa todos.
 
 Na raiz:
 

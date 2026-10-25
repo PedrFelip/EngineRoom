@@ -110,7 +110,12 @@ jobs:
         if: matrix.platform == 'ubuntu-22.04'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev squashfs-tools
+
+      - uses: actions/setup-python@v5
+        if: matrix.platform == 'ubuntu-22.04'
+        with:
+          python-version: '3.12'
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -158,14 +163,28 @@ jobs:
           path: app/src-tauri/binaries/stockfish-*
           key: ${{ steps.stockfish-cache.outputs.cache-primary-key }}
 
-      - name: Build and upload to draft
+      - name: Build installers
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           projectPath: app
-          releaseId: ${{ needs.prepare.outputs.release_id }}
           args: ${{ matrix.args }} -- --locked
+
+      - name: Prepare and verify AppImage for host graphics drivers
+        if: matrix.platform == 'ubuntu-22.04'
+        run: python3 .github/scripts/prepare_appimage.py app/src-tauri/target/release/bundle/appimage/*.AppImage
+
+      - name: Upload verified installers to draft
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          shopt -s nullglob
+          installers=(app/src-tauri/target/release/bundle/{appimage/*.AppImage,nsis/*.exe,msi/*.msi})
+          test "${#installers[@]}" -gt 0
+          gh release upload "$RELEASE_TAG" "${installers[@]}" --clobber
 
   publish:
     needs: [prepare, checks, build]
