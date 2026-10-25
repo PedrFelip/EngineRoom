@@ -1,5 +1,14 @@
 # Changelog
 
+## [2.1.2](https://github.com/PedrFelip/EngineRoom/compare/v2.1.1...v2.1.2) (2026-10-25)
+
+
+### Correções
+
+* atualiza stack do aplicativo para 2.1.2 ([abf8bde](https://github.com/PedrFelip/EngineRoom/commit/abf8bde2551941f72a8881cabc68e41f78e3417e))
+* atualiza stack e corrige AppImage no Linux ([80cc646](https://github.com/PedrFelip/EngineRoom/commit/80cc646a7473c8935347558f38e17ea0eeb21f7a))
+* usa empacotador corrigido do Tauri para AppImage ([f43c31e](https://github.com/PedrFelip/EngineRoom/commit/f43c31e7ccbd7e2975cee98719572b68a860795f))
+
 ## [2.1.1](https://github.com/PedrFelip/EngineRoom/compare/v2.1.0...v2.1.1) (2026-10-25)
 
 
