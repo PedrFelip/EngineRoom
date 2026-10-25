@@ -1,5 +1,14 @@
 # Changelog
 
+## [2.1.0](https://github.com/PedrFelip/EngineRoom/compare/v2.0.0...v2.1.0) (2026-10-25)
+
+
+### Funcionalidades
+
+* add Chess.com game import and harden Stockfish download ([f894dbb](https://github.com/PedrFelip/EngineRoom/commit/f894dbb3b947a15b2ec49d92ed5635f678a6d27b))
+* importa partidas do Chess.com para revisão local ([7e5f864](https://github.com/PedrFelip/EngineRoom/commit/7e5f86429100f17adcbfa5141e17900af79abd38))
+* **ui:** melhora navegação e ícones da importação Chess.com ([1f15a7d](https://github.com/PedrFelip/EngineRoom/commit/1f15a7d3de9cc3ec1b80ba772ca8bf63251607e0))
+
 ## [2.0.0](https://github.com/PedrFelip/EngineRoom/compare/v1.0.0...v2.0.0) (2026-10-23)
 
 
