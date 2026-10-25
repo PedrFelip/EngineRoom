@@ -260,7 +260,7 @@ export default function SettingsModal({
             <div className='rounded-2xl border border-edge-soft bg-panel-2/40 p-4'>
               <span>
                 <span className='block text-sm font-medium text-ink'>
-                  Stockfish embarcado
+                  Stockfish 19 embarcado
                 </span>
                 <span className='block text-xs text-ink-faint'>
                   Usa exclusivamente a engine que vem junto com o app.

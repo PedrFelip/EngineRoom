@@ -14,14 +14,21 @@ export default function HomeHeader({
 }: Props) {
   return (
     <header className='home-navigation flex w-full max-w-6xl flex-nowrap items-center justify-between gap-2 p-2.5 sm:gap-3 sm:p-3 md:px-4'>
-      <div className='flex min-w-0 shrink items-center gap-2.5 pl-1'>
-        <div className='flex size-9 shrink-0 items-center justify-center rounded-xl bg-brand/10 text-brand'>
-          <Blocks size={19} strokeWidth={1.8} aria-hidden='true' />
-        </div>
-        <h1 className='whitespace-nowrap text-sm font-semibold tracking-tight text-ink max-[359px]:sr-only'>
-          EngineRoom
-        </h1>
-      </div>
+      <h1 className='min-w-0 shrink'>
+        <button
+          type='button'
+          onClick={() => onViewChange('new')}
+          aria-label='EngineRoom — Nova análise'
+          className='flex min-w-0 items-center gap-2.5 rounded-xl pl-1 text-left outline-none transition hover:opacity-80 focus-visible:ring-2 focus-visible:ring-brand'
+        >
+          <span className='flex size-9 shrink-0 items-center justify-center rounded-xl bg-brand/10 text-brand'>
+            <Blocks size={19} strokeWidth={1.8} aria-hidden='true' />
+          </span>
+          <span className='whitespace-nowrap text-sm font-semibold tracking-tight text-ink max-[359px]:sr-only'>
+            EngineRoom
+          </span>
+        </button>
+      </h1>
       <nav
         aria-label='Menu principal'
         className='flex shrink-0 items-center gap-0.5 sm:gap-1'

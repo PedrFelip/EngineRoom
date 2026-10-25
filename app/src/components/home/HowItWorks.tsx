@@ -14,9 +14,11 @@ export default function HowItWorks() {
               <FileUp size={14} strokeWidth={2.2} aria-hidden='true' />
             </span>
             <div>
-              <p className='text-sm font-semibold text-ink'>Importe um PGN</p>
+              <p className='text-sm font-semibold text-ink'>
+                Importe sua partida
+              </p>
               <p className='mt-0.5 text-xs text-ink-dim'>
-                Arraste um arquivo .pgn ou cole a notação diretamente.
+                Use um arquivo PGN, cole a notação ou busque no Chess.com.
               </p>
             </div>
           </li>

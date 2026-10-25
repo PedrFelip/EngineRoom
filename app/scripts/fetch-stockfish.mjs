@@ -10,36 +10,41 @@
  * The repo does not commit the binaries (see src-tauri/.gitignore), so every
  * developer / CI run fetches the right one for their platform.
  */
-import { execSync } from "node:child_process";
+import { execFileSync, execSync } from "node:child_process";
 import { copyFileSync, createWriteStream, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { exec as execCb } from "node:child_process";
 import { promisify } from "node:util";
+import { pathToFileURL } from "node:url";
 const exec = promisify(execCb);
 
 const BINARIES_DIR = resolve(process.cwd(), "src-tauri/binaries");
-const SF_TAG = "sf_18";
+const SF_TAG = "sf_19";
 
 /** Map our known targets to a Stockfish release asset. */
-function assetFor(target) {
+export function assetFor(target) {
   const isWin = target.includes("windows");
   const isMac = target.includes("apple-darwin");
   const isLinux = target.includes("linux");
-  const arch = target.includes("aarch64") || target.includes("arm64") ? "arm" : "x86-64";
+  const arch = /^(aarch64|arm64)-/.test(target)
+    ? "arm64"
+    : target.startsWith("x86_64-") ? "x86-64" : null;
+  if (!arch) throw new Error(`Arquitetura não suportada: ${target}`);
 
-  // Prefer broadly-compatible variants (no AVX2 requirement) for portability.
+  // Universal binaries select the optimal instructions for the host CPU.
   if (isWin) {
-    return arch === "arm" ? "stockfish-windows-armv8.zip" : "stockfish-windows-x86-64.zip";
+    return `stockfish-windows-${arch}-universal.zip`;
   }
   if (isMac) {
-    return arch === "arm"
-      ? "stockfish-macos-m1-apple-silicon.tar"
-      : "stockfish-macos-x86-64.tar";
+    return "stockfish-macos-universal.tar.gz";
   }
   if (isLinux) {
-    return arch === "arm" ? "stockfish-android-armv8.tar" : "stockfish-ubuntu-x86-64.tar";
+    if (!target.endsWith("-gnu")) {
+      throw new Error(`Target Linux não suportado: ${target}`);
+    }
+    return `stockfish-linux-${arch}-universal.tar.gz`;
   }
   throw new Error(`Plataforma não suportada pelo fetch script: ${target}`);
 }
@@ -75,11 +80,8 @@ async function extractZip(archivePath, outDir) {
 }
 
 /** Find the actual stockfish executable inside the extracted dir. */
-function findBinary(dir, ext) {
+function findBinary(dir, expectedName) {
   const entries = readdirSync(dir, { recursive: true });
-  // Prefer the largest file whose basename starts with stockfish (the real binary is ~100MB, AUTHORS is 6KB)
-  let best = null
-  let bestSize = -1
   for (const entry of entries) {
     const full = join(dir, String(entry));
     try {
@@ -88,65 +90,80 @@ function findBinary(dir, ext) {
       continue;
     }
     const name = basename(String(entry));
-    if (!/^stockfish/i.test(name)) continue;
-    if (ext ? !name.endsWith(ext) : name.endsWith(".exe")) continue;
-    // Skip known non-binary docs that happen to be under a stockfish/ folder
-    if (/^AUTHORS|README|Copying|CITATION/i.test(name)) continue;
-    try {
-      const size = statSync(full).size;
-      if (size > bestSize) {
-        bestSize = size;
-        best = full;
-      }
-    } catch {
-      if (!best) best = full;
-    }
+    if (name === expectedName) return full;
   }
-  return best;
+  return null;
+}
+
+export function isExpectedVersion(output) {
+  return /^id name Stockfish 19\s*$/m.test(output);
+}
+
+function hasExpectedVersion(binary) {
+  try {
+    return isExpectedVersion(execFileSync(binary, [], {
+      input: "uci\nquit\n",
+      encoding: "utf8",
+      timeout: 15000,
+      maxBuffer: 1024 * 1024,
+      stdio: ["pipe", "pipe", "pipe"],
+    }));
+  } catch {
+    return false;
+  }
 }
 
 async function main() {
   const target = hostTuple();
   if (!target) throw new Error("Não consegui determinar o target triple do Rust.");
   const ext = target.includes("windows") ? ".exe" : "";
+  const asset = assetFor(target);
   const finalPath = join(BINARIES_DIR, `stockfish-${target}${ext}`);
-  if (existsSync(finalPath)) {
-    console.log("✓ Já existe:", finalPath);
+  if (existsSync(finalPath) && hasExpectedVersion(finalPath)) {
+    console.log("✓ Stockfish 19 já instalado:", finalPath);
     return;
   }
 
-  const asset = assetFor(target);
   const url = `https://github.com/official-stockfish/Stockfish/releases/download/${SF_TAG}/${asset}`;
   mkdirSync(BINARIES_DIR, { recursive: true });
 
   const tmp = join(tmpdir(), `sf-${Date.now()}`);
   mkdirSync(tmp, { recursive: true });
   const archivePath = join(tmp, asset);
-  await download(url, archivePath);
-
-  const extractDir = join(tmp, "out");
-  mkdirSync(extractDir, { recursive: true });
-  if (asset.endsWith(".tar")) await extractTar(archivePath, extractDir);
-  else await extractZip(archivePath, extractDir);
-
-  const bin = findBinary(extractDir, ext);
-  if (!bin) throw new Error("Binário do Stockfish não encontrado no pacote extraído.");
-
-  if (!ext) await exec(`chmod +x "${bin}"`);
+  const stagedPath = `${finalPath}.download`;
   try {
-    renameSync(bin, finalPath)
-  } catch (e) {
-    if (e.code === 'EXDEV') {
-      copyFileSync(bin, finalPath)
-      if (!ext) await exec(`chmod +x "${finalPath}"`)
-    } else throw e
-  }
-  rmSync(tmp, { recursive: true, force: true });
+    await download(url, archivePath);
 
-  console.log("✓ Stockfish instalado em:", finalPath);
+    const extractDir = join(tmp, "out");
+    mkdirSync(extractDir, { recursive: true });
+    if (asset.endsWith(".tar.gz")) await extractTar(archivePath, extractDir);
+    else await extractZip(archivePath, extractDir);
+
+    const expectedName = asset.replace(/\.(tar\.gz|zip)$/, "") + ext;
+    const bin = findBinary(extractDir, expectedName);
+    if (!bin) throw new Error("Binário do Stockfish não encontrado no pacote extraído.");
+
+    if (!ext) await exec(`chmod +x "${bin}"`);
+    if (!hasExpectedVersion(bin)) {
+      throw new Error("O pacote baixado não identificou Stockfish 19 via UCI.");
+    }
+    copyFileSync(bin, stagedPath);
+    if (!ext) await exec(`chmod +x "${stagedPath}"`);
+    renameSync(stagedPath, finalPath);
+
+    console.log("✓ Stockfish 19 instalado em:", finalPath);
+  } finally {
+    rmSync(stagedPath, { force: true });
+    rmSync(tmp, { recursive: true, force: true });
+  }
 }
 
-main().catch((e) => {
-  console.error("✗", e?.message || e);
-  process.exit(1);
-});
+if (
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(resolve(process.argv[1])).href
+) {
+  main().catch((e) => {
+    console.error("✗", e?.message || e);
+    process.exit(1);
+  });
+}
