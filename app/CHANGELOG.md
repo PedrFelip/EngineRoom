@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.1.1](https://github.com/PedrFelip/EngineRoom/compare/v2.1.0...v2.1.1) (2026-10-25)
+
+
+### Correções
+
+* inclui empacotamento do AppImage na release 2.1.1 ([9a9a329](https://github.com/PedrFelip/EngineRoom/commit/9a9a329d134c4781b1c1724a7ebf16d8368b82bf))
+* inclui empacotamento do AppImage na release 2.1.1 ([31aa436](https://github.com/PedrFelip/EngineRoom/commit/31aa436e3be82050e7e2f3c66376c37b9017397f))
+
 ## [2.1.0](https://github.com/PedrFelip/EngineRoom/compare/v2.0.0...v2.1.0) (2026-10-25)
 
 
