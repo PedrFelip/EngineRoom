@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.1.3](https://github.com/PedrFelip/EngineRoom/compare/v2.1.2...v2.1.3) (2026-10-25)
+
+
+### Correções
+
+* migra frontend e corrige ambiente de teste do AppImage ([6841bab](https://github.com/PedrFelip/EngineRoom/commit/6841babed85b321e1007ef4ceb9bd65f50e8fc07))
+
 ## [2.1.2](https://github.com/PedrFelip/EngineRoom/compare/v2.1.1...v2.1.2) (2026-10-25)
 
 
