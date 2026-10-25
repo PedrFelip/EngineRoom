@@ -1,10 +1,10 @@
-import { Effect, Layer, Schema } from 'effect'
+import { Deferred, Effect, Layer, Schema } from 'effect'
 import { describe, expect, it, vi } from 'vitest'
 import type { ReviewConfig } from '../types'
 import reviewFixture from './__tests__/fixtures/review.json'
 import { AnalysisSessions, type SessionPort } from './backend'
 import { SessionError } from './effect/errors'
-import { mountReviewSession } from './effect/ui-runtime'
+import { mountReviewSession, runUi } from './effect/ui-runtime'
 import { ReviewResultSchema, type SessionEvent } from './review-protocol'
 import type { LiveAnalysisSettings } from './review-session'
 import { createReviewStore } from './review-store'
@@ -35,7 +35,7 @@ const settings: LiveAnalysisSettings = {
   memoryMb: 16,
   moveFeedbackEnabled: false,
 }
-function fixture(initial = false) {
+function fixture(initial = false, cleanup: Effect.Effect<void> = Effect.void) {
   let emit: (event: SessionEvent) => void = () => {}
   let sequence = 0
   type Payload<T> = T extends SessionEvent
@@ -61,7 +61,7 @@ function fixture(initial = false) {
         () =>
           Effect.sync(() => {
             close()
-          }),
+          }).pipe(Effect.andThen(cleanup)),
       ),
   })
   const mounted = mountReviewSession(
@@ -84,6 +84,33 @@ describe('Rust session UI glue', () => {
     expect(f.store.getState().result).toEqual(result)
     expect(f.states).toHaveBeenCalledWith({ status: 'done', error: null })
     await f.mounted.dispose()
+    await f.mounted.dispose()
+    expect(f.close).toHaveBeenCalledOnce()
+  })
+  it('waits for acknowledged cleanup without reporting cancellation as an error', async () => {
+    const releasing = Effect.runSync(Deferred.make<void>())
+    const releaseAllowed = Effect.runSync(Deferred.make<void>())
+    const f = fixture(
+      false,
+      Effect.gen(function* () {
+        yield* Deferred.succeed(releasing, undefined)
+        yield* Deferred.await(releaseAllowed)
+      }),
+    )
+    await f.mounted.start()
+    let disposed = false
+    const closing = f.mounted.dispose().then(() => {
+      disposed = true
+    })
+    await runUi(Deferred.await(releasing))
+    expect(disposed).toBe(false)
+    expect(f.close).toHaveBeenCalledOnce()
+    await runUi(Deferred.succeed(releaseAllowed, undefined))
+    await closing
+    expect(disposed).toBe(true)
+    expect(f.states.mock.calls.map(([state]) => state.status)).not.toContain(
+      'error',
+    )
     await f.mounted.dispose()
     expect(f.close).toHaveBeenCalledOnce()
   })

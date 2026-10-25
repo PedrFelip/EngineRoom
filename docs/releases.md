@@ -88,6 +88,55 @@ gh workflow run ci.yml --ref NOME_DA_BRANCH -f pr_number=NUMERO_DO_PR
 
 ## Falhas e retomada
 
+### Compatibilidade gráfica do AppImage
+
+O build Linux continua no Ubuntu 22.04, mas o AppImage usa a biblioteca
+`libwayland-client.so.0` do sistema de destino. A cópia antiga incluída pelo
+linuxdeploy pode impedir o carregamento do Mesa atual por símbolos ausentes
+(`wl_fixes_interface`, por exemplo), levando o WebKit a abortar com
+`Could not create default EGL display: EGL_BAD_PARAMETER`, inclusive via XWayland.
+
+O CLI Tauri está fixado em 2.12.4 no package.json e no lockfile. Essa versão
+inclui a [atualização upstream do linuxdeploy e do plugin GTK](https://github.com/tauri-apps/tauri/pull/16062)
+que corrige a inclusão dessas dependências. A correção acontece no build normal,
+inclusive localmente, sem reempacotar ou alterar o binário depois de gerado.
+
+Antes do upload, `app/scripts/verify_appimage.py` extrai uma cópia temporária
+usando o próprio runtime do AppImage, sem FUSE, e rejeita bibliotecas gráficas
+que devem vir do sistema. A política segue a
+[lista de exclusão da comunidade AppImage](https://github.com/AppImageCommunity/pkg2appimage/blob/master/excludelist).
+O verificador não modifica o artefato; uma regressão do empacotador bloqueia a
+publicação em vez de corrigir silenciosamente o pacote. Não exige squashfs-tools.
+
+O mesmo AppImage produzido no Ubuntu 22.04 também precisa iniciar no Ubuntu
+24.04 antes da publicação. Esse teste usa Xvfb e o Mesa por software, com dados
+isolados, e exige que o aplicativo e o WebKit permaneçam ativos sem erro EGL.
+Ele cobre inicialização via XWayland/X11; não substitui testes manuais de Wayland
+nativo nem dos diferentes drivers de GPU.
+
+O runner headless precisa instalar `libgles2` explicitamente, além de EGL e Mesa:
+`libegl1` não fornece nem exige `libGLESv2.so.2`, carregada dinamicamente pelo
+WebKit. O workflow verifica o carregamento de ambas antes de iniciar o AppImage.
+A ausência de GLES causa `Couldn't open libGLESv2.so.2` e aborto do aplicativo;
+essa falha de provisionamento é diferente do conflito de Wayland/EGL descrito
+acima. Não empacote uma biblioteca gráfica do host para corrigir o runner.
+
+O Linux de destino precisa fornecer `libwayland-client.so.0` (pacote
+`libwayland-client0` no Ubuntu/Debian; `wayland` no Arch). Para conferir um build
+local antes de assinar ou enviar, execute na raiz:
+
+```bash
+python3 app/scripts/verify_appimage.py app/src-tauri/target/release/bundle/appimage/*.AppImage
+```
+
+Não aplique `LD_PRELOAD` global nem desative a aceleração gráfica para contornar
+essa incompatibilidade de empacotamento.
+
+Mantenha scripts de empacotamento do aplicativo dentro de `app/`: o Release
+Please filtra commits por esse caminho antes de interpretar `fix:` e
+`Release-As`. Um hotfix que altera somente `.github/` e `docs/` não gera uma
+versão, mesmo com esse rodapé. Os testes de versão incluem esse filtro.
+
 Falhas em testes ou em qualquer plataforma mantêm a release como rascunho.
 A publicação exige os três instaladores completos. Todos são construídos no SHA
 imutável da release; uma tag apontando para outro commit causa falha.
@@ -98,11 +147,26 @@ Use **Actions → Release → Run workflow**, selecione `main` e informe a tag, 
 gh workflow run release.yml --ref main -f tag=v1.0.0
 ```
 
+Se a correção é no workflow, integre-a em `main` antes de disparar essa retomada:
+o novo run usa o workflow corrigido e continua construindo no SHA imutável da
+tag. Reexecutar o job antigo mantém a definição antiga do workflow.
+
 A retomada aceita apenas uma release existente, com tag coerente e commit no
 histórico da main. Se já estiver publicada, somente retoma a sincronização com
 develop. Não move tags nem cria uma nova versão.
 
 ## Verificar alterações na automação
+
+O Bun está fixado em 1.4.4 nos campos `packageManager` e nos workflows de CI e
+release. Ao atualizá-lo, mantenha também as chaves de cache na mesma versão.
+O CLI Tauri, a API JavaScript e o runtime Rust são verificados juntos: além dos
+testes, gere o AppImage e execute a verificação de inicialização descrita acima.
+
+Atualizações de dependências dentro das faixas atuais usam `bun update` em
+`app/` e `cargo update` em `app/src-tauri/`, preservando os lockfiles no PR.
+Migrações para novas versões principais de Effect, TypeScript e Vitest devem
+ter escopo e validação próprios. O Release Please continua fixado à biblioteca
+usada pela action; não atualize somente a dependência dos testes.
 
 Na raiz:
 

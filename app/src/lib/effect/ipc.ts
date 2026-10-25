@@ -15,11 +15,11 @@ export function ipc<E>(
 }
 
 export function decode<A, I>(
-  schema: Schema.Schema<A, I>,
+  schema: Schema.Codec<A, I>,
   input: unknown,
   source: string,
 ) {
-  return Schema.decodeUnknown(schema)(input).pipe(
+  return Schema.decodeUnknownEffect(schema)(input).pipe(
     Effect.mapError(
       (cause) =>
         new InvalidPayloadError({

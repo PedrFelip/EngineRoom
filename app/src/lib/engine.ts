@@ -1,5 +1,5 @@
 import { Channel } from '@tauri-apps/api/core'
-import { Deferred, Effect, Either, Schema } from 'effect'
+import { Deferred, Effect, Exit, Schema } from 'effect'
 import { bestEffort } from './effect/diagnostics'
 import { ProbeResultSchema } from './review-protocol'
 import { sessionCommand } from './tauri-backend'
@@ -22,12 +22,12 @@ export function probeEngine({
       const result = yield* Deferred.make<ProbeResult>()
       const channel = new Channel<unknown>()
       channel.onmessage = (payload) => {
-        const parsed = Schema.decodeUnknownEither(ProbeResultSchema)(payload)
-        Deferred.unsafeDone(
+        const parsed = Schema.decodeUnknownExit(ProbeResultSchema)(payload)
+        Deferred.doneUnsafe(
           result,
           Effect.succeed(
-            Either.isRight(parsed)
-              ? parsed.right
+            Exit.isSuccess(parsed)
+              ? parsed.value
               : {
                   ok: false,
                   name: null,
@@ -51,7 +51,7 @@ export function probeEngine({
       return yield* Deferred.await(result)
     }),
   ).pipe(
-    Effect.catchAll((error) =>
+    Effect.catch((error) =>
       Effect.succeed({ ok: false, name: null, error: error.message }),
     ),
   )

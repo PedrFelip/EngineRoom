@@ -69,7 +69,7 @@ export function createReviewSession(opts: ReviewSessionOpts) {
     const fail = (message: string) => {
       if (disposed) return
       opts.onStateChange({ status: 'error', error: message })
-      Deferred.unsafeDone(ready, Effect.void)
+      Deferred.doneUnsafe(ready, Effect.void)
     }
     const port = yield* service
       .open(
@@ -88,7 +88,7 @@ export function createReviewSession(opts: ReviewSessionOpts) {
             case 'completed':
               if (!opts.config.initialResult) opts.store.setResult(event.result)
               opts.onStateChange({ status: 'done', error: null })
-              Deferred.unsafeDone(ready, Effect.void)
+              Deferred.doneUnsafe(ready, Effect.void)
               break
             case 'liveStarted':
               opts.store.startLiveAnalysis(event.fen)
@@ -108,16 +108,19 @@ export function createReviewSession(opts: ReviewSessionOpts) {
               else fail(event.error.message)
               break
             case 'warning':
-              Effect.runFork(warn(event.error.operation, event.error.message), {
-                scope,
-              })
+              Effect.runSync(
+                Effect.forkIn(
+                  warn(event.error.operation, event.error.message),
+                  scope,
+                ),
+              )
               break
           }
         },
         (error) => fail(error.message),
       )
       .pipe(
-        Effect.catchAll((error) =>
+        Effect.catch((error) =>
           Effect.sync(() => {
             fail(error.message)
             return null
@@ -144,7 +147,7 @@ export function createReviewSession(opts: ReviewSessionOpts) {
             ? port.analyzePosition(intent.id, intent.request, intent.settings)
             : port.cancelLive(intent.id)
         yield* command.pipe(
-          Effect.catchAll((error) =>
+          Effect.catch((error) =>
             Effect.sync(() => {
               if (disposed || intent.id !== requestId) return
               if (intent.request)

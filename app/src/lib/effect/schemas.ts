@@ -1,18 +1,18 @@
-import { Schema as S } from 'effect'
+import { Effect, Option, Predicate, Schema as S, SchemaGetter } from 'effect'
 import { PvLineSchema } from '../review-protocol'
 
-const Num = S.Number.pipe(S.finite())
-const Count = Num.pipe(S.int(), S.nonNegative())
-const Positive = Count.pipe(S.positive())
+const Num = S.Number.pipe(S.check(S.isFinite()))
+const Count = Num.pipe(S.check(S.isInt()), S.check(S.isGreaterThanOrEqualTo(0)))
+const Positive = Count.pipe(S.check(S.isGreaterThan(0)))
 const Strings = S.mutable(S.Array(S.String))
-const Phase = S.Literal('opening', 'middlegame', 'endgame')
+const Phase = S.Literals(['opening', 'middlegame', 'endgame'])
 const Accuracy = S.Struct({ white: Num, black: Num })
 const AccuracyByPhase = S.Struct({
   opening: Accuracy,
   middlegame: Accuracy,
   endgame: Accuracy,
 })
-const Classification = S.Literal(
+const Classification = S.Literals([
   'livro',
   'melhor',
   'excelente',
@@ -22,7 +22,7 @@ const Classification = S.Literal(
   'blunder',
   'brilhante',
   'otimo',
-)
+])
 
 export const RawLineSchema = S.Struct({
   multipv: Positive,
@@ -34,9 +34,11 @@ export const RawLineSchema = S.Struct({
 export const CachedPositionSchema = S.Struct({
   cp: Num,
   linesJson: S.String,
-  reachedDepth: S.optionalWith(Count, { default: () => 0 }),
+  reachedDepth: Count.pipe(S.withDecodingDefaultType(Effect.succeed(0))),
 })
-export const CacheLinesSchema = S.parseJson(S.mutable(S.Array(RawLineSchema)))
+export const CacheLinesSchema = S.fromJsonString(
+  S.mutable(S.Array(RawLineSchema)),
+)
 export const ResourcesSchema = S.Struct({
   threads: Positive,
   memory_mb: Positive,
@@ -49,7 +51,14 @@ export const StorageStatsSchema = S.Struct({
 export const EngineExitSchema = S.Struct({
   code: S.NullOr(S.Int),
   signal: S.NullOr(S.Int),
-  error: S.optionalWith(S.String, { nullable: true }),
+  error: S.optional(S.NullOr(S.String)).pipe(
+    S.decodeTo(S.optional(S.String), {
+      decode: SchemaGetter.transformOptional(
+        Option.filter(Predicate.isNotNull),
+      ),
+      encode: SchemaGetter.passthrough(),
+    }),
+  ),
 })
 const SummaryFields = {
   id: Positive,
@@ -58,10 +67,10 @@ const SummaryFields = {
   result: S.String,
   plies: Count,
   engineTier: S.String,
-  mode: S.optionalWith(S.Literal('depth', 'time'), {
-    default: () => 'depth' as const,
-  }),
-  analysisKind: S.optional(S.Literal('manual', 'auto-fast', 'auto-deep')),
+  mode: S.Literals(['depth', 'time']).pipe(
+    S.withDecodingDefaultType(Effect.succeed('depth')),
+  ),
+  analysisKind: S.optional(S.Literals(['manual', 'auto-fast', 'auto-deep'])),
   depth: Count,
   multipv: Positive,
   accuracyWhite: Num,
@@ -79,7 +88,7 @@ export const GamePageSchema = S.Struct({
   nextCursor: S.NullOr(S.Struct({ id: Positive, createdAt: S.String })),
 })
 export const SavedIdSchema = Positive
-export const LegacyReviewSchema = S.parseJson(
+export const LegacyReviewSchema = S.fromJsonString(
   S.Struct({
     positions: S.mutable(
       S.Array(
@@ -95,7 +104,7 @@ export const LegacyReviewSchema = S.parseJson(
           triageLines: S.optional(S.mutable(S.Array(PvLineSchema))),
           search: S.optional(
             S.Struct({
-              purpose: S.Literal('playback', 'refinement'),
+              purpose: S.Literals(['playback', 'refinement']),
               movetimeMs: Count,
               multipv: Positive,
             }),
@@ -107,7 +116,7 @@ export const LegacyReviewSchema = S.parseJson(
       S.Array(
         S.Struct({
           ply: Positive,
-          color: S.Literal('w', 'b'),
+          color: S.Literals(['w', 'b']),
           san: S.String,
           uci: S.String,
           fenBefore: S.String,
@@ -127,9 +136,9 @@ export const LegacyReviewSchema = S.parseJson(
     accuracyByPhase: S.optional(AccuracyByPhase),
   }),
 )
-export type LegacyReview = S.Schema.Type<typeof LegacyReviewSchema>
+export type LegacyReview = typeof LegacyReviewSchema.Type
 
 // Keep field-level fallback/clamping: one invalid preference must not reset all others.
-export const SettingsInputSchema = S.parseJson(
-  S.Record({ key: S.String, value: S.Unknown }),
+export const SettingsInputSchema = S.fromJsonString(
+  S.Record(S.String, S.Unknown),
 )

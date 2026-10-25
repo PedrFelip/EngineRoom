@@ -21,7 +21,7 @@ jobs:
           persist-credentials: false
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: '1.4.3'
+          bun-version: '1.4.4'
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -29,8 +29,8 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.bun/install/cache
-          key: bun-v1-${{ runner.os }}-${{ runner.arch }}-1.4.3-app-${{ hashFiles('app/bun.lock') }}
-          restore-keys: bun-v1-${{ runner.os }}-${{ runner.arch }}-1.4.3-app-
+          key: bun-v1-${{ runner.os }}-${{ runner.arch }}-1.4.4-app-${{ hashFiles('app/bun.lock') }}
+          restore-keys: bun-v1-${{ runner.os }}-${{ runner.arch }}-1.4.4-app-
       - run: bun install --frozen-lockfile
         working-directory: app
       - run: bun run lint && bun run typecheck && bun run test
@@ -90,14 +90,14 @@ jobs:
           node-version: '22'
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: '1.4.3'
+          bun-version: '1.4.4'
       - run: python -m unittest discover -s .github/scripts -p 'test_*.py'
       - run: python .github/scripts/release_version.py
       - name: Cache Bun packages
         uses: actions/cache@v4
         with:
           path: ~/.bun/install/cache
-          key: bun-v1-${{ runner.os }}-${{ runner.arch }}-1.4.3-automation-${{ hashFiles('.github/scripts/bun.lock') }}
-          restore-keys: bun-v1-${{ runner.os }}-${{ runner.arch }}-1.4.3-automation-
+          key: bun-v1-${{ runner.os }}-${{ runner.arch }}-1.4.4-automation-${{ hashFiles('.github/scripts/bun.lock') }}
+          restore-keys: bun-v1-${{ runner.os }}-${{ runner.arch }}-1.4.4-automation-
       - run: bun install --frozen-lockfile && bun run test
         working-directory: .github/scripts

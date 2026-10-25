@@ -1,11 +1,11 @@
 import { Schema as S } from 'effect'
 
-const Num = S.Number.pipe(S.finite())
-const Count = Num.pipe(S.int(), S.nonNegative())
-const Positive = Count.pipe(S.positive())
+const Num = S.Number.pipe(S.check(S.isFinite()))
+const Count = Num.pipe(S.check(S.isInt()), S.check(S.isGreaterThanOrEqualTo(0)))
+const Positive = Count.pipe(S.check(S.isGreaterThan(0)))
 const Strings = S.mutable(S.Array(S.String))
-const Phase = S.Literal('opening', 'middlegame', 'endgame')
-const Classification = S.Literal(
+const Phase = S.Literals(['opening', 'middlegame', 'endgame'])
+const Classification = S.Literals([
   'livro',
   'melhor',
   'excelente',
@@ -13,7 +13,7 @@ const Classification = S.Literal(
   'imprecisao',
   'erro',
   'blunder',
-)
+])
 const Accuracy = S.Struct({ white: Num, black: Num })
 export const PvLineSchema = S.Struct({
   multipv: Positive,
@@ -35,7 +35,7 @@ export const PositionAnalysisSchema = S.Struct({
   triageLines: S.optional(S.mutable(S.Array(PvLineSchema))),
   search: S.optional(
     S.Struct({
-      purpose: S.Literal('playback', 'refinement'),
+      purpose: S.Literals(['playback', 'refinement']),
       movetimeMs: Count,
       multipv: Positive,
     }),
@@ -47,7 +47,7 @@ export const ReviewResultSchema = S.Struct({
     S.Array(
       S.Struct({
         ply: Positive,
-        color: S.Literal('w', 'b'),
+        color: S.Literals(['w', 'b']),
         san: S.String,
         uci: S.String,
         fenBefore: S.String,
@@ -82,13 +82,13 @@ export const ReviewConfigSchema = S.Struct({
     plies: Count,
   }),
   engine: S.Struct({
-    id: S.Literal('fast', 'balanced', 'deep', 'custom'),
+    id: S.Literals(['fast', 'balanced', 'deep', 'custom']),
     label: S.String,
     depth: Positive,
     hint: S.String,
   }),
-  mode: S.Literal('depth', 'time'),
-  analysisKind: S.optional(S.Literal('manual', 'auto-fast', 'auto-deep')),
+  mode: S.Literals(['depth', 'time']),
+  analysisKind: S.optional(S.Literals(['manual', 'auto-fast', 'auto-deep'])),
   movetimeMs: S.optional(Positive),
   lines: Positive,
   initialResult: S.optional(ReviewResultSchema),
@@ -99,13 +99,13 @@ export const SessionErrorSchema = S.Struct({
   message: S.String,
 })
 const Progress = S.Struct({
-  stage: S.Literal(
+  stage: S.Literals([
     'preparing',
     'analyzing',
     'triage',
     'refinement',
     'finalizing',
-  ),
+  ]),
   completed: Count,
   total: Count,
   currentPly: Count,
@@ -120,7 +120,7 @@ const Envelope = {
   sequence: Positive,
   requestId: S.optional(Positive),
 }
-export const SessionEventSchema = S.Union(
+export const SessionEventSchema = S.Union([
   S.Struct({ ...Envelope, type: S.Literal('progress'), progress: Progress }),
   S.Struct({
     ...Envelope,
@@ -158,8 +158,8 @@ export const SessionEventSchema = S.Union(
     type: S.Literal('warning'),
     error: SessionErrorSchema,
   }),
-)
-export type SessionEvent = S.Schema.Type<typeof SessionEventSchema>
+])
+export type SessionEvent = typeof SessionEventSchema.Type
 export const ProbeResultSchema = S.Struct({
   ok: S.Boolean,
   name: S.NullOr(S.String),

@@ -35,7 +35,7 @@ export function bestEffort<A, E, R>(
   operation: string,
 ) {
   return effect.pipe(
-    Effect.catchAllCause((cause) => warn(operation, cause)),
+    Effect.catchCause((cause) => warn(operation, cause)),
     Effect.asVoid,
   )
 }

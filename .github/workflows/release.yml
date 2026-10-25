@@ -112,10 +112,15 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
 
+      - uses: actions/setup-python@v5
+        if: matrix.platform == 'ubuntu-22.04'
+        with:
+          python-version: '3.12'
+
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: '1.4.3'
+          bun-version: '1.4.4'
 
       - uses: actions/setup-node@v4
         with:
@@ -133,8 +138,8 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.bun/install/cache
-          key: bun-v1-${{ runner.os }}-${{ runner.arch }}-1.4.3-app-${{ hashFiles('app/bun.lock') }}
-          restore-keys: bun-v1-${{ runner.os }}-${{ runner.arch }}-1.4.3-app-
+          key: bun-v1-${{ runner.os }}-${{ runner.arch }}-1.4.4-app-${{ hashFiles('app/bun.lock') }}
+          restore-keys: bun-v1-${{ runner.os }}-${{ runner.arch }}-1.4.4-app-
       - name: Install frontend dependencies
         run: bun install --frozen-lockfile
         working-directory: app
@@ -158,17 +163,74 @@ jobs:
           path: app/src-tauri/binaries/stockfish-*
           key: ${{ steps.stockfish-cache.outputs.cache-primary-key }}
 
-      - name: Build and upload to draft
+      - name: Build installers
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           projectPath: app
-          releaseId: ${{ needs.prepare.outputs.release_id }}
           args: ${{ matrix.args }} -- --locked
 
+      - name: Verify AppImage host graphics compatibility
+        if: matrix.platform == 'ubuntu-22.04'
+        run: python3 app/scripts/verify_appimage.py app/src-tauri/target/release/bundle/appimage/*.AppImage
+
+      - name: Share AppImage for startup test on a newer distribution
+        if: matrix.platform == 'ubuntu-22.04'
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-appimage
+          path: app/src-tauri/target/release/bundle/appimage/*.AppImage
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Upload verified installers to draft
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          shopt -s nullglob
+          installers=(app/src-tauri/target/release/bundle/{appimage/*.AppImage,nsis/*.exe,msi/*.msi})
+          test "${#installers[@]}" -gt 0
+          gh release upload "$RELEASE_TAG" "${installers[@]}" --clobber
+
+  linux-smoke:
+    needs: [prepare, build]
+    if: needs.prepare.outputs.should_release == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-appimage
+          path: appimage
+      - name: Install headless Mesa display
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends xvfb xauth libegl1 libgles2 libegl-mesa0 libgl1-mesa-dri libglx-mesa0 libwayland-client0
+      # WebKit loads GLES dynamically; libegl1 does not pull in libgles2.
+      - name: Check host EGL and GLES runtime
+        run: |
+          python3 - <<'PYTHON'
+          import ctypes
+          for library in ("libEGL.so.1", "libGLESv2.so.2"):
+              ctypes.CDLL(library)
+              print(f"Host graphics library available: {library}")
+          PYTHON
+      - name: Verify Ubuntu 22.04 AppImage starts on Ubuntu 24.04
+        run: |
+          chmod +x appimage/*.AppImage
+          xvfb-run --auto-servernum python3 app/scripts/verify_appimage.py --smoke appimage/*.AppImage
+
   publish:
-    needs: [prepare, checks, build]
+    needs: [prepare, checks, build, linux-smoke]
     runs-on: ubuntu-22.04
     permissions:
       contents: write

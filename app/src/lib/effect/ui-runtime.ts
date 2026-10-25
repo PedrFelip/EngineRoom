@@ -24,7 +24,7 @@ export async function runUi<A, E>(
 ): Promise<A> {
   const exit = await Effect.runPromiseExit(effect, { signal })
   if (Exit.isSuccess(exit)) return exit.value
-  const failure = Cause.failureOption(exit.cause)
+  const failure = Cause.findErrorOption(exit.cause)
   if (Option.isSome(failure)) throw failure.value
   throw new Error(Cause.pretty(exit.cause))
 }
@@ -45,7 +45,7 @@ export function mountReviewSession(
   backend: Layer.Layer<Backend>,
 ): MountedReviewSession {
   const started = Effect.runSync(Deferred.make<void>())
-  let root: Fiber.RuntimeFiber<void, never> | undefined
+  let root: Fiber.Fiber<void, never> | undefined
   let session: ReviewSession | undefined
   let pending: Parameters<ReviewSession['analyzePosition']> | null | undefined
   let disposed = false
@@ -71,8 +71,8 @@ export function mountReviewSession(
             }),
           ).pipe(
             Effect.provide(backend),
-            Effect.catchAllCause((cause) =>
-              Cause.isInterruptedOnly(cause)
+            Effect.catchCause((cause) =>
+              Cause.hasInterruptsOnly(cause)
                 ? Effect.void
                 : warn('review.runtime', cause),
             ),
