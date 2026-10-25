@@ -96,7 +96,7 @@ linuxdeploy pode impedir o carregamento do Mesa atual por símbolos ausentes
 (`wl_fixes_interface`, por exemplo), levando o WebKit a abortar com
 `Could not create default EGL display: EGL_BAD_PARAMETER`, inclusive via XWayland.
 
-Depois do build, `.github/scripts/prepare_appimage.py` remove somente as cópias
+Depois do build, `app/scripts/prepare_appimage.py` remove somente as cópias
 de `libwayland-client.so*`, preserva o runtime e o formato SquashFS e extrai o
 arquivo final para conferir a exclusão. Só depois os instaladores são enviados
 ao rascunho. Uma falha impede a publicação. Os testes da automação exercitam o
@@ -108,11 +108,16 @@ O Linux de destino precisa fornecer `libwayland-client.so.0` (pacote
 distribuição também devem executar, na raiz, antes de assinar ou enviar:
 
 ```bash
-python3 .github/scripts/prepare_appimage.py app/src-tauri/target/release/bundle/appimage/*.AppImage
+python3 app/scripts/prepare_appimage.py app/src-tauri/target/release/bundle/appimage/*.AppImage
 ```
 
 Não aplique `LD_PRELOAD` global nem desative a aceleração gráfica para contornar
 essa incompatibilidade de empacotamento.
+
+Mantenha scripts de empacotamento do aplicativo dentro de `app/`: o Release
+Please filtra commits por esse caminho antes de interpretar `fix:` e
+`Release-As`. Um hotfix que altera somente `.github/` e `docs/` não gera uma
+versão, mesmo com esse rodapé. Os testes de versão incluem esse filtro.
 
 Falhas em testes ou em qualquer plataforma mantêm a release como rascunho.
 A publicação exige os três instaladores completos. Todos são construídos no SHA
