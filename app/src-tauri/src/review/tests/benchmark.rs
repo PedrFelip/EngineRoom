@@ -626,7 +626,7 @@ async fn benchmark_stockfish_review_quality() {
         }
     }
     let report = serde_json::json!({
-        "reference": "Stockfish 18, 5000ms/position, MultiPV 1",
+        "reference": "Stockfish 19, 5000ms/position, MultiPV 1",
         "resources": { "threads": 6, "hashMb": 96 }, "samplesPerCase": 1,
         "excludes": ["frontend IPC", "rendering"], "cases": rows,
     });

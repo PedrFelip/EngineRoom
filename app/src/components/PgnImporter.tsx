@@ -1,5 +1,6 @@
-import { Check, ClipboardPaste, FileUp, Upload } from 'lucide-react'
+import { Check, ClipboardPaste, FileUp, Globe, Upload } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
+import ChessComImporter from './ChessComImporter'
 import { Badge } from './ui/badge'
 import { SegmentedControl } from './ui/segmented-control'
 
@@ -13,7 +14,7 @@ interface Props {
   onImport?: (pgn: string) => void
 }
 
-type Mode = 'file' | 'paste'
+type Mode = 'file' | 'paste' | 'chesscom'
 
 function readFile(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -91,17 +92,19 @@ export default function PgnImporter({
   return (
     <div>
       <SegmentedControl
-        className='mb-3 max-w-sm'
+        className='mb-3'
+        stackedOnMobile
         label='Forma de importar a partida'
         value={mode}
         options={[
           { id: 'file', label: 'Arquivo PGN', icon: FileUp },
           { id: 'paste', label: 'Colar PGN', icon: ClipboardPaste },
+          { id: 'chesscom', label: 'Chess.com', icon: Globe },
         ]}
         onChange={(nextMode) => {
           setMode(nextMode)
           setReadError(null)
-          if (nextMode === 'paste') {
+          if (nextMode !== 'file') {
             readRequest.current++
             setReading(false)
             onReadingChange?.(false)
@@ -167,6 +170,8 @@ export default function PgnImporter({
               }}
             />
           </div>
+        ) : mode === 'chesscom' ? (
+          <ChessComImporter active={active} onImport={onImport ?? onChange} />
         ) : (
           <div className='relative'>
             <textarea

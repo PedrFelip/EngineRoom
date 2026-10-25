@@ -381,7 +381,7 @@ export default function HomePage({ onStart, active = true }: Props) {
                 </h3>
                 <p className='mt-1 text-xs text-ink-dim'>
                   {step === 'import'
-                    ? 'Etapa 1 de 2 · Arquivo ou notação PGN'
+                    ? 'Etapa 1 de 2 · Arquivo, PGN ou Chess.com'
                     : 'Etapa 2 de 2 · Escolha como quer revisar'}
                 </p>
               </div>
@@ -584,7 +584,7 @@ export default function HomePage({ onStart, active = true }: Props) {
                 <ArrowRight size={16} strokeWidth={2.5} aria-hidden='true' />
               </Button>
               <p className='mt-3 flex items-center justify-center gap-1.5 text-xs text-ink-dim'>
-                <ShieldCheck size={13} aria-hidden='true' /> Stockfish 18 ·
+                <ShieldCheck size={13} aria-hidden='true' /> Stockfish 19 ·
                 Análise local e privada
               </p>
             </div>

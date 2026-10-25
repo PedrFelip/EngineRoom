@@ -16,9 +16,9 @@ As versões exatas e as demais dependências do backend estão em
 `app/src-tauri/Cargo.lock`; as do frontend estão em `app/bun.lock`.
 Dependências conservam suas próprias licenças e avisos.
 
-O Stockfish 18 é executado como sidecar separado. Seu código-fonte está em
-https://github.com/official-stockfish/Stockfish/tree/sf_18, e o release utilizado
-pelo downloader está em https://github.com/official-stockfish/Stockfish/releases/tag/sf_18.
+O Stockfish 19 é executado como sidecar separado. Seu código-fonte está em
+https://github.com/official-stockfish/Stockfish/tree/sf_19, e o release utilizado
+pelo downloader está em https://github.com/official-stockfish/Stockfish/releases/tag/sf_19.
 Os avisos e a licença do Stockfish estão no repositório original.
 
 O dataset ECO existente mantém sua origem em `lichess/chess-openings`; esta

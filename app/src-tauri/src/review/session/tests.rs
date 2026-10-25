@@ -407,7 +407,7 @@ async fn real_stockfish_sidecar_cache_history_reopen_and_live_cancellation() {
     let id = engine::ask(probe.as_mut(), "uci", "uciok", 8000, &root)
         .await
         .unwrap();
-    assert!(id.iter().any(|l| l.contains("Stockfish 18")));
+    assert!(id.iter().any(|l| l.contains("Stockfish 19")));
     probe.shutdown().await;
     assert_eq!(manager.permit.available_permits(), 1);
     assert!(stopped.load(Ordering::SeqCst) >= 5);

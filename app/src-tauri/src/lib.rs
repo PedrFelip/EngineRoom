@@ -1,5 +1,6 @@
 mod db;
 mod engine;
+mod imports;
 mod review;
 mod system;
 
@@ -14,6 +15,7 @@ pub fn run() {
             std::fs::create_dir_all(&dir)?;
             let conn = db::open_file(&dir.join("engineroom.db"))?;
             app.manage(db::DbState(std::sync::Mutex::new(conn)));
+            app.manage(imports::state()?);
             Ok(())
         })
         .manage(review::ReviewSessions::default())
@@ -22,6 +24,9 @@ pub fn run() {
                 use tauri::Manager;
                 window
                     .state::<review::ReviewSessions>()
+                    .close_window(window.label());
+                window
+                    .state::<imports::ImportTasks>()
                     .close_window(window.label());
             }
         })
@@ -50,6 +55,8 @@ pub fn run() {
             engine::benchmark_uci_send_batch,
             engine::benchmark_uci_report,
             system::system_resources,
+            imports::chess_com_search_start,
+            imports::chess_com_search_cancel,
         ])
         .build(tauri::generate_context!());
     let app = match app {
@@ -62,11 +69,18 @@ pub fn run() {
     app.run(|app, event| {
         if let tauri::RunEvent::ExitRequested { api, .. } = event {
             use tauri::Manager;
-            if let Some(cleanup) = app.state::<review::ReviewSessions>().begin_shutdown() {
+            let cleanup = app.state::<review::ReviewSessions>().begin_shutdown();
+            let imports_cleanup = app.state::<imports::ImportTasks>().begin_shutdown();
+            if cleanup.is_some() || imports_cleanup.is_some() {
                 api.prevent_exit();
                 let app = app.clone();
                 tauri::async_runtime::spawn(async move {
-                    cleanup.await;
+                    if let Some(cleanup) = cleanup {
+                        cleanup.await;
+                    }
+                    if let Some(cleanup) = imports_cleanup {
+                        cleanup.await;
+                    }
                     app.exit(0);
                 });
             }

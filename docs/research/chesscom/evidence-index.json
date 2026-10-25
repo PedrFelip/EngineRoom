@@ -1,0 +1,92 @@
+{
+  "investigated_at": "2026-10-13",
+  "target_url": "https://www.chess.com/analysis",
+  "client_package": "analysis/2026.9.10",
+  "report": "../chesscom-game-review.md",
+  "canonical_bundle": "artifacts/evidence-bundle.json",
+  "canonical_bundle_sha256": "fba63a5a249e8a4daa4e90ce6a1e02a470c47bbbc77302bfddd668bf9d441642",
+  "canonical_bundle_bytes": 108074267,
+  "evidence": {
+    "E1": "ev_2f4351e91b2791b8a1a474c9e766ec1cbc3ad875062f70f86310a75b68f2137e",
+    "E2": "ev_11e9ce3a5ebe708c431d63e650fbc42fb083804cf8a84b1b0582cbd413f7290d",
+    "E3": "ev_2504d2b3f426eae66ebb16004ca882f4f5b8bc675b60f0ef9ff05b1c26ddcc40",
+    "E4": "ev_a917ce44d4f9b9ea37fa5bea1da8dd570ce3d751d7391ac01bca8b7149aeffe0",
+    "E5": "ev_5e8177cb25c0c5d5d3ac5e66acf4a2e7504c315d47bd260ba8de3a5b144a89e9"
+  },
+  "analysis_input_sha256": "4db11fba4099761956ea78a1796144d3f0157e040453cd1168d848a4ffdee363",
+  "main_asset": {
+    "url": "https://www.chess.com/r2/client-packages/analysis/2026.9.10/shared.eager.Cl1PJoThT_.chunk.js",
+    "sha256": "e0d3787593ff9ba6b3ce616e6eab53e865d489b4171e290d32c9cabcb9184afb",
+    "bytes": 3154191,
+    "node_id": "jag_node_e5c4364140716a52ebe8f897d64c09426a6294022f79cac70c57f98ff816b807",
+    "anchor_coordinate": "zero-based JavaScript UTF-16 code-unit offsets; start inclusive, end exclusive",
+    "anchors": [
+      {
+        "id": "A1",
+        "start": 1669100,
+        "end": 1671500,
+        "finding": "WebSocket endpoints and flag-controlled legacy/binary transport selection"
+      },
+      {
+        "id": "A2",
+        "start": 2309650,
+        "end": 2312500,
+        "finding": "rtt builds legacy gameAnalysis request with caps2, classificationv3 and speechv3"
+      },
+      {
+        "id": "A3",
+        "start": 2300250,
+        "end": 2306500,
+        "finding": "bet strength mapping and Bet binary request metadata"
+      },
+      {
+        "id": "A4",
+        "start": 1633800,
+        "end": 1637200,
+        "finding": "rKe rating-dependent inverse logistic helper for position-state labels; not verified as complete classification/accuracy algorithm"
+      },
+      {
+        "id": "A5",
+        "start": 2575500,
+        "end": 2582500,
+        "finding": "local feedback engine queue, MultiPV=2, default 3000 ms, CEE analysis request, critical board events"
+      },
+      {
+        "id": "A6",
+        "start": 1616500,
+        "end": 1644700,
+        "finding": "theme speech templates, critical/key move processing and response adapters"
+      },
+      {
+        "id": "A7",
+        "start": 1735600,
+        "end": 1737900,
+        "finding": "dZe and report adapters consume accuracy/effective rating fields"
+      },
+      {
+        "id": "A8",
+        "start": 240200,
+        "end": 241850,
+        "finding": "Explanation Engine WASM package metadata for versions 1.130.68 and 1.130.53"
+      },
+      {
+        "id": "A9",
+        "start": 2551900,
+        "end": 2554400,
+        "finding": "CEE initialization and coach text/audio asset loading"
+      }
+    ]
+  },
+  "unknowns": {
+    "U1": "unk_ed1dfdccf6d5def3d5938f28282ac9243961950671696b3d3e8a9e3d2a4bc227",
+    "U2": "unk_a557e01d41934973e5c83e503ad55cb7c513e14812d8e994c20f1a67d5b1757a",
+    "U3": "unk_370a744816d7e33911668160503fc820f347c47662adcdc78bebce804e54a860"
+  },
+  "limitations": [
+    "Authenticated full Game Review was not obtained; anonymous click opened registration.",
+    "The static application and semantic graphs are partial; source anchors are analyst interpretation of observed bytes.",
+    "Browser network observations are incomplete at capture end.",
+    "Source-map recovery, CEE WASM decompilation and backend implementation recovery were not performed.",
+    "Official Classification V2 thresholds were not verified against the bundle's ClassificationV3 implementation."
+  ]
+}

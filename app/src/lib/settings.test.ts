@@ -3,6 +3,7 @@ import {
   DEFAULT_SETTINGS,
   loadSettings,
   recommendedReviewThreads,
+  saveSettings,
 } from './settings'
 
 function stubStorage(raw: string | null) {
@@ -58,6 +59,42 @@ describe('loadSettings (som)', () => {
     const settings = loadSettings()
     expect(settings).toEqual(DEFAULT_SETTINGS)
     expect(settings).not.toHaveProperty('enginePath')
+  })
+})
+
+describe('usuário salvo do Chess.com', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('restaura e normaliza o último usuário sem perder outras preferências', () => {
+    stubStorage(
+      JSON.stringify({ chessComUsername: ' Alice_123 ', theme: 'light' }),
+    )
+    const settings = loadSettings()
+    expect(settings.chessComUsername).toBe('alice_123')
+    expect(settings.theme).toBe('light')
+    saveSettings(settings)
+    expect(localStorage.setItem).toHaveBeenCalledWith(
+      'engineroom.settings.v1',
+      JSON.stringify(settings),
+    )
+  })
+
+  it('ignora usernames ausentes ou inválidos sem resetar o tema', () => {
+    for (const username of [
+      undefined,
+      null,
+      123,
+      '',
+      '../alice',
+      'a'.repeat(51),
+    ]) {
+      stubStorage(
+        JSON.stringify({ chessComUsername: username, theme: 'light' }),
+      )
+      const settings = loadSettings()
+      expect(settings.chessComUsername).toBeNull()
+      expect(settings.theme).toBe('light')
+    }
   })
 })
 
