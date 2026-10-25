@@ -6,11 +6,16 @@ import {
   CircleAlert,
   Clock3,
   LoaderCircle,
+  type LucideIcon,
   RefreshCw,
+  Rocket,
   Search,
+  Sun,
   Swords,
+  Timer,
   UserRound,
   X,
+  Zap,
 } from 'lucide-react'
 import { useId, useState } from 'react'
 import { chessComGamePerspective } from '../lib/chess-com-account'
@@ -24,6 +29,12 @@ const timeClasses: Record<string, string> = {
   blitz: 'Blitz',
   rapid: 'Rápida',
   daily: 'Diária',
+}
+const timeClassIcons: Record<string, LucideIcon> = {
+  bullet: Rocket,
+  blitz: Zap,
+  rapid: Timer,
+  daily: Sun,
 }
 const dateFormat = new Intl.DateTimeFormat('pt-BR', {
   day: '2-digit',
@@ -66,12 +77,6 @@ export default function ChessComImporter({
     >
       <header className='border-b border-border/70 bg-gradient-to-br from-brand/5 to-transparent p-4'>
         <div className='mb-4 flex items-center gap-3'>
-          <div
-            aria-hidden='true'
-            className='flex size-10 shrink-0 items-center justify-center rounded-xl border border-border bg-card text-2xl text-foreground shadow-sm'
-          >
-            ♟
-          </div>
           <div className='min-w-0'>
             <h3 className='text-sm font-semibold text-foreground'>
               Suas partidas, a um clique.
@@ -110,7 +115,6 @@ export default function ChessComImporter({
                 spellCheck={false}
                 maxLength={50}
                 placeholder='Seu nome de usuário'
-                aria-describedby={`${id}-hint`}
                 className='h-10 w-full min-w-0 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground'
               />
             </div>
@@ -135,10 +139,10 @@ export default function ChessComImporter({
               {refreshing ? 'Atualizar' : 'Buscar'}
             </Button>
           </div>
-          <div className='mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-2'>
-            <p id={`${id}-hint`} className='text-[11px] text-muted-foreground'>
-              Sem login · último usuário lembrado automaticamente
-            </p>
+          <div
+            hidden={!savedUsername}
+            className='mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-2'
+          >
             {savedUsername && (
               <span className='inline-flex max-w-full items-center gap-1 rounded-full border border-border bg-card/80 py-0.5 pl-2 pr-0.5 text-[11px] text-muted-foreground'>
                 <BookmarkCheck size={12} aria-hidden='true' />
@@ -376,6 +380,7 @@ function GameCard({
   radioName: string
   onSelect: () => void
 }) {
+  const TimeClassIcon = timeClassIcons[game.timeClass ?? ''] ?? Clock3
   const perspective = chessComGamePerspective(game, username)
   const title =
     perspective.opponent?.username ??
@@ -397,7 +402,7 @@ function GameCard({
         aria-hidden='true'
         className={`flex size-9 shrink-0 items-center justify-center rounded-lg border ${selected ? 'border-primary/20 bg-primary text-primary-foreground' : 'border-border bg-muted/40 text-muted-foreground'}`}
       >
-        {selected ? <Check size={16} /> : <Swords size={15} />}
+        {selected ? <Check size={16} /> : <TimeClassIcon size={15} />}
       </span>
       <span className='min-w-0 flex-1'>
         <span className='flex min-w-0 items-baseline gap-1.5'>
@@ -418,7 +423,7 @@ function GameCard({
         </span>
         <span className='mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] text-muted-foreground'>
           <span className='inline-flex items-center gap-1'>
-            <Clock3 size={10} aria-hidden='true' />
+            <TimeClassIcon size={10} aria-hidden='true' />
             {game.timeClass
               ? (timeClasses[game.timeClass] ?? game.timeClass)
               : 'Ritmo não informado'}
