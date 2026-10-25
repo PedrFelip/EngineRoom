@@ -1,4 +1,4 @@
-# Migração do frontend para a 2.1.2
+# Migração do frontend para a 2.1.3
 
 Versões estáveis consultadas em 25/10/2026: Effect 4.0.6, TypeScript 7.0.2
 e Vitest 5.0.5. As versões instaladas estão em `app/bun.lock`.
