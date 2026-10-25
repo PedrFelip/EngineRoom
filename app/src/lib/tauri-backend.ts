@@ -1,5 +1,5 @@
 import { Channel } from '@tauri-apps/api/core'
-import { Deferred, Effect, Either, Layer, Schema } from 'effect'
+import { Deferred, Effect, Exit, Layer, Schema } from 'effect'
 import { AnalysisSessions, type SessionPort } from './backend'
 import { bestEffort } from './effect/diagnostics'
 import { InvalidPayloadError, SessionError } from './effect/errors'
@@ -11,10 +11,10 @@ export function sessionCommand(
   args?: Record<string, unknown>,
 ) {
   return ipc(command, args, (cause) => {
-    const parsed = Schema.decodeUnknownEither(SessionErrorSchema)(cause)
+    const parsed = Schema.decodeUnknownExit(SessionErrorSchema)(cause)
     return new SessionError(
-      Either.isRight(parsed)
-        ? parsed.right
+      Exit.isSuccess(parsed)
+        ? parsed.value
         : {
             code: 'ipc',
             operation: command,
@@ -35,8 +35,8 @@ export const TauriBackend = Layer.succeed(AnalysisSessions, {
       const channel = new Channel<unknown>()
       channel.onmessage = (payload) => {
         if (!active) return
-        const parsed = Schema.decodeUnknownEither(SessionEventSchema)(payload)
-        if (Either.isLeft(parsed)) {
+        const parsed = Schema.decodeUnknownExit(SessionEventSchema)(payload)
+        if (Exit.isFailure(parsed)) {
           active = false
           onError(
             new InvalidPayloadError({
@@ -44,10 +44,10 @@ export const TauriBackend = Layer.succeed(AnalysisSessions, {
               message: 'Dados inválidos da sessão de análise.',
             }),
           )
-          Deferred.unsafeDone(invalid, Effect.void)
+          Deferred.doneUnsafe(invalid, Effect.void)
           return
         }
-        const event = parsed.right
+        const event = parsed.value
         if (event.sessionId !== sessionId || event.sequence <= sequence) return
         sequence = event.sequence
         onEvent(event)
@@ -68,7 +68,7 @@ export const TauriBackend = Layer.succeed(AnalysisSessions, {
           }),
       )
       yield* Deferred.await(invalid).pipe(
-        Effect.zipRight(
+        Effect.andThen(
           bestEffort(
             sessionCommand('review_session_close', { sessionId }),
             'session.invalid_payload',

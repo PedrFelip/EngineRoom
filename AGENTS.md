@@ -16,7 +16,7 @@ From `app/src-tauri/`: `cargo test`.
 
 - CI runs the app suite on PRs/pushes to main/develop and at the immutable release commit before building installers. Run verification locally too. `typecheck` checks the app and `tsconfig.tests.json`; Vitest transpilation alone does not type-check tests.
 - `bun run test` runs Node downloader tests before Vitest. Downloader: `node --test scripts/fetch-stockfish.test.mjs` from `app/`; real session: `cargo test real_stockfish_sidecar_cache_history_reopen_and_live_cancellation`.
-- Vitest 4 uses `node`, not jsdom. Use Effect TestContext/TestClock directly; do not install `@effect/vitest` 0.30 (requires Vitest 3).
+- Vitest 5 uses `node`, not jsdom, and requires Node >= 22.12 and Vite >= 6.4. Effect 4 test clocks come from `effect/testing` (`TestClock.layer()` replaces the old TestContext). Use direct Effect testing services when needed; any `@effect/vitest` adapter must match Effect 4 and support Vitest 5.
 
 ## Architecture and resource ownership
 

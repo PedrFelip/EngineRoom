@@ -17,9 +17,7 @@ export interface SessionPort {
 }
 
 /** The UI injects a session, never a process, cache or analysis algorithm. */
-export class AnalysisSessions extends Context.Tag(
-  'EngineRoom/AnalysisSessions',
-)<
+export class AnalysisSessions extends Context.Service<
   AnalysisSessions,
   {
     open(
@@ -28,6 +26,6 @@ export class AnalysisSessions extends Context.Tag(
       onError: (error: SessionError | InvalidPayloadError) => void,
     ): Effect.Effect<SessionPort, SessionError, Scope.Scope>
   }
->() {}
+>()('EngineRoom/AnalysisSessions') {}
 
 export type Backend = AnalysisSessions

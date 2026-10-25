@@ -135,7 +135,7 @@ describe('session IPC acquisition and validation', () => {
             result: { invalid: true },
           })
           expect(errors).toHaveBeenCalledOnce()
-          yield* Effect.yieldNow()
+          yield* Effect.yieldNow
           channel.onmessage({ ...event, sequence: 3 })
           expect(events).toHaveBeenCalledOnce()
         }),

@@ -114,6 +114,13 @@ isolados, e exige que o aplicativo e o WebKit permaneçam ativos sem erro EGL.
 Ele cobre inicialização via XWayland/X11; não substitui testes manuais de Wayland
 nativo nem dos diferentes drivers de GPU.
 
+O runner headless precisa instalar `libgles2` explicitamente, além de EGL e Mesa:
+`libegl1` não fornece nem exige `libGLESv2.so.2`, carregada dinamicamente pelo
+WebKit. O workflow verifica o carregamento de ambas antes de iniciar o AppImage.
+A ausência de GLES causa `Couldn't open libGLESv2.so.2` e aborto do aplicativo;
+essa falha de provisionamento é diferente do conflito de Wayland/EGL descrito
+acima. Não empacote uma biblioteca gráfica do host para corrigir o runner.
+
 O Linux de destino precisa fornecer `libwayland-client.so.0` (pacote
 `libwayland-client0` no Ubuntu/Debian; `wayland` no Arch). Para conferir um build
 local antes de assinar ou enviar, execute na raiz:
@@ -139,6 +146,10 @@ Use **Actions → Release → Run workflow**, selecione `main` e informe a tag, 
 ```bash
 gh workflow run release.yml --ref main -f tag=v1.0.0
 ```
+
+Se a correção é no workflow, integre-a em `main` antes de disparar essa retomada:
+o novo run usa o workflow corrigido e continua construindo no SHA imutável da
+tag. Reexecutar o job antigo mantém a definição antiga do workflow.
 
 A retomada aceita apenas uma release existente, com tag coerente e commit no
 histórico da main. Se já estiver publicada, somente retoma a sincronização com
