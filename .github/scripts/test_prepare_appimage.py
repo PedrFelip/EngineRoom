@@ -1,10 +1,12 @@
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "app/scripts"))
 from prepare_appimage import prepare, run
 
 

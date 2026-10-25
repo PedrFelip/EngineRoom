@@ -7,6 +7,7 @@ const { Node } = require('release-please/build/src/strategies/node');
 const { Version } = require('release-please/build/src/version');
 const { TagName } = require('release-please/build/src/util/tag-name');
 const { parseConventionalCommits } = require('release-please/build/src/commit');
+const { CommitSplit } = require('release-please/build/src/util/commit-split');
 const { parse: parseToml } = require('@iarna/toml');
 
 const root = path.join(__dirname, '../..');
@@ -14,7 +15,7 @@ const read = file => fs.readFileSync(path.join(root, file), 'utf8');
 const config = JSON.parse(read('release-please-config.json')).packages.app;
 const logger = { info() {}, warn() {}, debug() {}, error() {} };
 
-async function candidate(message, previous = '1.0.0', readFile = read) {
+async function candidate(message, previous = '1.0.0', readFile = read, files = ['app/src/App.tsx']) {
   const github = {
     repository: { owner: 'PedrFelip', repo: 'EngineRoom', defaultBranch: 'main' },
     getFileContentsOnBranch: async file => ({ parsedContent: readFile(file) }),
@@ -25,7 +26,9 @@ async function candidate(message, previous = '1.0.0', readFile = read) {
     includeVInTag: config['include-v-in-tag'],
     extraFiles: config['extra-files'], changelogSections: config['changelog-sections'],
   });
-  const commits = parseConventionalCommits([{ sha: 'a'.repeat(40), message, files: ['app/src/App.tsx'] }], logger);
+  // Manifest splits by package path before the strategy sees any commits.
+  const split = new CommitSplit({ packagePaths: ['app'] }).split([{ sha: 'a'.repeat(40), message, files }]);
+  const commits = parseConventionalCommits(split.app || [], logger);
   return strategy.buildReleasePullRequest(commits, {
     tag: new TagName(Version.parse(previous)), sha: 'b'.repeat(40), notes: '',
   });
@@ -46,6 +49,15 @@ test('administrative-only changes do not open a version PR', async () => {
   for (const message of ['docs: explica setup', 'chore: atualiza configuração', 'test: cobre cache']) {
     assert.equal(await candidate(message), undefined);
   }
+});
+
+test('AppImage packaging fixes produce a patch release through manifest path filtering', async () => {
+  const script = 'app/scripts/prepare_appimage.py';
+  assert.ok(fs.existsSync(path.join(root, script)), 'The packaging script must live in the released app path');
+  const message = 'fix: corrige inicialização do AppImage com Mesa recente\n\nRelease-As: 2.1.1';
+  const files = [script, '.github/workflows/release.yml'];
+  assert.equal((await candidate(message, '2.1.0', read, files)).version.toString(), '2.1.1');
+  assert.equal(await candidate(message, '2.1.0', read, ['.github/scripts/prepare_appimage.py', '.github/workflows/release.yml']), undefined);
 });
 
 async function verifyManifestUpdates(readFile) {

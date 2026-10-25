@@ -173,7 +173,7 @@ jobs:
 
       - name: Prepare and verify AppImage for host graphics drivers
         if: matrix.platform == 'ubuntu-22.04'
-        run: python3 .github/scripts/prepare_appimage.py app/src-tauri/target/release/bundle/appimage/*.AppImage
+        run: python3 app/scripts/prepare_appimage.py app/src-tauri/target/release/bundle/appimage/*.AppImage
 
       - name: Upload verified installers to draft
         shell: bash
