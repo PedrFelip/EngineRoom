@@ -96,19 +96,30 @@ linuxdeploy pode impedir o carregamento do Mesa atual por símbolos ausentes
 (`wl_fixes_interface`, por exemplo), levando o WebKit a abortar com
 `Could not create default EGL display: EGL_BAD_PARAMETER`, inclusive via XWayland.
 
-Depois do build, `app/scripts/prepare_appimage.py` remove somente as cópias
-de `libwayland-client.so*`, preserva o runtime e o formato SquashFS e extrai o
-arquivo final para conferir a exclusão. Só depois os instaladores são enviados
-ao rascunho. Uma falha impede a publicação. Os testes da automação exercitam o
-reempacotamento real com `squashfs-tools`, incluindo preservação dos outros
-arquivos e falha sem sobrescrever o original.
+O CLI Tauri está fixado em 2.12.4 no package.json e no lockfile. Essa versão
+inclui a [atualização upstream do linuxdeploy e do plugin GTK](https://github.com/tauri-apps/tauri/pull/16062)
+que corrige a inclusão dessas dependências. A correção acontece no build normal,
+inclusive localmente, sem reempacotar ou alterar o binário depois de gerado.
+
+Antes do upload, `app/scripts/verify_appimage.py` extrai uma cópia temporária
+usando o próprio runtime do AppImage, sem FUSE, e rejeita bibliotecas gráficas
+que devem vir do sistema. A política segue a
+[lista de exclusão da comunidade AppImage](https://github.com/AppImageCommunity/pkg2appimage/blob/master/excludelist).
+O verificador não modifica o artefato; uma regressão do empacotador bloqueia a
+publicação em vez de corrigir silenciosamente o pacote. Não exige squashfs-tools.
+
+O mesmo AppImage produzido no Ubuntu 22.04 também precisa iniciar no Ubuntu
+24.04 antes da publicação. Esse teste usa Xvfb e o Mesa por software, com dados
+isolados, e exige que o aplicativo e o WebKit permaneçam ativos sem erro EGL.
+Ele cobre inicialização via XWayland/X11; não substitui testes manuais de Wayland
+nativo nem dos diferentes drivers de GPU.
 
 O Linux de destino precisa fornecer `libwayland-client.so.0` (pacote
-`libwayland-client0` no Ubuntu/Debian; `wayland` no Arch). Builds locais para
-distribuição também devem executar, na raiz, antes de assinar ou enviar:
+`libwayland-client0` no Ubuntu/Debian; `wayland` no Arch). Para conferir um build
+local antes de assinar ou enviar, execute na raiz:
 
 ```bash
-python3 app/scripts/prepare_appimage.py app/src-tauri/target/release/bundle/appimage/*.AppImage
+python3 app/scripts/verify_appimage.py app/src-tauri/target/release/bundle/appimage/*.AppImage
 ```
 
 Não aplique `LD_PRELOAD` global nem desative a aceleração gráfica para contornar
@@ -135,8 +146,16 @@ develop. Não move tags nem cria uma nova versão.
 
 ## Verificar alterações na automação
 
-Os testes de reempacotamento do AppImage exigem `squashfs-tools` instalado.
-Sem essas ferramentas, esses testes são pulados; o CI instala e executa todos.
+O Bun está fixado em 1.4.4 nos campos `packageManager` e nos workflows de CI e
+release. Ao atualizá-lo, mantenha também as chaves de cache na mesma versão.
+O CLI Tauri, a API JavaScript e o runtime Rust são verificados juntos: além dos
+testes, gere o AppImage e execute a verificação de inicialização descrita acima.
+
+Atualizações de dependências dentro das faixas atuais usam `bun update` em
+`app/` e `cargo update` em `app/src-tauri/`, preservando os lockfiles no PR.
+Migrações para novas versões principais de Effect, TypeScript e Vitest devem
+ter escopo e validação próprios. O Release Please continua fixado à biblioteca
+usada pela action; não atualize somente a dependência dos testes.
 
 Na raiz:
 
