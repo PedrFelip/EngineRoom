@@ -120,7 +120,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: '1.4.3'
+          bun-version: '1.4.4'
 
       - uses: actions/setup-node@v4
         with:
@@ -138,8 +138,8 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.bun/install/cache
-          key: bun-v1-${{ runner.os }}-${{ runner.arch }}-1.4.3-app-${{ hashFiles('app/bun.lock') }}
-          restore-keys: bun-v1-${{ runner.os }}-${{ runner.arch }}-1.4.3-app-
+          key: bun-v1-${{ runner.os }}-${{ runner.arch }}-1.4.4-app-${{ hashFiles('app/bun.lock') }}
+          restore-keys: bun-v1-${{ runner.os }}-${{ runner.arch }}-1.4.4-app-
       - name: Install frontend dependencies
         run: bun install --frozen-lockfile
         working-directory: app

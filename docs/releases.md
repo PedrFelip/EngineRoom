@@ -146,6 +146,17 @@ develop. Não move tags nem cria uma nova versão.
 
 ## Verificar alterações na automação
 
+O Bun está fixado em 1.4.4 nos campos `packageManager` e nos workflows de CI e
+release. Ao atualizá-lo, mantenha também as chaves de cache na mesma versão.
+O CLI Tauri, a API JavaScript e o runtime Rust são verificados juntos: além dos
+testes, gere o AppImage e execute a verificação de inicialização descrita acima.
+
+Atualizações de dependências dentro das faixas atuais usam `bun update` em
+`app/` e `cargo update` em `app/src-tauri/`, preservando os lockfiles no PR.
+Migrações para novas versões principais de Effect, TypeScript e Vitest devem
+ter escopo e validação próprios. O Release Please continua fixado à biblioteca
+usada pela action; não atualize somente a dependência dos testes.
+
 Na raiz:
 
 ```bash

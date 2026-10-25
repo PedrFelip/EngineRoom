@@ -9,8 +9,8 @@ Bibliotecas de xadrez vinculadas ao backend:
 
 | Biblioteca | Versão | Licença | Código-fonte |
 | --- | --- | --- | --- |
-| shakmaty | 0.30.1 | GPL-3.0-or-later | https://github.com/niklasf/shakmaty |
-| pgn-reader | 0.29.0 | GPL-3.0-or-later | https://github.com/niklasf/shakmaty |
+| shakmaty | 0.30.2 | GPL-3.0-or-later | https://github.com/niklasf/shakmaty |
+| pgn-reader | 0.29.1 | GPL-3.0-or-later | https://github.com/niklasf/shakmaty |
 
 As versões exatas e as demais dependências do backend estão em
 `app/src-tauri/Cargo.lock`; as do frontend estão em `app/bun.lock`.
