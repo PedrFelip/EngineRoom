@@ -154,6 +154,7 @@ impl EngineFactory for FakeFactory {
 }
 #[derive(Default)]
 pub(super) struct MemoryRepo {
+    pub(super) drained: std::sync::atomic::AtomicBool,
     pub(super) hits: Mutex<HashMap<String, RawPosition>>,
     pub(super) writes: Mutex<Vec<(u32, usize)>>,
     pub(super) lookups: Mutex<Vec<(Vec<String>, u32, u32)>>,
@@ -162,6 +163,11 @@ pub(super) struct MemoryRepo {
     pub(super) fail_save: bool,
 }
 impl Repository for MemoryRepo {
+    fn drain(&self) -> Task<'_, ()> {
+        Box::pin(async move {
+            self.drained.store(true, Ordering::SeqCst);
+        })
+    }
     fn lookup<'a>(
         &'a self,
         fens: &'a [String],

@@ -24,21 +24,11 @@ const Classification = S.Literals([
   'otimo',
 ])
 
-export const RawLineSchema = S.Struct({
-  multipv: Positive,
-  cp: Num,
-  pv: Strings,
-  san: S.optional(S.NullOr(S.String)),
-  depth: S.optional(Count),
-})
 export const CachedPositionSchema = S.Struct({
   cp: Num,
   linesJson: S.String,
   reachedDepth: Count.pipe(S.withDecodingDefaultType(Effect.succeed(0))),
 })
-export const CacheLinesSchema = S.fromJsonString(
-  S.mutable(S.Array(RawLineSchema)),
-)
 export const ResourcesSchema = S.Struct({
   threads: Positive,
   memory_mb: Positive,
@@ -87,7 +77,6 @@ export const GamePageSchema = S.Struct({
   total: Count,
   nextCursor: S.NullOr(S.Struct({ id: Positive, createdAt: S.String })),
 })
-export const SavedIdSchema = Positive
 export const LegacyReviewSchema = S.fromJsonString(
   S.Struct({
     positions: S.mutable(
@@ -136,7 +125,6 @@ export const LegacyReviewSchema = S.fromJsonString(
     accuracyByPhase: S.optional(AccuracyByPhase),
   }),
 )
-export type LegacyReview = typeof LegacyReviewSchema.Type
 
 // Keep field-level fallback/clamping: one invalid preference must not reset all others.
 export const SettingsInputSchema = S.fromJsonString(

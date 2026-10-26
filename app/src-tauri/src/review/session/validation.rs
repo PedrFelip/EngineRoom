@@ -1,5 +1,5 @@
 //! Session payload validation at the IPC boundary.
-use super::*;
+use crate::review::types::{LiveSettings, Result, ReviewConfig, ReviewError, ReviewErrorCode};
 
 pub(super) fn validate(config: &ReviewConfig) -> Result<()> {
     if !(1..=128).contains(&config.engine.depth)
