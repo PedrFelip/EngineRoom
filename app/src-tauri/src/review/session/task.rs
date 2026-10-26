@@ -41,7 +41,7 @@ pub(super) async fn run_session(
                 progress: Progress {
                     stage: "preparing".into(),
                     completed: 0,
-                    total: config.meta.plies + 1,
+                    total: config.meta.plies.saturating_add(1),
                     current_ply: 0,
                     phase: None,
                     cached_positions: 0,

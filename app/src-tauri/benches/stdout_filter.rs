@@ -1,6 +1,6 @@
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 
-#[path = "../src/engine.rs"]
+#[path = "../src/engine/stdout.rs"]
 mod engine;
 
 /// Implementação que estava no leitor antes da otimização. Ela é mantida só

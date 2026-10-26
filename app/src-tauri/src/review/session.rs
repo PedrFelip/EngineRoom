@@ -39,6 +39,17 @@ pub struct ReviewSessions {
     sessions: Arc<Mutex<HashMap<String, Arc<Session>>>>,
     permit: Arc<Semaphore>,
     exiting: AtomicBool,
+    shutdown_complete: Arc<AtomicBool>,
+}
+
+/// The action required for an application exit request.
+pub enum ShutdownAction {
+    /// Prevent exit and run this cleanup task once.
+    Cleanup(engine::Task<'static, ()>),
+    /// Prevent repeated exit requests until cleanup finishes.
+    Wait,
+    /// Allow exit after all sessions acknowledge cleanup.
+    Exit,
 }
 impl Default for ReviewSessions {
     fn default() -> Self {
@@ -46,6 +57,7 @@ impl Default for ReviewSessions {
             sessions: Arc::new(Mutex::new(HashMap::new())),
             permit: Arc::new(Semaphore::new(1)),
             exiting: AtomicBool::new(false),
+            shutdown_complete: Arc::new(AtomicBool::new(false)),
         }
     }
 }
@@ -126,9 +138,13 @@ impl ReviewSessions {
             }
         }
     }
-    pub fn begin_shutdown(&self) -> Option<engine::Task<'static, ()>> {
+    pub fn begin_shutdown(&self) -> ShutdownAction {
         if self.exiting.swap(true, Ordering::SeqCst) {
-            return None;
+            return if self.shutdown_complete.load(Ordering::SeqCst) {
+                ShutdownAction::Exit
+            } else {
+                ShutdownAction::Wait
+            };
         }
         let sessions: Vec<_> = self
             .sessions
@@ -140,11 +156,13 @@ impl ReviewSessions {
         for session in &sessions {
             session.close.send_replace(true);
         }
-        Some(Box::pin(async move {
+        let shutdown_complete = self.shutdown_complete.clone();
+        ShutdownAction::Cleanup(Box::pin(async move {
             for session in sessions {
                 let mut done = session.done.clone();
                 let _ = done.wait_for(|v| *v).await;
             }
+            shutdown_complete.store(true, Ordering::SeqCst);
         }))
     }
 }

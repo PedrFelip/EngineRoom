@@ -280,14 +280,26 @@ pub fn parse_info(line: &str) -> Option<RawLine> {
     while let Some(token) = words.next() {
         match token {
             "depth" => depth = words.next()?.parse().ok()?,
-            "multipv" => multipv = words.next()?.parse().ok()?,
+            "multipv" => {
+                multipv = words.next()?.parse().ok()?;
+                if multipv == 0 {
+                    return None;
+                }
+            }
             "score" => {
                 let kind = words.next()?;
                 let n: i32 = words.next()?.parse().ok()?;
-                cp = Some(if kind == "mate" {
-                    (if n > 0 { 1 } else { -1 }) * (100000 - n.abs())
-                } else {
-                    n
+                cp = Some(match kind {
+                    "cp" => n,
+                    "mate" => {
+                        // Mate distances must fit the reserved score encoding.
+                        let distance = n.checked_abs()?;
+                        if distance > 100000 {
+                            return None;
+                        }
+                        (if n > 0 { 1 } else { -1 }) * (100000 - distance)
+                    }
+                    _ => return None,
                 });
             }
             "pv" => {

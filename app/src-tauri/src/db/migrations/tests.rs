@@ -186,6 +186,40 @@ fn migracao_games_mode_eh_idempotente() {
 }
 
 #[test]
+fn failed_migration_preserves_legacy_schema_and_allows_retry() {
+    let conn = banco_com_games_legacy();
+    // Simulate a malformed legacy row that fails the new schema's constraints.
+    conn.execute_batch(
+        "CREATE TABLE legacy_games AS SELECT * FROM games;
+         DROP TABLE games;
+         ALTER TABLE legacy_games RENAME TO games;
+         UPDATE games SET white = NULL;",
+    )
+    .unwrap();
+
+    assert!(
+        migrate(&conn).is_err(),
+        "invalid legacy row must fail migration"
+    );
+    assert!(
+        !has_column(&conn, "games", "mode").unwrap(),
+        "failed migration must preserve the original schema for retry"
+    );
+    let white: Option<String> = conn
+        .query_row("SELECT white FROM games", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(white, None, "failed migration must preserve legacy data");
+
+    conn.execute("UPDATE games SET white = 'Brancas'", [])
+        .unwrap();
+    migrate(&conn).unwrap();
+    let games = Store::new(&conn).list_page(50, None).unwrap().games;
+    assert_eq!(games.len(), 1, "retry must migrate the original game");
+    assert_eq!(games[0].white, "Brancas");
+    assert_eq!(games[0].analysis_kind, "manual");
+}
+
+#[test]
 fn migrate_em_schema_atual_eh_noop() {
     // open_memory() já roda migrate() uma vez → schema no estado latest.
     let conn = open_memory().unwrap();
