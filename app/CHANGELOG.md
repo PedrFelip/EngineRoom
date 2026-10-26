@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.1.4](https://github.com/PedrFelip/EngineRoom/compare/v2.1.3...v2.1.4) (2026-10-26)
+
+
+### Correções
+
+* **review:** harden edge cases across analysis and shutdown ([ad54835](https://github.com/PedrFelip/EngineRoom/commit/ad54835c9f74f16ab7952629760f47d2d694d171))
+* **review:** harden edge cases across analysis and shutdown ([77820e2](https://github.com/PedrFelip/EngineRoom/commit/77820e215a41d0c3a7c59c2fcb21455add05e286))
+
 ## [2.1.3](https://github.com/PedrFelip/EngineRoom/compare/v2.1.2...v2.1.3) (2026-10-25)
 
 
