@@ -9,6 +9,11 @@ struct Entry {
     moves: Vec<String>,
 }
 pub fn opening(moves: &[PlayedMove]) -> Option<(usize, Eco)> {
+    // ECO sequences assume the standard starting position, even when supplied
+    // through an explicit PGN FEN tag.
+    if moves.first()?.fen_before != super::fen(&shakmaty::Chess::default()) {
+        return None;
+    }
     static DATA: OnceLock<Vec<Entry>> = OnceLock::new();
     let data = DATA.get_or_init(|| {
         serde_json::from_str(include_str!("../../../../src/data/eco.json")).unwrap_or_default()

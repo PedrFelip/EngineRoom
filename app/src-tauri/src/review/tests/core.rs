@@ -1,6 +1,47 @@
 use super::*;
 
 #[test]
+fn opening_requires_the_standard_starting_position() {
+    let standard = core::extract("1. e4 e5").unwrap();
+    assert!(core::opening(&standard.moves).is_some());
+    let explicit_standard = core::extract(
+        "[SetUp \"1\"]\n[FEN \"rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1\"]\n1. e4 e5",
+    )
+    .unwrap();
+    assert!(core::opening(&explicit_standard.moves).is_some());
+    let custom = core::extract(
+        "[SetUp \"1\"]\n[FEN \"rnb1kbnr/pppppppp/8/8/8/8/PPPPPPPP/RNB1KBNR w KQkq - 0 1\"]\n1. e4 e5",
+    )
+    .unwrap();
+    assert!(core::opening(&custom.moves).is_none());
+    let raw: Vec<_> = custom
+        .fens
+        .iter()
+        .map(|fen| core::terminal_raw(fen, 0))
+        .collect();
+    let review = core::build(&custom, &raw).unwrap();
+    assert!(review.moves.iter().all(|m| !m.is_book && m.eco.is_none()));
+}
+
+#[test]
+fn extreme_scores_do_not_overflow_ranking_or_perspective_conversion() {
+    let game = core::extract("[FEN \"7k/8/8/8/8/8/8/R6K w - - 0 1\"]\n1. Ra2").unwrap();
+    let raw = [
+        core::terminal_raw(&game.fens[0], i32::MIN),
+        core::terminal_raw(&game.fens[1], i32::MIN),
+    ];
+    let critical = adaptive::rank(&game, &raw);
+    assert!(critical[0].reasons.contains(&adaptive::Reason::Mate));
+    let review = core::build(&game, &raw).unwrap();
+    assert_eq!(review.positions[0].lines[0].cp, i32::MIN);
+    assert_eq!(review.positions[1].lines[0].cp, i32::MAX);
+    assert_eq!(
+        review.positions[1].lines[0].win_pct,
+        100.0 - crate::review::scoring::win_pct(i32::MIN)
+    );
+}
+
+#[test]
 fn accuracy_uses_fen_start_and_actual_phase_entry_evaluation() {
     let game = core::extract("[FEN \"7k/8/8/8/8/8/8/R6K w - - 0 1\"]\n1. Ra2 Kg7 2. Ra3").unwrap();
     let raw: Vec<_> = game

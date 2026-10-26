@@ -12,8 +12,15 @@ Fluxo: `feature/* → develop → main → PR de versão → release pública`.
    das funcionalidades e correções precisam chegar à main para gerar o changelog.
 4. O Release Please abre ou atualiza um PR de versão na main. Revise as notas e
    faça **Squash and merge** quando quiser publicar.
-5. O Actions valida o commit da versão, gera AppImage, NSIS e MSI e publica a release.
+5. O Actions cria a tag junto do rascunho, valida o commit da versão, gera
+   AppImage, NSIS e MSI e publica somente depois dos checks e smoke Linux.
 6. Faça merge do PR automático `main → develop` com **Create a merge commit**.
+
+O PR de sincronização acompanha a branch `main`: inclui todo o histórico ainda
+ausente em `develop`, e pode crescer enquanto estiver aberto. Ele não representa
+um snapshot de uma release. Integre-o preservando os commits; squash nessa direção
+faz o histórico já aplicado reaparecer nas próximas sincronizações. Conflitos
+precisam ser resolvidos antes de o CI de integração aprovar esse PR.
 
 Para uma correção urgente, crie `hotfix/*` a partir da main e abra um PR para main.
 Use um título `fix: ...`, faça squash e siga o mesmo PR automático de versão.
@@ -45,7 +52,20 @@ os testes exercitam os updaters reais e preservam todas as dependências.
 
 A implantação inicial contém `Release-As: 1.0.0` na mensagem do commit, após uma
 linha em branco. Esse rodapé força apenas a primeira versão. O ponto inicial do
-histórico é a tag `v0.9.1`; as releases anteriores são preservadas.
+histórico é a tag `v0.9.1`; as releases anteriores são preservadas. Não reutilize
+`Release-As` para corrigir uma proposta regressiva: investigue primeiro a referência
+da última release. O CI do PR de versão exige uma versão estável maior que a base
+e que todas as releases estáveis existentes, inclusive drafts, e rejeita tags já usadas.
+
+`force-tag-creation` mantém a tag disponível antes de o Release Please calcular
+o próximo PR na mesma execução. Sem ela, um draft sem tag não é reconhecido como
+limite do histórico; o fallback para bootstrap relê `Release-As` e notas antigas.
+Os testes da automação cobrem esse ciclo com a biblioteca real fixada na action.
+
+Evite `BEGIN_COMMIT_OVERRIDE` em PRs que preservarão vários commits: o bloco é
+aplicado a cada commit associado e pode multiplicar entradas do changelog. O bloco
+histórico do PR #8 fica antes do limite das releases atuais e não precisa ser
+reescrito. Releases e changelogs já publicados permanecem preservados.
 
 ## CI e permissões
 
@@ -80,13 +100,26 @@ merge dos seus próprios PRs.
 
 Eventos criados pelo token podem não iniciar CI automaticamente. Por isso o fluxo
 dispara `ci.yml` explicitamente na branch do PR, passando `pr_number`; o CI confere
-se o SHA executado ainda corresponde ao PR. Para repetir manualmente:
+se o SHA executado ainda corresponde ao PR. Os checks usam o SHA imutável do
+merge sintético, verificando os pais contra a base e o head atuais; PRs com
+conflito ou merge ainda indisponível falham e precisam de nova execução.
+Para repetir manualmente:
 
 ```bash
 gh workflow run ci.yml --ref NOME_DA_BRANCH -f pr_number=NUMERO_DO_PR
 ```
 
 ## Falhas e retomada
+
+### Recuperar uma proposta regressiva
+
+Depois de integrar a correção da automação em `main`, confira que a última tag
+publicada aponta para o commit correto e que o manifest contém essa versão.
+Feche o PR regressivo antigo (por exemplo #35, que propunha 2.1.2 sobre 2.1.3)
+sem fazer merge. O próximo push em `main` recalcula a proposta usando a última
+release reconhecida. Não mova tags publicadas, não diminua versões e não apague
+o changelog para esconder o problema. Na ausência de alterações de produto após
+a última release, nenhuma nova proposta é esperada.
 
 ### Compatibilidade gráfica do AppImage
 
@@ -140,6 +173,8 @@ versão, mesmo com esse rodapé. Os testes de versão incluem esse filtro.
 Falhas em testes ou em qualquer plataforma mantêm a release como rascunho.
 A publicação exige os três instaladores completos. Todos são construídos no SHA
 imutável da release; uma tag apontando para outro commit causa falha.
+A retomada de um draft também falha se já houver uma versão estável igual ou
+maior publicada, evitando que uma release antiga substitua a versão mais recente.
 
 Use **Actions → Release → Run workflow**, selecione `main` e informe a tag, ou:
 

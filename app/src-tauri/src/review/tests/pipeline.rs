@@ -374,6 +374,19 @@ async fn uci_timeout_mate_scores_and_latest_multipv() {
     p.shutdown().await;
 }
 
+#[test]
+fn uci_rejects_invalid_scores_and_zero_multipv() {
+    for line in [
+        "info score mate -2147483648",
+        "info score mate 100001",
+        "info score mate -100001",
+        "info score unknown 42",
+        "info multipv 0 score cp 42",
+    ] {
+        assert!(parse_info(line).is_none(), "invalid UCI line: {line}");
+    }
+}
+
 #[tokio::test]
 async fn cancellation_interrupts_a_blocked_cache_lookup() {
     struct BlockedRepo(tokio::sync::Notify);
