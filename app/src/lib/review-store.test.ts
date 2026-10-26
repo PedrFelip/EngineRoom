@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import type { MoveAnalysis } from '../types'
 import { selectDisplayedPosition } from './review-selectors'
 import { createReviewStore } from './review-store'
 
@@ -12,7 +13,7 @@ function mainlineMove(
   san: string,
   uci: string,
   fenBefore: string,
-) {
+): MoveAnalysis {
   return {
     ply,
     color,
@@ -174,6 +175,91 @@ describe('createReviewStore — navegação na linha principal', () => {
 
     expect(listener).toHaveBeenCalledTimes(1)
     expect(store.getSnapshot().currentPly).toBe(0)
+  })
+})
+
+describe('createReviewStore — erros e blunders', () => {
+  it('pula entre erros e blunders e permanece no limite', () => {
+    const store = createReviewStore()
+    const result = e4e5Result()
+    result.moves[0].classification = 'erro'
+    result.moves[1].classification = 'blunder'
+    result.moves.push(
+      { ...result.moves[1], ply: 3, classification: 'imprecisao' },
+      { ...result.moves[1], ply: 4, san: 'Cf6', classification: 'erro' },
+    )
+    store.setResult(result)
+    store.first()
+    const listener = vi.fn()
+    store.subscribe(listener)
+
+    store.nextCritical()
+    expect(store.getSnapshot().currentPly).toBe(1)
+    store.nextCritical()
+    expect(store.getSnapshot().currentPly).toBe(2)
+    store.nextCritical()
+    expect(store.getSnapshot().currentPly).toBe(4)
+    store.nextCritical()
+    expect(store.getSnapshot().currentPly).toBe(4)
+
+    store.prevCritical()
+    expect(store.getSnapshot().currentPly).toBe(2)
+    store.prevCritical()
+    expect(store.getSnapshot().currentPly).toBe(1)
+    store.prevCritical()
+    expect(store.getSnapshot().currentPly).toBe(1)
+    expect(listener).toHaveBeenCalledTimes(5)
+  })
+
+  it('não avança quando a partida não tem erro nem blunder', () => {
+    const store = createReviewStore()
+    store.setResult(e4e5Result())
+    store.first()
+    const listener = vi.fn()
+    store.subscribe(listener)
+
+    store.nextCritical()
+    store.prevCritical()
+
+    expect(store.getSnapshot().currentPly).toBe(0)
+    expect(listener).not.toHaveBeenCalled()
+  })
+
+  it('sai da variação para o erro de origem antes de recuar mais', () => {
+    const store = createReviewStore()
+    const result = e4e5Result()
+    result.moves[0].classification = 'blunder'
+    result.moves[1].classification = 'erro'
+    store.setResult(result)
+    store.goTo(1)
+    expect(store.exploreLine(['d7d5'])).not.toEqual([])
+    expect(store.getSnapshot().variation).not.toBeNull()
+
+    store.prevCritical()
+    expect(store.getSnapshot().variation).toBeNull()
+    expect(store.getSnapshot().currentPly).toBe(1)
+
+    store.exploreLine(['d7d5'])
+    store.nextCritical()
+    expect(store.getSnapshot().variation).toBeNull()
+    expect(store.getSnapshot().currentPly).toBe(2)
+  })
+
+  it('mantém a variação quando não há erro anterior', () => {
+    const store = createReviewStore()
+    const result = e4e5Result()
+    result.moves[1].classification = 'erro'
+    store.setResult(result)
+    store.first()
+    expect(store.exploreLine(['d2d4'])).not.toEqual([])
+
+    store.prevCritical()
+    expect(store.getSnapshot().variation).not.toBeNull()
+    expect(store.getSnapshot().currentPly).toBe(0)
+
+    store.nextCritical()
+    expect(store.getSnapshot().variation).toBeNull()
+    expect(store.getSnapshot().currentPly).toBe(2)
   })
 })
 

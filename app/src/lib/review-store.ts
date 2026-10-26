@@ -58,6 +58,10 @@ export interface ReviewStore {
   goTo(ply: number): void
   next(): void
   prev(): void
+  /** Próximo erro ou blunder da linha principal. */
+  nextCritical(): void
+  /** Erro ou blunder anterior da linha principal. */
+  prevCritical(): void
   first(): void
   last(): void
   makeMove(from: string, to: string, promotion?: string): boolean
@@ -93,6 +97,31 @@ export function createReviewStore(): ReviewStore {
       )
       return changed ? next : snapshot
     })
+  }
+
+  function isCritical(classification: Classification): boolean {
+    return classification === 'erro' || classification === 'blunder'
+  }
+
+  function nextCriticalPly(
+    moves: ReviewResult['moves'],
+    after: number,
+  ): number | null {
+    return (
+      moves.find((move) => move.ply > after && isCritical(move.classification))
+        ?.ply ?? null
+    )
+  }
+
+  function previousCriticalPly(
+    moves: ReviewResult['moves'],
+    before: number,
+  ): number | null {
+    for (let index = moves.length - 1; index >= 0; index--) {
+      const move = moves[index]
+      if (move.ply < before && isCritical(move.classification)) return move.ply
+    }
+    return null
   }
 
   function commitVariation(variation: ReviewVariation): void {
@@ -159,6 +188,33 @@ export function createReviewStore(): ReviewStore {
         return
       }
       commit({ currentPly: Math.max(0, snapshot.currentPly - 1) })
+    },
+    nextCritical() {
+      const snapshot = state.getState()
+      const moves = snapshot.result?.moves
+      if (!moves) return
+      const ply = nextCriticalPly(moves, snapshot.currentPly)
+      if (ply === null) return
+      commit({ currentPly: ply, variation: null })
+    },
+    prevCritical() {
+      const snapshot = state.getState()
+      const moves = snapshot.result?.moves
+      if (!moves) return
+      const onCriticalBranch =
+        snapshot.variation !== null &&
+        moves.some(
+          (move) =>
+            move.ply === snapshot.currentPly &&
+            isCritical(move.classification),
+        )
+      if (onCriticalBranch) {
+        commit({ variation: null })
+        return
+      }
+      const ply = previousCriticalPly(moves, snapshot.currentPly)
+      if (ply === null) return
+      commit({ currentPly: ply, variation: null })
     },
     first() {
       commit({ currentPly: 0, variation: null })

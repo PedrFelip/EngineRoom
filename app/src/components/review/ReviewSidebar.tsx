@@ -120,6 +120,7 @@ export default memo(function ReviewSidebar({
           </h3>
           <p className='mt-1.5 text-xs leading-relaxed text-ink-faint'>
             Volte aos erros e explore o que poderia ter sido jogado.
+            Shift+← e Shift+→ pulam entre eles.
           </p>
           <SegmentedControl
             className='mt-3'
