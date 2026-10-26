@@ -17,12 +17,12 @@ async fn cache_advertises_only_produced_lines_and_their_common_depth() {
     raw.lines[0].pv = vec!["e2e4".into()];
     repo.put(&[raw.clone()], Mode::Time, 1000, 3).await.unwrap();
     assert!(repo
-        .lookup(&[fen.clone()], Mode::Time, 500, 3)
+        .lookup(std::slice::from_ref(&fen), Mode::Time, 500, 3)
         .await
         .unwrap()[0]
         .is_none());
     assert!(repo
-        .lookup(&[fen.clone()], Mode::Depth, 20, 1)
+        .lookup(std::slice::from_ref(&fen), Mode::Depth, 20, 1)
         .await
         .unwrap()[0]
         .is_some());
@@ -38,12 +38,12 @@ async fn cache_advertises_only_produced_lines_and_their_common_depth() {
     }
     repo.put(&[raw.clone()], Mode::Time, 1000, 3).await.unwrap();
     assert!(repo
-        .lookup(&[fen.clone()], Mode::Depth, 14, 3)
+        .lookup(std::slice::from_ref(&fen), Mode::Depth, 14, 3)
         .await
         .unwrap()[0]
         .is_none());
     assert!(repo
-        .lookup(&[fen.clone()], Mode::Depth, 12, 3)
+        .lookup(std::slice::from_ref(&fen), Mode::Depth, 12, 3)
         .await
         .unwrap()[0]
         .is_some());
@@ -65,7 +65,7 @@ async fn cache_advertises_only_produced_lines_and_their_common_depth() {
             .unwrap();
     }
     assert!(repo
-        .lookup(&[fen.clone()], Mode::Depth, 21, 3)
+        .lookup(std::slice::from_ref(&fen), Mode::Depth, 21, 3)
         .await
         .unwrap()[0]
         .is_none());

@@ -36,6 +36,7 @@ fn missing_baseline_is_an_error_even_with_a_refinement() {
     let state = State {
         game: &game,
         profile: adaptive::profile(AnalysisKind::Fast).unwrap().unwrap(),
+        sizing: None,
         phases: core::phases(&game.fens),
         terminals: vec![None; 2],
         baseline: vec![None; 2],
