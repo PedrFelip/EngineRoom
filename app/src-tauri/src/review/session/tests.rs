@@ -489,3 +489,69 @@ async fn real_stockfish_sidecar_cache_history_reopen_and_live_cancellation() {
     assert!(stopped.load(Ordering::SeqCst) >= 5);
     drop(close);
 }
+
+#[tokio::test]
+async fn poisoned_latest_closes_retained_engine_before_acknowledgment() {
+    let manager = ReviewSessions::default();
+    let (session, finished, done) = manager.register("poison", "main").unwrap();
+    let config = restored();
+    let fen = config.initial_result.as_ref().unwrap().positions[0]
+        .fen
+        .clone();
+    let f = factory(FakeState::default());
+    update(
+        &session,
+        1,
+        Some(Job {
+            id: 1,
+            request: request(&fen),
+            settings: settings(),
+        }),
+    )
+    .unwrap();
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let owned = session.clone();
+    let factory = f.clone();
+    let repo = Arc::new(MemoryRepo::default());
+    let repository = repo.clone();
+    let running = tokio::spawn(async move {
+        run_session(
+            "poison",
+            &config,
+            &owned,
+            finished,
+            done,
+            Pipeline::new(factory, repository),
+            &mut |e| tx.send(e).is_ok(),
+        )
+        .await;
+    });
+    receive(&mut rx, |e| matches!(e.event, Event::LiveCompleted { .. })).await;
+    let mut acknowledged = session.finished.clone();
+    acknowledged.wait_for(|id| *id == 1).await.unwrap();
+    assert!(
+        session.latest.lock().unwrap().is_none(),
+        "processed job must be consumed"
+    );
+    let owned = session.clone();
+    assert!(std::thread::spawn(move || {
+        let _guard = owned.latest.lock().unwrap();
+        panic!("poison latest for cleanup test");
+    })
+    .join()
+    .is_err());
+    session.revision.send_replace(2);
+    let error = receive(&mut rx, |e| matches!(e.event, Event::Error { .. })).await;
+    assert!(
+        matches!(error.event, Event::Error { error, .. } if error.code == ReviewErrorCode::Session)
+    );
+    tokio::time::timeout(Duration::from_secs(3), session.close())
+        .await
+        .unwrap();
+    running.await.unwrap();
+    assert_eq!(f.state.lock().unwrap().searches, 1);
+    assert_eq!(f.state.lock().unwrap().stopped, 1);
+    assert_eq!(f.permit.available_permits(), 1);
+    assert!(*session.done.borrow());
+    assert!(repo.drained.load(Ordering::SeqCst));
+}

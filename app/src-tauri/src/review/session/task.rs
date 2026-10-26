@@ -98,8 +98,27 @@ pub(super) async fn run_session(
     let mut observed = 0;
     while root.check().is_ok() {
         let (id, job) = {
-            let latest = session.latest.lock().unwrap_or_else(|e| e.into_inner());
-            (*session.revision.borrow(), latest.clone())
+            let mut latest = match session.latest.lock() {
+                Ok(latest) => latest,
+                Err(error) => {
+                    publish(
+                        None,
+                        Event::Error {
+                            error: ReviewError::new(
+                                ReviewErrorCode::Session,
+                                "session.intent",
+                                error,
+                            ),
+                            fen: None,
+                        },
+                    );
+                    session.close.send_replace(true);
+                    break;
+                }
+            };
+            let id = *session.revision.borrow();
+            let job = if id != observed { latest.take() } else { None };
+            (id, job)
         };
         if id != observed {
             observed = id;

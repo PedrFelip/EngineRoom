@@ -24,9 +24,11 @@ impl Pipeline {
             detected: None,
         }
     }
+    /// Awaits engine teardown without draining repository work.
     pub async fn discard(&mut self) {
         self.engine.discard().await;
     }
+    /// Awaits engine teardown and repository drain before session close acknowledgment.
     pub async fn close(&mut self) {
         self.discard().await;
         self.repository.drain().await;
@@ -91,13 +93,13 @@ impl Pipeline {
             let mut raw = Vec::new();
             let mut cached = 0;
             let mut searched = 0;
-            for (i, fen) in game.fens.iter().enumerate() {
+            for (i, (fen, hit)) in game.fens.iter().zip(hits).enumerate() {
                 cancel.check()?;
                 let pos = if let Some(cp) = terminals[i] {
                     core::terminal_raw(fen, cp)
-                } else if let Some(hit) = &hits[i] {
+                } else if let Some(hit) = hit {
                     cached += 1;
-                    hit.clone()
+                    hit
                 } else {
                     let (threads, memory) = sizing.unwrap_or((1, 16));
                     let port = self
@@ -235,7 +237,7 @@ impl Pipeline {
             let mut raw = result?;
             core::add_san(&mut raw);
             self.repository
-                .put(&[raw.clone()], Mode::Time, value, multipv)
+                .put(std::slice::from_ref(&raw), Mode::Time, value, multipv)
                 .await?;
             raw
         };
@@ -269,34 +271,35 @@ impl Pipeline {
                 fen: request.fen.clone(),
             });
             let after = self.analyze_fen(&request.fen, settings, cancel).await?;
+            let after_cp = after.cp;
             emit(Event::LiveCompleted {
                 fen: request.fen.clone(),
-                analysis: after.clone(),
+                analysis: after,
             });
             if settings.move_feedback_enabled {
                 if let (Some(id), Some(source_fen)) =
                     (&request.variation_node_id, &request.source_fen)
                 {
-                    let before = if let Some(source) = request
+                    let before_cp = if let Some(source) = request
                         .source_analysis
                         .as_ref()
                         .filter(|s| s.fen == *source_fen)
                     {
-                        Some(source.clone())
+                        Some(source.cp)
                     } else if *source_fen == request.fen {
-                        Some(after.clone())
+                        Some(after_cp)
                     } else if !settings.fast_pass {
-                        Some(self.analyze_fen(source_fen, settings, cancel).await?)
+                        Some(self.analyze_fen(source_fen, settings, cancel).await?.cp)
                     } else {
                         None
                     };
                     cancel.check()?;
-                    if let Some(before) = before {
+                    if let Some(before_cp) = before_cp {
                         emit(Event::Classification {
                             node_id: id.clone(),
                             classification: scoring::classify(
-                                (scoring::win_pct(before.cp)
-                                    - (100.0 - scoring::win_pct(after.cp)))
+                                (scoring::win_pct(before_cp)
+                                    - (100.0 - scoring::win_pct(after_cp)))
                                 .max(0.0),
                                 false,
                             ),

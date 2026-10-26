@@ -432,9 +432,9 @@ async fn execute(
                 ms: completed.value,
                 multipv: job.multipv,
             });
-            state.refined[job.index] = Some(raw.clone());
+            state.refined[job.index] = Some(raw);
         } else {
-            state.baseline[job.index] = Some(raw.clone());
+            state.baseline[job.index] = Some(raw);
             state.discover(job.index);
         }
         state.progress(job.index, Some(state.evaluation(job.index)?), emit);

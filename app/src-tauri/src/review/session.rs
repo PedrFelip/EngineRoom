@@ -25,7 +25,6 @@ pub use ipc::{
     review_session_cancel_live, review_session_close, review_session_open,
 };
 
-#[derive(Clone)]
 struct Job {
     id: u64,
     request: LiveRequest,

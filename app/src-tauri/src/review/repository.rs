@@ -20,7 +20,10 @@ pub use sqlite::{
 pub trait Repository: Send + Sync {
     /// Returns one entry per FEN, in input order, satisfying the requested budget.
     ///
-    /// Corrupt cached payloads are misses; storage failures return an error.
+    /// Corrupt cached payloads are misses.
+    ///
+    /// # Errors
+    /// Returns actual storage failures; callers treat these as fatal.
     fn lookup<'a>(
         &'a self,
         fens: &'a [String],
@@ -30,7 +33,8 @@ pub trait Repository: Send + Sync {
     ) -> Task<'a, Result<Vec<Option<RawPosition>>>>;
     /// Stores completed evaluations with their actual depth and candidate coverage.
     ///
-    /// Storage failures propagate so analysis cannot silently lose cache writes.
+    /// # Errors
+    /// Encoding and storage failures propagate so analysis cannot silently lose cache writes.
     fn put<'a>(
         &'a self,
         entries: &'a [RawPosition],
@@ -40,7 +44,10 @@ pub trait Repository: Send + Sync {
     ) -> Task<'a, Result<()>>;
     /// Saves a completed review, deriving game metadata from its PGN.
     ///
-    /// The caller decides how to report a history failure after completion.
+    /// The caller publishes completion first and reports history failure best-effort.
+    ///
+    /// # Errors
+    /// Returns PGN, encoding or storage failures.
     fn save<'a>(
         &'a self,
         config: &'a ReviewConfig,
@@ -48,6 +55,8 @@ pub trait Repository: Send + Sync {
     ) -> Task<'a, Result<()>>;
     /// Waits for owned work, including operations whose waiting future was dropped.
     ///
+    /// Cancellation signals intent; only completed drain acknowledges finished work.
+    /// Dropping a waiter must not detach work from this ownership contract.
     /// Implementations without background work may use the immediate default.
     fn drain(&self) -> Task<'_, ()> {
         Box::pin(async {})

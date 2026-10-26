@@ -2,7 +2,7 @@
 use super::{normalize, shape, Repository};
 use crate::db::{
     cache::{Cache, CachedPositionPut},
-    games::{NewGame, Store},
+    games::{NewGame, Store, StoredGame},
     mode::Mode,
     DbState,
 };
@@ -40,16 +40,27 @@ impl<R: tauri::Runtime> SqliteRepository<R> {
         run: impl FnOnce(&rusqlite::Connection) -> rusqlite::Result<T> + Send + 'static,
     ) -> Result<T> {
         let app = self.app.clone();
-        self.active.send_modify(|n| *n += 1);
-        let operation_guard = Operation(self.active.clone());
-        tauri::async_runtime::spawn_blocking(move || {
-            let _operation = operation_guard;
+        self.blocking(operation, code, move || {
             let state = app.state::<DbState>();
             let conn = state
                 .0
                 .lock()
                 .map_err(|e| ReviewError::new(code, operation, e))?;
             run(&conn).map_err(|e| ReviewError::with_source(code, operation, e))
+        })
+        .await
+    }
+    async fn blocking<T: Send + 'static>(
+        &self,
+        operation: &'static str,
+        code: ReviewErrorCode,
+        run: impl FnOnce() -> Result<T> + Send + 'static,
+    ) -> Result<T> {
+        self.active.send_modify(|n| *n += 1);
+        let operation_guard = Operation(self.active.clone());
+        tauri::async_runtime::spawn_blocking(move || {
+            let _operation = operation_guard;
+            run()
         })
         .await
         .map_err(|e| ReviewError::with_source(code, operation, e))?
@@ -104,7 +115,7 @@ impl<R: tauri::Runtime> Repository for SqliteRepository<R> {
             let mut writes = Vec::with_capacity(entries.len());
             for position in entries {
                 let legal = core::position(&position.fen)?.legal_moves().len();
-                let mut lines = position.lines.clone();
+                let mut lines: Vec<_> = position.lines.iter().collect();
                 lines.sort_by_key(|line| line.multipv);
                 let coverage = lines
                     .iter()
@@ -206,71 +217,78 @@ pub async fn games_get_review_config(
         else {
             return Ok(None);
         };
-        let review = normalize(serde_json::from_str(&stored.review_json).map_err(|e| {
-            ReviewError::with_source(ReviewErrorCode::InvalidPayload, "games.decode", e)
-        })?)?;
-        let kind = match stored.summary.analysis_kind.as_str() {
-            "auto-fast" => AnalysisKind::Fast,
-            "auto-deep" => AnalysisKind::Deep,
-            _ => AnalysisKind::Manual,
-        };
-        let game = core::extract(&stored.pgn);
-        let meta = game.map(|g| g.meta).unwrap_or(PgnMeta {
-            white: stored.summary.white,
-            black: stored.summary.black,
-            white_elo: None,
-            black_elo: None,
-            event: None,
-            result: stored.summary.result,
-            plies: stored.summary.plies as usize,
-        });
-        let depth = if stored.summary.mode == Mode::Depth {
-            stored.summary.depth.clamp(15, 25)
-        } else {
-            20
-        };
-        let (tier, label, hint) = match depth {
-            15 => (
-                "fast",
-                "Rápido",
-                "Pré-visualização rápida dos lances críticos.",
-            ),
-            20 => (
-                "balanced",
-                "Equilibrado",
-                "Bom equilíbrio entre qualidade e tempo.",
-            ),
-            25 => (
-                "deep",
-                "Profundo",
-                "Análise profunda, mais lenta por lance.",
-            ),
-            _ => ("custom", "Personalizado", ""),
-        };
-        Ok(Some(ReviewConfig {
-            pgn: stored.pgn,
-            meta,
-            engine: EngineTier {
-                id: tier.into(),
-                depth,
-                label: label.into(),
-                hint: if tier == "custom" {
-                    format!("Profundidade fixa em d{depth}.")
-                } else {
-                    hint.into()
-                },
-            },
-            mode: stored.summary.mode,
-            analysis_kind: kind,
-            movetime_ms: if stored.summary.mode == Mode::Time && kind == AnalysisKind::Manual {
-                Some(stored.summary.depth)
-            } else {
-                None
-            },
-            lines: stored.summary.multipv,
-            initial_result: Some(review),
-        }))
+        repo.blocking("games.decode", ReviewErrorCode::InvalidPayload, move || {
+            review_config(stored).map(Some)
+        })
+        .await
     }
     .await
     .map_err(|error: ReviewError| ReviewErrorPayload::from(error))
+}
+
+fn review_config(stored: StoredGame) -> Result<ReviewConfig> {
+    let review = normalize(serde_json::from_str(&stored.review_json).map_err(|e| {
+        ReviewError::with_source(ReviewErrorCode::InvalidPayload, "games.decode", e)
+    })?)?;
+    let kind = match stored.summary.analysis_kind.as_str() {
+        "auto-fast" => AnalysisKind::Fast,
+        "auto-deep" => AnalysisKind::Deep,
+        _ => AnalysisKind::Manual,
+    };
+    let game = core::extract(&stored.pgn);
+    let meta = game.map(|g| g.meta).unwrap_or(PgnMeta {
+        white: stored.summary.white,
+        black: stored.summary.black,
+        white_elo: None,
+        black_elo: None,
+        event: None,
+        result: stored.summary.result,
+        plies: stored.summary.plies as usize,
+    });
+    let depth = if stored.summary.mode == Mode::Depth {
+        stored.summary.depth.clamp(15, 25)
+    } else {
+        20
+    };
+    let (tier, label, hint) = match depth {
+        15 => (
+            "fast",
+            "Rápido",
+            "Pré-visualização rápida dos lances críticos.",
+        ),
+        20 => (
+            "balanced",
+            "Equilibrado",
+            "Bom equilíbrio entre qualidade e tempo.",
+        ),
+        25 => (
+            "deep",
+            "Profundo",
+            "Análise profunda, mais lenta por lance.",
+        ),
+        _ => ("custom", "Personalizado", ""),
+    };
+    Ok(ReviewConfig {
+        pgn: stored.pgn,
+        meta,
+        engine: EngineTier {
+            id: tier.into(),
+            depth,
+            label: label.into(),
+            hint: if tier == "custom" {
+                format!("Profundidade fixa em d{depth}.")
+            } else {
+                hint.into()
+            },
+        },
+        mode: stored.summary.mode,
+        analysis_kind: kind,
+        movetime_ms: if stored.summary.mode == Mode::Time && kind == AnalysisKind::Manual {
+            Some(stored.summary.depth)
+        } else {
+            None
+        },
+        lines: stored.summary.multipv,
+        initial_result: Some(review),
+    })
 }
