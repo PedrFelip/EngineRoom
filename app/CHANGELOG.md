@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.2.0](https://github.com/PedrFelip/EngineRoom/compare/v2.1.4...v2.2.0) (2026-10-26)
+
+
+### Funcionalidades
+
+* **review:** pula entre erros e blunders com Shift e setas ([#36](https://github.com/PedrFelip/EngineRoom/issues/36)) ([7bb4b91](https://github.com/PedrFelip/EngineRoom/commit/7bb4b912bf88391db43476ecd9b678e24e5caad3))
+
 ## [2.1.4](https://github.com/PedrFelip/EngineRoom/compare/v2.1.3...v2.1.4) (2026-10-26)
 
 
