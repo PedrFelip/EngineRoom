@@ -1,6 +1,6 @@
 use super::{
     adaptive, core,
-    engine::{self, Cancellation, EngineFactory, EnginePort},
+    engine::{self, Cancellation, EngineFactory},
     repository::Repository,
     scoring,
     types::*,
@@ -8,68 +8,30 @@ use super::{
 use crate::db::mode::Mode;
 use std::sync::Arc;
 
+mod owned_engine;
+use owned_engine::{EngineSettings, OwnedEngine};
+
 pub struct Pipeline {
-    factory: Arc<dyn EngineFactory>,
+    engine: OwnedEngine,
     repository: Arc<dyn Repository>,
-    port: Option<Box<dyn EnginePort>>,
-    settings: Option<(u32, u32, u32)>,
     detected: Option<(u32, u32)>,
 }
 impl Pipeline {
     pub fn new(factory: Arc<dyn EngineFactory>, repository: Arc<dyn Repository>) -> Self {
         Self {
-            factory,
+            engine: OwnedEngine::new(factory),
             repository,
-            port: None,
-            settings: None,
             detected: None,
         }
     }
+    /// Awaits engine teardown without draining repository work.
     pub async fn discard(&mut self) {
-        if let Some(mut port) = self.port.take() {
-            port.shutdown().await;
-        }
-        self.settings = None;
+        self.engine.discard().await;
     }
+    /// Awaits engine teardown and repository drain before session close acknowledgment.
     pub async fn close(&mut self) {
         self.discard().await;
         self.repository.drain().await;
-    }
-    async fn ensure(
-        &mut self,
-        threads: Option<u32>,
-        memory: Option<u32>,
-        multipv: u32,
-        cancel: &Cancellation,
-    ) -> Result<&mut (dyn EnginePort + 'static)> {
-        if let Some(port) = self.port.as_mut() {
-            let next = (threads.unwrap_or(1), memory.unwrap_or(16), multipv);
-            let previous = self.settings;
-            if previous != Some(next) {
-                if previous.map(|s| s.0) != Some(next.0) {
-                    port.send(&format!("setoption name Threads value {}", next.0))?;
-                }
-                if previous.map(|s| s.1) != Some(next.1) {
-                    port.send(&format!("setoption name Hash value {}", next.1))?;
-                }
-                if previous.map(|s| s.2) != Some(next.2) {
-                    port.send(&format!("setoption name MultiPV value {multipv}"))?;
-                }
-                engine::ask(port.as_mut(), "isready", "readyok", 10000, cancel).await?;
-            }
-        } else {
-            let port = self.port.insert(self.factory.acquire(cancel).await?);
-            engine::configure(port.as_mut(), threads, memory, multipv, cancel).await?;
-        }
-        self.settings = Some((threads.unwrap_or(1), memory.unwrap_or(16), multipv));
-        match self.port.as_mut() {
-            Some(port) => Ok(port.as_mut()),
-            None => Err(ReviewError::new(
-                ReviewErrorCode::EngineExited,
-                "engine.ensure",
-                "Engine indisponível.",
-            )),
-        }
     }
     pub async fn review(
         &mut self,
@@ -86,7 +48,7 @@ impl Pipeline {
         if let Some(profile) = adaptive::profile(config.analysis_kind)? {
             self.discard().await;
             return super::automatic::review(
-                self.factory.as_ref(),
+                self.engine.factory(),
                 self.repository.as_ref(),
                 &game,
                 profile,
@@ -131,17 +93,25 @@ impl Pipeline {
             let mut raw = Vec::new();
             let mut cached = 0;
             let mut searched = 0;
-            for (i, fen) in game.fens.iter().enumerate() {
+            for (i, (fen, hit)) in game.fens.iter().zip(hits).enumerate() {
                 cancel.check()?;
                 let pos = if let Some(cp) = terminals[i] {
                     core::terminal_raw(fen, cp)
-                } else if let Some(hit) = &hits[i] {
+                } else if let Some(hit) = hit {
                     cached += 1;
-                    hit.clone()
+                    hit
                 } else {
                     let (threads, memory) = sizing.unwrap_or((1, 16));
                     let port = self
-                        .ensure(Some(threads), Some(memory), multipv, cancel)
+                        .engine
+                        .ensure(
+                            EngineSettings {
+                                threads,
+                                memory_mb: memory,
+                                multipv,
+                            },
+                            cancel,
+                        )
                         .await?;
                     let mut pos =
                         engine::evaluate(port, fen, mode, value, timeout(mode, value), cancel)
@@ -243,7 +213,15 @@ impl Pipeline {
                 (settings.threads, settings.memory_mb)
             };
             let port = self
-                .ensure(Some(threads), Some(memory), multipv, cancel)
+                .engine
+                .ensure(
+                    EngineSettings {
+                        threads,
+                        memory_mb: memory,
+                        multipv,
+                    },
+                    cancel,
+                )
                 .await?;
             let mut result =
                 engine::evaluate(port, fen, Mode::Time, value, value as u64 + 10000, cancel).await;
@@ -259,7 +237,7 @@ impl Pipeline {
             let mut raw = result?;
             core::add_san(&mut raw);
             self.repository
-                .put(&[raw.clone()], Mode::Time, value, multipv)
+                .put(std::slice::from_ref(&raw), Mode::Time, value, multipv)
                 .await?;
             raw
         };
@@ -293,34 +271,35 @@ impl Pipeline {
                 fen: request.fen.clone(),
             });
             let after = self.analyze_fen(&request.fen, settings, cancel).await?;
+            let after_cp = after.cp;
             emit(Event::LiveCompleted {
                 fen: request.fen.clone(),
-                analysis: after.clone(),
+                analysis: after,
             });
             if settings.move_feedback_enabled {
                 if let (Some(id), Some(source_fen)) =
                     (&request.variation_node_id, &request.source_fen)
                 {
-                    let before = if let Some(source) = request
+                    let before_cp = if let Some(source) = request
                         .source_analysis
                         .as_ref()
                         .filter(|s| s.fen == *source_fen)
                     {
-                        Some(source.clone())
+                        Some(source.cp)
                     } else if *source_fen == request.fen {
-                        Some(after.clone())
+                        Some(after_cp)
                     } else if !settings.fast_pass {
-                        Some(self.analyze_fen(source_fen, settings, cancel).await?)
+                        Some(self.analyze_fen(source_fen, settings, cancel).await?.cp)
                     } else {
                         None
                     };
                     cancel.check()?;
-                    if let Some(before) = before {
+                    if let Some(before_cp) = before_cp {
                         emit(Event::Classification {
                             node_id: id.clone(),
                             classification: scoring::classify(
-                                (scoring::win_pct(before.cp)
-                                    - (100.0 - scoring::win_pct(after.cp)))
+                                (scoring::win_pct(before_cp)
+                                    - (100.0 - scoring::win_pct(after_cp)))
                                 .max(0.0),
                                 false,
                             ),

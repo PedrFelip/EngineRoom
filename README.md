@@ -41,6 +41,7 @@ levam aos erros da partida. O histórico permite buscar jogadores nas partidas
 carregadas, e as configurações são organizadas por seção.
 
 **Atalhos na revisão:** `←` / `→` para o lance anterior ou seguinte;
+`Shift+←` / `Shift+→` para o erro ou blunder anterior ou seguinte;
 `Home` / `End` para o início ou fim da partida. A interface tem temas claro
 e escuro.
 
@@ -86,6 +87,12 @@ para conectar as duas partes.
 O backend revalida o PGN e respeita posições iniciais definidas por FEN.
 A interface usa `chess.js` na prévia de importação e nas interações do
 tabuleiro, renderizado com Chessground.
+
+O `Pipeline` coordena a análise usando os contratos `EngineFactory` e
+`Repository`. A aquisição, configuração e limpeza da engine ficam em
+`pipeline/owned_engine.rs`; os comandos Tauri ficam em `session/ipc.rs`.
+O adaptador SQLite fica em `repository/sqlite.rs`, separado da validação e
+normalização de revisões salvas em `repository/saved_review.rs`.
 
 A análise automática divide os recursos entre até três processos Stockfish;
 a manual usa um. As sessões têm acesso exclusivo ao motor e aguardam a

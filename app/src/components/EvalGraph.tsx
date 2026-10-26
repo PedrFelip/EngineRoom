@@ -136,6 +136,12 @@ export default function EvalGraph({
                 : 'Gráfico de avaliação das brancas. Análise em andamento.'
             }
             onKeyDown={(event) => {
+              if (
+                event.shiftKey &&
+                (event.key === 'ArrowLeft' || event.key === 'ArrowRight')
+              ) {
+                return
+              }
               let ply: number
               switch (event.key) {
                 case 'ArrowLeft':
