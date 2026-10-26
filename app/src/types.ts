@@ -84,18 +84,6 @@ export interface GameCursor {
   id: number
 }
 
-export interface GamePage {
-  games: GameSummary[]
-  total: number
-  nextCursor: GameCursor | null
-}
-
-/** Partida completa no store, para reabertura instantânea. */
-export interface StoredGame extends GameSummary {
-  pgn: string
-  reviewJson: string
-}
-
 /** Classificação de um lance, no vocabulário pt-BR do projeto. */
 export type Classification =
   | 'livro'
