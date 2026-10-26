@@ -135,6 +135,48 @@ async fn replacing_live_search_waits_for_discard_and_does_not_emit_old_result() 
     assert_eq!(f.state.lock().unwrap().stopped, 2);
 }
 #[tokio::test]
+async fn provisional_progress_handles_maximum_untrusted_ply_count() {
+    let manager = ReviewSessions::default();
+    let (session, finished, done) = manager.register("session", "main").unwrap();
+    let mut config = config("1. e4", AnalysisKind::Manual);
+    config.meta.plies = usize::MAX;
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let owned = session.clone();
+    let running = tokio::spawn(async move {
+        run_session(
+            "session",
+            &config,
+            &owned,
+            finished,
+            done,
+            Pipeline::new(
+                factory(FakeState::default()),
+                Arc::new(MemoryRepo::default()),
+            ),
+            &mut |event| tx.send(event).is_ok(),
+        )
+        .await;
+    });
+    let preparing = receive(&mut rx, |event| {
+        matches!(&event.event, Event::Progress { progress } if progress.stage == "preparing")
+    })
+    .await;
+    assert!(
+        matches!(preparing.event, Event::Progress { progress } if progress.total == usize::MAX)
+    );
+    let completed = receive(&mut rx, |event| {
+        matches!(event.event, Event::Completed { .. })
+    })
+    .await;
+    assert!(matches!(completed.event, Event::Completed { result } if result.positions.len() == 2));
+    session.close.send_replace(true);
+    running
+        .await
+        .expect("session must complete without a metadata overflow");
+    assert!(*session.done.borrow());
+}
+
+#[tokio::test]
 async fn persistence_failure_does_not_invalidate_completed_review() {
     let manager = ReviewSessions::default();
     let (s, finished, done) = manager.register("session", "main").unwrap();
@@ -186,15 +228,20 @@ fn window_ownership_duplicate_sessions_and_out_of_order_intents() {
 async fn app_exit_waits_for_session_cleanup_and_blocks_new_acquisitions() {
     let manager = ReviewSessions::default();
     let (s, _, done) = manager.register("session", "main").unwrap();
-    let cleanup = manager.begin_shutdown().unwrap();
+    let ShutdownAction::Cleanup(cleanup) = manager.begin_shutdown() else {
+        panic!("the first exit request must start cleanup");
+    };
     assert!(*s.close.borrow());
     assert!(manager.register("new", "main").is_err());
-    assert!(manager.begin_shutdown().is_none());
+    assert!(matches!(manager.begin_shutdown(), ShutdownAction::Wait));
     let waiting = tokio::spawn(cleanup);
     tokio::task::yield_now().await;
     assert!(!waiting.is_finished());
+    assert!(matches!(manager.begin_shutdown(), ShutdownAction::Wait));
     done.send_replace(true);
     waiting.await.unwrap();
+    assert!(matches!(manager.begin_shutdown(), ShutdownAction::Exit));
+    assert!(manager.register("after-cleanup", "main").is_err());
 }
 
 #[tokio::test]

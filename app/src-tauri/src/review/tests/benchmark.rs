@@ -393,7 +393,9 @@ async fn execute(scenario: &Scenario, game: &BenchGame) -> (Output, Stats) {
 #[tokio::test]
 #[ignore = "explicit complete release benchmark; includes optional real Stockfish, excludes IPC/rendering/SQLite"]
 async fn benchmark_complete_pipeline() {
-    assert!(!cfg!(debug_assertions), "run benchmarks with --release");
+    if cfg!(debug_assertions) {
+        panic!("run benchmarks with --release");
+    }
     let fixture: Fixture =
         serde_json::from_str(include_str!("../fixtures/benchmark.json")).unwrap();
     let samples = std::env::var("BENCH_SAMPLES")

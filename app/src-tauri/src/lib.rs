@@ -66,14 +66,23 @@ pub fn run() {
             std::process::exit(1);
         }
     };
-    app.run(|app, event| {
+    let shutdown_complete = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    app.run(move |app, event| {
         if let tauri::RunEvent::ExitRequested { api, .. } = event {
+            use std::sync::atomic::Ordering;
             use tauri::Manager;
-            let cleanup = app.state::<review::ReviewSessions>().begin_shutdown();
+            if shutdown_complete.load(Ordering::SeqCst) {
+                return;
+            }
+            api.prevent_exit();
+            let cleanup = match app.state::<review::ReviewSessions>().begin_shutdown() {
+                review::ShutdownAction::Cleanup(cleanup) => Some(cleanup),
+                review::ShutdownAction::Wait | review::ShutdownAction::Exit => None,
+            };
             let imports_cleanup = app.state::<imports::ImportTasks>().begin_shutdown();
             if cleanup.is_some() || imports_cleanup.is_some() {
-                api.prevent_exit();
                 let app = app.clone();
+                let shutdown_complete = shutdown_complete.clone();
                 tauri::async_runtime::spawn(async move {
                     if let Some(cleanup) = cleanup {
                         cleanup.await;
@@ -81,6 +90,7 @@ pub fn run() {
                     if let Some(cleanup) = imports_cleanup {
                         cleanup.await;
                     }
+                    shutdown_complete.store(true, Ordering::SeqCst);
                     app.exit(0);
                 });
             }

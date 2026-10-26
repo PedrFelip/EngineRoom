@@ -5,10 +5,12 @@
 use rusqlite::Connection;
 
 /// Aplica todas as migrações na ordem. Idempotente: no-op quando o schema já
-/// está atualizado. Chamado por [`crate::db::open_file`] e
+/// está atualizado. Schema e dados são revertidos juntos se alguma etapa falhar.
+/// Chamado por [`crate::db::open_file`] e
 /// [`crate::db::open_memory`].
 pub(super) fn migrate(conn: &Connection) -> rusqlite::Result<()> {
-    conn.execute_batch(
+    let tx = conn.unchecked_transaction()?;
+    tx.execute_batch(
         "CREATE TABLE IF NOT EXISTS position_cache (
             fen TEXT NOT NULL,
             reached_depth INTEGER NOT NULL,
@@ -38,11 +40,12 @@ pub(super) fn migrate(conn: &Connection) -> rusqlite::Result<()> {
             UNIQUE (pgn, analysis_kind, mode, depth, multipv)
         );",
     )?;
-    migrate_position_cache_mode(conn)?;
-    migrate_position_cache_reached_depth(conn)?;
-    migrate_games_mode(conn)?;
-    migrate_games_analysis_kind(conn)?;
-    migrate_games_list_index(conn)
+    migrate_position_cache_mode(&tx)?;
+    migrate_position_cache_reached_depth(&tx)?;
+    migrate_games_mode(&tx)?;
+    migrate_games_analysis_kind(&tx)?;
+    migrate_games_list_index(&tx)?;
+    tx.commit()
 }
 
 /// `true` se a coluna existe na tabela (via `PRAGMA table_info`).
