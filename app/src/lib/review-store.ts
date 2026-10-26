@@ -205,8 +205,7 @@ export function createReviewStore(): ReviewStore {
         snapshot.variation !== null &&
         moves.some(
           (move) =>
-            move.ply === snapshot.currentPly &&
-            isCritical(move.classification),
+            move.ply === snapshot.currentPly && isCritical(move.classification),
         )
       if (onCriticalBranch) {
         commit({ variation: null })
