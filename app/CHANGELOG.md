@@ -3,9 +3,12 @@
 ## [2.2.0](https://github.com/PedrFelip/EngineRoom/compare/v2.1.4...v2.2.0) (2026-10-26)
 
 
-### Funcionalidades
+### Novidades
 
-* **review:** pula entre erros e blunders com Shift e setas ([#36](https://github.com/PedrFelip/EngineRoom/issues/36)) ([7bb4b91](https://github.com/PedrFelip/EngineRoom/commit/7bb4b912bf88391db43476ecd9b678e24e5caad3))
+- Na revisão, use **Shift + ←** e **Shift + →** para navegar entre erros e blunders. Os atalhos também funcionam com o gráfico em foco e respeitam a linha principal ao sair de uma variação. ([#36](https://github.com/PedrFelip/EngineRoom/pull/36))
+- A análise em Rust foi reorganizada para separar as responsabilidades da engine, das sessões e da persistência, preservando o comportamento e a comunicação do aplicativo. ([#38](https://github.com/PedrFelip/EngineRoom/pull/38))
+
+Agradecemos a [@gabbzin](https://github.com/gabbzin) pela primeira contribuição ao EngineRoom! 🎉
 
 ## [2.1.4](https://github.com/PedrFelip/EngineRoom/compare/v2.1.3...v2.1.4) (2026-10-26)
 
