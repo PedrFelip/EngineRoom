@@ -27,7 +27,7 @@ async fn cache_advertises_only_produced_lines_and_their_common_depth() {
         .unwrap()[0]
         .is_some());
     for (multipv, depth, root) in [(2, 12, "d2d4"), (3, 15, "g1f3")] {
-        raw.lines.push(super::super::types::RawLine {
+        raw.lines.push(crate::review::types::RawLine {
             multipv,
             depth: Some(depth),
             cp: 10,

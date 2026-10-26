@@ -1,5 +1,11 @@
+use super::task::run_session;
 use super::*;
 use crate::review::tests::{config, factory, request, settings, FakeState, MemoryRepo};
+use crate::review::{
+    engine::{Cancellation, EngineFactory, SidecarFactory},
+    pipeline::Pipeline,
+    types::*,
+};
 use std::time::Duration;
 
 fn restored() -> ReviewConfig {
@@ -28,6 +34,28 @@ async fn receive(
     .await
     .expect("session event timeout")
 }
+#[tokio::test]
+async fn session_intents_wait_for_their_cleanup_acknowledgments() {
+    let manager = ReviewSessions::default();
+    let (session, finished, done) = manager.register("session", "main").unwrap();
+    let owned = session.clone();
+    let cancellation = tokio::spawn(async move { owned.cancel_live(7).await });
+    tokio::task::yield_now().await;
+    assert_eq!(*session.revision.borrow(), 7);
+    assert!(!cancellation.is_finished());
+    finished.send_replace(7);
+    cancellation.await.unwrap().unwrap();
+
+    let owned = session.clone();
+    let closing = tokio::spawn(async move { owned.close().await });
+    tokio::task::yield_now().await;
+    assert!(*session.close.borrow());
+    assert!(!closing.is_finished());
+    done.send_replace(true);
+    closing.await.unwrap();
+    session.close().await;
+}
+
 #[tokio::test]
 async fn only_latest_navigation_runs_and_close_finishes_all_resources() {
     let manager = ReviewSessions::default();
@@ -250,6 +278,7 @@ async fn real_stockfish_sidecar_cache_history_reopen_and_live_cancellation() {
         core,
         engine::{EnginePort, Task},
         pipeline::Pipeline,
+        repository::normalize,
         repository::{Repository, SqliteRepository},
     };
     use std::sync::atomic::AtomicUsize;

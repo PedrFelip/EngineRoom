@@ -1,6 +1,6 @@
 use super::{
     adaptive, core,
-    engine::{self, Cancellation, EngineFactory, EnginePort},
+    engine::{self, Cancellation, EngineFactory},
     repository::Repository,
     scoring,
     types::*,
@@ -8,68 +8,28 @@ use super::{
 use crate::db::mode::Mode;
 use std::sync::Arc;
 
+mod owned_engine;
+use owned_engine::{EngineSettings, OwnedEngine};
+
 pub struct Pipeline {
-    factory: Arc<dyn EngineFactory>,
+    engine: OwnedEngine,
     repository: Arc<dyn Repository>,
-    port: Option<Box<dyn EnginePort>>,
-    settings: Option<(u32, u32, u32)>,
     detected: Option<(u32, u32)>,
 }
 impl Pipeline {
     pub fn new(factory: Arc<dyn EngineFactory>, repository: Arc<dyn Repository>) -> Self {
         Self {
-            factory,
+            engine: OwnedEngine::new(factory),
             repository,
-            port: None,
-            settings: None,
             detected: None,
         }
     }
     pub async fn discard(&mut self) {
-        if let Some(mut port) = self.port.take() {
-            port.shutdown().await;
-        }
-        self.settings = None;
+        self.engine.discard().await;
     }
     pub async fn close(&mut self) {
         self.discard().await;
         self.repository.drain().await;
-    }
-    async fn ensure(
-        &mut self,
-        threads: Option<u32>,
-        memory: Option<u32>,
-        multipv: u32,
-        cancel: &Cancellation,
-    ) -> Result<&mut (dyn EnginePort + 'static)> {
-        if let Some(port) = self.port.as_mut() {
-            let next = (threads.unwrap_or(1), memory.unwrap_or(16), multipv);
-            let previous = self.settings;
-            if previous != Some(next) {
-                if previous.map(|s| s.0) != Some(next.0) {
-                    port.send(&format!("setoption name Threads value {}", next.0))?;
-                }
-                if previous.map(|s| s.1) != Some(next.1) {
-                    port.send(&format!("setoption name Hash value {}", next.1))?;
-                }
-                if previous.map(|s| s.2) != Some(next.2) {
-                    port.send(&format!("setoption name MultiPV value {multipv}"))?;
-                }
-                engine::ask(port.as_mut(), "isready", "readyok", 10000, cancel).await?;
-            }
-        } else {
-            let port = self.port.insert(self.factory.acquire(cancel).await?);
-            engine::configure(port.as_mut(), threads, memory, multipv, cancel).await?;
-        }
-        self.settings = Some((threads.unwrap_or(1), memory.unwrap_or(16), multipv));
-        match self.port.as_mut() {
-            Some(port) => Ok(port.as_mut()),
-            None => Err(ReviewError::new(
-                ReviewErrorCode::EngineExited,
-                "engine.ensure",
-                "Engine indisponível.",
-            )),
-        }
     }
     pub async fn review(
         &mut self,
@@ -86,7 +46,7 @@ impl Pipeline {
         if let Some(profile) = adaptive::profile(config.analysis_kind)? {
             self.discard().await;
             return super::automatic::review(
-                self.factory.as_ref(),
+                self.engine.factory(),
                 self.repository.as_ref(),
                 &game,
                 profile,
@@ -141,7 +101,15 @@ impl Pipeline {
                 } else {
                     let (threads, memory) = sizing.unwrap_or((1, 16));
                     let port = self
-                        .ensure(Some(threads), Some(memory), multipv, cancel)
+                        .engine
+                        .ensure(
+                            EngineSettings {
+                                threads,
+                                memory_mb: memory,
+                                multipv,
+                            },
+                            cancel,
+                        )
                         .await?;
                     let mut pos =
                         engine::evaluate(port, fen, mode, value, timeout(mode, value), cancel)
@@ -243,7 +211,15 @@ impl Pipeline {
                 (settings.threads, settings.memory_mb)
             };
             let port = self
-                .ensure(Some(threads), Some(memory), multipv, cancel)
+                .engine
+                .ensure(
+                    EngineSettings {
+                        threads,
+                        memory_mb: memory,
+                        multipv,
+                    },
+                    cancel,
+                )
                 .await?;
             let mut result =
                 engine::evaluate(port, fen, Mode::Time, value, value as u64 + 10000, cancel).await;

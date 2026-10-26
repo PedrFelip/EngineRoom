@@ -1,5 +1,12 @@
 //! Review execution, latest live intent and acknowledged teardown.
-use super::*;
+use super::Session;
+use crate::review::{
+    engine::Cancellation,
+    pipeline::{hash_mb, Pipeline},
+    repository::normalize,
+    types::{Envelope, Event, Progress, ReviewConfig, ReviewError, ReviewErrorCode},
+};
+use tokio::sync::watch;
 
 pub(super) async fn run_session(
     session_id: &str,
@@ -51,7 +58,7 @@ pub(super) async fn run_session(
                 },
             },
         );
-        let resources = tauri::async_runtime::spawn_blocking(crate::system::system_resources)
+        let resources = tokio::task::spawn_blocking(crate::system::system_resources)
             .await
             .ok();
         let sizing = resources.map(|r| {
@@ -104,7 +111,7 @@ pub(super) async fn run_session(
                 if job.settings.threads_auto && !resources_detected {
                     // Detection is best-effort and remains outside the engine lease.
                     if let Ok(r) =
-                        tauri::async_runtime::spawn_blocking(crate::system::system_resources).await
+                        tokio::task::spawn_blocking(crate::system::system_resources).await
                     {
                         pipeline.set_detected_resources(r.threads as u32, r.memory_mb as u32);
                         resources_detected = true;
