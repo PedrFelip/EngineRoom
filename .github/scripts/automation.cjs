@@ -129,6 +129,14 @@ function validateAssets(assets) {
       throw new Error(`Instalador ausente ou incompleto: ${extension}`);
     }
   }
+  for (const installer of assets.filter(asset => /\.(AppImage|exe|msi)$/.test(asset.name))) {
+    if (!assets.some(asset => asset.name === `${installer.name}.sig` && asset.size > 0 && asset.state === 'uploaded')) {
+      throw new Error(`Assinatura ausente ou incompleta: ${installer.name}`);
+    }
+  }
+  if (!assets.some(asset => asset.name === 'latest.json' && asset.size > 0 && asset.state === 'uploaded')) {
+    throw new Error('Manifest de atualização ausente ou incompleto: latest.json');
+  }
 }
 
 async function publish({ github, context }, id, tag, sha) {

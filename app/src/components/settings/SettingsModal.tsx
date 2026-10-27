@@ -1,5 +1,15 @@
-import { Check, CircleAlert, Cpu, Database, Palette, X } from 'lucide-react'
+import {
+  Check,
+  CircleAlert,
+  Cpu,
+  Database,
+  Info,
+  Palette,
+  X,
+} from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
+import { useStore } from 'zustand'
+import { version } from '../../../package.json'
 import { runUi } from '../../lib/effect/ui-runtime'
 import { type ProbeResult, probeEngine } from '../../lib/engine'
 import { clearGames } from '../../lib/games'
@@ -9,6 +19,7 @@ import {
   getStorageStats,
   type StorageStats,
 } from '../../lib/storage'
+import { updatesStore } from '../../lib/updates-store'
 import { useModalFocus } from '../../lib/use-modal-focus'
 import { SegmentedControl } from '../ui/segmented-control'
 import ReviewEngineSettings from './ReviewEngineSettings'
@@ -28,6 +39,7 @@ export default function SettingsModal({
   onClose,
   onGamesCleared,
 }: Props) {
+  const appInfo = useStore(updatesStore, (state) => state.info)
   const [section, setSection] = useState('preferences')
   const dialogRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
@@ -220,6 +232,12 @@ export default function SettingsModal({
                 controls: 'settings-analysis settings-engine',
               },
               {
+                id: 'about',
+                label: 'Sobre',
+                icon: Info,
+                controls: 'settings-about',
+              },
+              {
                 id: 'storage',
                 label: 'Armazenamento',
                 icon: Database,
@@ -298,6 +316,32 @@ export default function SettingsModal({
                     : (result.error ?? 'Falhou')}
                 </span>
               )}
+            </div>
+          </section>
+
+          <section id='settings-about' hidden={section !== 'about'}>
+            <h3 className='mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-ink-dim'>
+              <Info size={13} aria-hidden='true' /> Sobre o app
+            </h3>
+            <div className='rounded-2xl border border-edge-soft bg-panel-2/40 p-4'>
+              <h4 className='text-lg font-semibold text-ink'>EngineRoom</h4>
+              <p className='mt-1 text-sm text-ink-dim'>
+                Versão {appInfo?.currentVersion ?? version}
+              </p>
+              <p className='mt-4 text-sm leading-relaxed text-ink-dim'>
+                Entenda suas decisões e descubra novas possibilidades em cada
+                partida. O EngineRoom usa o Stockfish 19 para revisar seus jogos
+                de xadrez diretamente no computador. Importe um PGN ou busque
+                suas partidas no Chess.com, explore os melhores lances e
+                acompanhe sua evolução pelo histórico.
+              </p>
+              <p className='mt-3 text-sm leading-relaxed text-ink-dim'>
+                A análise é local: suas partidas não são enviadas a um servidor
+                para serem analisadas.
+              </p>
+              <p className='mt-4 text-xs text-ink-faint'>
+                Software livre · GPL-3.0-or-later
+              </p>
             </div>
           </section>
 
