@@ -319,29 +319,28 @@ export default function SettingsModal({
             </div>
           </section>
 
-          <section id='settings-about' hidden={section !== 'about'}>
-            <h3 className='mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-ink-dim'>
-              <Info size={13} aria-hidden='true' /> Sobre o app
-            </h3>
-            <div className='rounded-2xl border border-edge-soft bg-panel-2/40 p-4'>
-              <h4 className='text-lg font-semibold text-ink'>EngineRoom</h4>
-              <p className='mt-1 text-sm text-ink-dim'>
-                Versão {appInfo?.currentVersion ?? version}
+          <section
+            id='settings-about'
+            aria-labelledby='settings-about-title'
+            hidden={section !== 'about'}
+          >
+            <div className='px-1 py-2'>
+              <div className='flex items-baseline gap-3'>
+                <h3
+                  id='settings-about-title'
+                  className='text-lg font-semibold text-ink'
+                >
+                  EngineRoom
+                </h3>
+                <span className='text-xs text-ink-faint'>
+                  v{appInfo?.currentVersion ?? version}
+                </span>
+              </div>
+              <p className='mt-2 max-w-sm text-sm leading-relaxed text-ink-dim'>
+                Revise suas partidas de xadrez com o Stockfish 19, direto no seu
+                computador.
               </p>
-              <p className='mt-4 text-sm leading-relaxed text-ink-dim'>
-                Entenda suas decisões e descubra novas possibilidades em cada
-                partida. O EngineRoom usa o Stockfish 19 para revisar seus jogos
-                de xadrez diretamente no computador. Importe um PGN ou busque
-                suas partidas no Chess.com, explore os melhores lances e
-                acompanhe sua evolução pelo histórico.
-              </p>
-              <p className='mt-3 text-sm leading-relaxed text-ink-dim'>
-                A análise é local: suas partidas não são enviadas a um servidor
-                para serem analisadas.
-              </p>
-              <p className='mt-4 text-xs text-ink-faint'>
-                Software livre · GPL-3.0-or-later
-              </p>
+              <p className='mt-4 text-xs text-ink-faint'>GPL-3.0-or-later</p>
             </div>
           </section>
 
