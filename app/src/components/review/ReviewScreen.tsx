@@ -256,6 +256,11 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
           stopExplorePlayback()
           review.last()
           break
+        case 'f':
+        case 'F':
+          if (e.shiftKey) return
+          review.flip()
+          break
         default:
           return
       }
@@ -272,6 +277,7 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
     review.nextCritical,
     review.first,
     review.last,
+    review.flip,
     stopExplorePlayback,
   ])
 
@@ -429,7 +435,10 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
               {displayedPly} / {result?.moves.length ?? 0}
             </span>
             <div className='mx-1 h-5 w-px bg-edge' />
-            <ReviewNavButton onClick={review.flip} label='Virar o tabuleiro'>
+            <ReviewNavButton
+              onClick={review.flip}
+              label='Virar o tabuleiro (F)'
+            >
               <ArrowUpDown size={17} strokeWidth={2} aria-hidden='true' />
             </ReviewNavButton>
           </div>

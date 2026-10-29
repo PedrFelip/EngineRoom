@@ -1,5 +1,5 @@
+import './segmented-control.css'
 import type { LucideIcon } from 'lucide-react'
-import type { CSSProperties } from 'react'
 import { cn } from '@/lib/utils'
 
 interface Option<Value extends string> {
@@ -36,14 +36,7 @@ export function SegmentedControl<Value extends string>({
         'surface-glass segmented-control flex min-w-0 rounded-2xl border border-edge p-1.5',
         className,
       )}
-      style={
-        {
-          '--tab-count': options.length,
-          '--tab-index': options.findIndex((option) => option.id === value),
-        } as CSSProperties
-      }
     >
-      <span className='segmented-indicator' aria-hidden='true' />
       {options.map(({ id, label: optionLabel, icon: Icon, controls }) => (
         <button
           key={id}

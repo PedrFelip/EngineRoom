@@ -78,7 +78,7 @@ export default function ReviewLoading({
         <h1
           ref={titleRef}
           tabIndex={-1}
-          className='mb-1 scroll-mt-24 rounded text-center text-xl font-bold text-ink focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-brand'
+          className='navigation-focus-target mb-1 scroll-mt-24 rounded text-center text-xl font-bold text-ink'
         >
           {config.meta.white} <span className='text-ink-faint'>vs</span>{' '}
           {config.meta.black}

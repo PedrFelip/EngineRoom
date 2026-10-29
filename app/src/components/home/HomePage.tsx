@@ -339,7 +339,7 @@ export default function HomePage({ onStart, active = true }: Props) {
           id='home-page-title'
           ref={pageTitle}
           tabIndex={-1}
-          className={`scroll-mt-28 focus-visible:ring-2 focus-visible:ring-brand text-2xl font-semibold tracking-tight text-ink ${
+          className={`navigation-focus-target scroll-mt-28 text-2xl font-semibold tracking-tight text-ink ${
             configuring ? '' : 'sm:text-3xl md:text-4xl'
           }`}
         >
@@ -373,7 +373,7 @@ export default function HomePage({ onStart, active = true }: Props) {
                   id='new-review-title'
                   ref={stepTitle}
                   tabIndex={-1}
-                  className='scroll-mt-28 text-base font-semibold text-ink focus-visible:ring-2 focus-visible:ring-brand'
+                  className='navigation-focus-target scroll-mt-28 text-base font-semibold text-ink'
                 >
                   {step === 'import'
                     ? 'Importe sua partida'
