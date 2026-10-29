@@ -2,14 +2,15 @@
 
 ## [2.3.2](https://github.com/PedrFelip/EngineRoom/compare/v2.3.1...v2.3.2) (2026-10-29)
 
+Esta versão corrige os sons no AppImage Linux e melhora a importação de partidas do Chess.com, o reaproveitamento de análises e a preparação do Stockfish.
 
 ### Correções
 
-* handle special characters in Stockfish setup paths ([#56](https://github.com/PedrFelip/EngineRoom/issues/56)) ([d6a3f2c](https://github.com/PedrFelip/EngineRoom/commit/d6a3f2c976739a9b112a97c1fd4f47e297d6abdf))
-* **linux:** corrige reprodução dos sons no AppImage ([#64](https://github.com/PedrFelip/EngineRoom/issues/64)) ([db11dee](https://github.com/PedrFelip/EngineRoom/commit/db11dee23d4330132efbac94c2b5649abeed8b6c))
-* resume interrupted Chess.com import search ([#58](https://github.com/PedrFelip/EngineRoom/issues/58)) ([3bb66f5](https://github.com/PedrFelip/EngineRoom/commit/3bb66f5ee160498fb7bf443e4689643e0bc35a6c))
-* retain partial Chess.com results at deadline ([#59](https://github.com/PedrFelip/EngineRoom/issues/59)) ([860f4cf](https://github.com/PedrFelip/EngineRoom/commit/860f4cfa8c9b307b8db4bb71d0cbca3da3e99659))
-* reuse valid covering cache entries ([#60](https://github.com/PedrFelip/EngineRoom/issues/60)) ([e68408c](https://github.com/PedrFelip/EngineRoom/commit/e68408cee48e4c86ba4b6f003107260c248a6c6e))
+- **Sons no Linux:** corrige a reprodução dos sons dos lances no AppImage. ([#64](https://github.com/PedrFelip/EngineRoom/pull/64))
+- **Importação do Chess.com:** retoma a busca inicial pelo usuário salvo ao voltar à aba de importação, caso ela tenha sido interrompida pela troca de aba. ([#58](https://github.com/PedrFelip/EngineRoom/pull/58))
+- **Resultados parciais:** preserva as partidas já encontradas quando a busca no Chess.com atinge o limite de tempo, com um aviso e a possibilidade de continuar de onde parou. ([#59](https://github.com/PedrFelip/EngineRoom/pull/59))
+- **Análises salvas:** melhora o reaproveitamento de resultados válidos do cache e preserva análises por tempo mais completas, evitando trabalho desnecessário do Stockfish. ([#60](https://github.com/PedrFelip/EngineRoom/pull/60))
+- **Preparação do Stockfish:** corrige falhas quando o caminho das pastas contém caracteres especiais. ([#56](https://github.com/PedrFelip/EngineRoom/pull/56))
 
 ## [2.3.1](https://github.com/PedrFelip/EngineRoom/compare/v2.3.0...v2.3.1) (2026-10-29)
 
