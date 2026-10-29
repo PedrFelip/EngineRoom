@@ -104,3 +104,6 @@ permite os cenários reais. A igualdade exata é exigida apenas para a engine fa
 As distribuições mostram mediana, quartis e extremos; não são intervalos de confiança.
 CPU/RSS cobrem o processo inteiro, incluindo aquecimento e preparação do harness.
 O pico de bytes vivos é por lote, sem divisão pelo número de operações.
+
+A fase A/B/B/A sem instrumentação termina antes da fase A/B/B/A de alocações
+em cada cenário, evitando intercalar a carga do contador com as medições de tempo.
