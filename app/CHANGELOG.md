@@ -1,5 +1,16 @@
 # Changelog
 
+## [2.3.2](https://github.com/PedrFelip/EngineRoom/compare/v2.3.1...v2.3.2) (2026-10-29)
+
+
+### Correções
+
+* handle special characters in Stockfish setup paths ([#56](https://github.com/PedrFelip/EngineRoom/issues/56)) ([d6a3f2c](https://github.com/PedrFelip/EngineRoom/commit/d6a3f2c976739a9b112a97c1fd4f47e297d6abdf))
+* **linux:** corrige reprodução dos sons no AppImage ([#64](https://github.com/PedrFelip/EngineRoom/issues/64)) ([db11dee](https://github.com/PedrFelip/EngineRoom/commit/db11dee23d4330132efbac94c2b5649abeed8b6c))
+* resume interrupted Chess.com import search ([#58](https://github.com/PedrFelip/EngineRoom/issues/58)) ([3bb66f5](https://github.com/PedrFelip/EngineRoom/commit/3bb66f5ee160498fb7bf443e4689643e0bc35a6c))
+* retain partial Chess.com results at deadline ([#59](https://github.com/PedrFelip/EngineRoom/issues/59)) ([860f4cf](https://github.com/PedrFelip/EngineRoom/commit/860f4cfa8c9b307b8db4bb71d0cbca3da3e99659))
+* reuse valid covering cache entries ([#60](https://github.com/PedrFelip/EngineRoom/issues/60)) ([e68408c](https://github.com/PedrFelip/EngineRoom/commit/e68408cee48e4c86ba4b6f003107260c248a6c6e))
+
 ## [2.3.1](https://github.com/PedrFelip/EngineRoom/compare/v2.3.0...v2.3.1) (2026-10-29)
 
 
