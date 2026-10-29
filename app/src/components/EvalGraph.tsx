@@ -304,11 +304,6 @@ export default function EvalGraph({
       </div>
       <div className='mt-2.5 flex items-center justify-between gap-2 text-[10px] text-ink-dim'>
         <span>Início</span>
-        <span className='font-mono tabular-nums'>
-          {Number.isFinite(currentValue)
-            ? `${Math.round(currentValue)}% · avaliação das brancas`
-            : 'Aguardando avaliação'}
-        </span>
         <span>{pulse ? 'Analisando…' : 'Fim'}</span>
       </div>
     </div>

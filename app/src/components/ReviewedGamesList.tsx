@@ -1,9 +1,11 @@
 import { Archive, RotateCcw, Search, Trash2, X } from 'lucide-react'
-import { memo, useEffect, useRef, useState } from 'react'
+import { memo, useEffect, useId, useRef, useState } from 'react'
 import { formatEngineTag } from '../lib/engine-tag'
 import { resultLabel } from '../lib/pgn'
 import type { GameSummary } from '../types'
 import { Badge } from './ui/badge'
+import { Button } from './ui/button'
+import { Input } from './ui/input'
 
 interface Props {
   busy: boolean
@@ -48,6 +50,7 @@ const ReviewedGamesList = memo(function ReviewedGamesList({
   onReanalyze,
   onLoadMore,
 }: Props) {
+  const searchId = useId()
   const [query, setQuery] = useState('')
   const [confirmDelete, setConfirmDelete] = useState<number | null>(null)
   const deleteTrigger = useRef<HTMLButtonElement | null>(null)
@@ -91,9 +94,14 @@ const ReviewedGamesList = memo(function ReviewedGamesList({
           </Badge>
         </header>
         <div className='border-b border-edge-soft p-3'>
-          <label className='flex items-center gap-2 rounded-xl border border-edge bg-panel-2/50 px-3 focus-within:ring-2 focus-within:ring-brand'>
+          <label
+            htmlFor={searchId}
+            className='flex items-center gap-2 rounded-xl border border-edge bg-panel-2/50 px-3 focus-within:ring-2 focus-within:ring-brand'
+          >
             <Search size={16} className='text-ink-dim' aria-hidden='true' />
-            <input
+            <Input
+              id={searchId}
+              embedded
               type='search'
               aria-label='Buscar jogadores nas partidas carregadas'
               placeholder='Buscar por jogador'
@@ -103,10 +111,10 @@ const ReviewedGamesList = memo(function ReviewedGamesList({
                 setConfirmDelete(null)
                 setDeleteError(false)
               }}
-              className='h-11 min-w-0 flex-1 bg-transparent text-sm text-ink outline-none placeholder:text-ink-faint'
+              className='h-11 flex-1'
             />
           </label>
-          <p className='mt-2 text-xs text-ink-dim'>
+          <p role='status' className='mt-2 text-xs text-ink-dim'>
             {query
               ? `${filteredGames.length} resultado(s) nas ${games.length} partidas carregadas`
               : `${games.length} de ${total} partidas · Mais recentes primeiro`}
@@ -233,18 +241,19 @@ const ReviewedGamesList = memo(function ReviewedGamesList({
                     )}
                   </div>
                   <div className='flex items-center gap-2'>
-                    <button
-                      type='button'
+                    <Button
+                      variant='ghost'
+                      size='sm'
                       ref={cancelDelete}
                       disabled={busy}
                       onClick={dismissDelete}
-                      className='inline-flex items-center gap-1 rounded-lg px-3 py-2 text-xs text-ink-dim hover:bg-panel-2'
                     >
                       <X size={12} aria-hidden='true' />
                       Cancelar
-                    </button>
-                    <button
-                      type='button'
+                    </Button>
+                    <Button
+                      variant='destructive'
+                      size='sm'
                       disabled={busy}
                       onClick={async () => {
                         const removed = await onDelete(g.id)
@@ -260,10 +269,9 @@ const ReviewedGamesList = memo(function ReviewedGamesList({
                           setDeleteError(true)
                         }
                       }}
-                      className='rounded-lg bg-blunder/10 px-3 py-2 text-xs font-medium text-blunder hover:bg-blunder/20'
                     >
                       Excluir revisão
-                    </button>
+                    </Button>
                   </div>
                 </div>
               )}
@@ -272,14 +280,15 @@ const ReviewedGamesList = memo(function ReviewedGamesList({
         </ul>
         {hasMore ? (
           <div className='border-t border-border/70 p-2.5 text-center'>
-            <button
-              type='button'
+            <Button
+              variant='ghost'
+              size='sm'
               onClick={onLoadMore}
+              aria-busy={loadingMore}
               disabled={busy || loadingMore}
-              className='rounded-[var(--radius)] px-3 py-1.5 text-xs font-semibold text-brand transition-colors hover:bg-brand/10 disabled:cursor-wait disabled:opacity-60'
             >
               {loadingMore ? 'Carregando…' : 'Carregar mais'}
-            </button>
+            </Button>
           </div>
         ) : null}
       </div>
