@@ -1,0 +1,35 @@
+{
+  "baselineProductionCommit": "31baa0de93d99057cee20905ba8646ab1256abb4",
+  "platform": "Linux-7.2.8-9-omarchy-x86_64-with-glibc2.44",
+  "cpu": "AMD Ryzen 7 5700U with Radeon Graphics",
+  "logicalCpus": 16,
+  "affinity": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15
+  ],
+  "memTotal": "MemTotal:       11560816 kB",
+  "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18)",
+  "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05)",
+  "node": "v26.7.0",
+  "bun": "1.4.4",
+  "hashes": {
+    "app/src-tauri/src/review/fixtures/benchmark.json": "7c9e8cad7090e39771a6891232007989b8672543c21d33e8db59590aa714ec67",
+    "app/src-tauri/src/review/profiles.json": "aade1c8f40232a76e0ccbb6ff8bbe27d114026926d80788ec9c269dfa00976fe",
+    "app/src-tauri/binaries/stockfish-x86_64-unknown-linux-gnu": "0f83d24cc46d2c66c60f16001af5444873bc112b7d028594513426894c12da19"
+  },
+  "python": "3.15.2"
+}
