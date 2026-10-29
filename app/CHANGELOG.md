@@ -5,8 +5,7 @@
 
 ### Correções
 
-* **linux:** bundle audio plugins in AppImage ([c3f0e2f](https://github.com/PedrFelip/EngineRoom/commit/c3f0e2f0ddb07db35e4c3fbc10c2af61a80bf453))
-* **linux:** bundle audio plugins in AppImage ([e1abd5f](https://github.com/PedrFelip/EngineRoom/commit/e1abd5fc9361de0297cdbf9003a642f4d665981c))
+* **Linux:** corrige a reprodução de áudio no AppImage, incluindo os componentes necessários para tocar MP3 e enviar o som ao sistema. ([c3f0e2f](https://github.com/PedrFelip/EngineRoom/commit/c3f0e2f0ddb07db35e4c3fbc10c2af61a80bf453))
 
 ## [2.3.0](https://github.com/PedrFelip/EngineRoom/compare/v2.2.0...v2.3.0) (2026-10-29)
 
