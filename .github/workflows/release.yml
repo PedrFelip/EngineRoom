@@ -167,6 +167,8 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: app
           args: ${{ matrix.args }} -- --locked
@@ -191,7 +193,7 @@ jobs:
           RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
         run: |
           shopt -s nullglob
-          installers=(app/src-tauri/target/release/bundle/{appimage/*.AppImage,nsis/*.exe,msi/*.msi})
+          installers=(app/src-tauri/target/release/bundle/{appimage/*.AppImage,appimage/*.AppImage.sig,nsis/*.exe,nsis/*.exe.sig,msi/*.msi,msi/*.msi.sig})
           test "${#installers[@]}" -gt 0
           gh release upload "$RELEASE_TAG" "${installers[@]}" --clobber
 
@@ -238,6 +240,19 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Generate feed from signed installers
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          mkdir -p updater-signatures
+          gh release download "$RELEASE_TAG" --pattern '*.sig' --dir updater-signatures
+          gh release view "$RELEASE_TAG" --json tagName,body,createdAt,assets > updater-release.json
+          python .github/scripts/updater_manifest.py --release updater-release.json --signatures updater-signatures --output latest.json
+          gh release upload "$RELEASE_TAG" latest.json --clobber
       - name: Publish only with all installers present
         uses: actions/github-script@v7
         env:

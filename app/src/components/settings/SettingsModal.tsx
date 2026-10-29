@@ -1,5 +1,15 @@
-import { Check, CircleAlert, Cpu, Database, Palette, X } from 'lucide-react'
+import {
+  Check,
+  CircleAlert,
+  Cpu,
+  Database,
+  Info,
+  Palette,
+  X,
+} from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
+import { useStore } from 'zustand'
+import { version } from '../../../package.json'
 import { runUi } from '../../lib/effect/ui-runtime'
 import { type ProbeResult, probeEngine } from '../../lib/engine'
 import { clearGames } from '../../lib/games'
@@ -9,6 +19,7 @@ import {
   getStorageStats,
   type StorageStats,
 } from '../../lib/storage'
+import { updatesStore } from '../../lib/updates-store'
 import { useModalFocus } from '../../lib/use-modal-focus'
 import { SegmentedControl } from '../ui/segmented-control'
 import ReviewEngineSettings from './ReviewEngineSettings'
@@ -28,6 +39,7 @@ export default function SettingsModal({
   onClose,
   onGamesCleared,
 }: Props) {
+  const appInfo = useStore(updatesStore, (state) => state.info)
   const [section, setSection] = useState('preferences')
   const dialogRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
@@ -220,6 +232,12 @@ export default function SettingsModal({
                 controls: 'settings-analysis settings-engine',
               },
               {
+                id: 'about',
+                label: 'Sobre',
+                icon: Info,
+                controls: 'settings-about',
+              },
+              {
                 id: 'storage',
                 label: 'Armazenamento',
                 icon: Database,
@@ -298,6 +316,31 @@ export default function SettingsModal({
                     : (result.error ?? 'Falhou')}
                 </span>
               )}
+            </div>
+          </section>
+
+          <section
+            id='settings-about'
+            aria-labelledby='settings-about-title'
+            hidden={section !== 'about'}
+          >
+            <div className='px-1 py-2'>
+              <div className='flex items-baseline gap-3'>
+                <h3
+                  id='settings-about-title'
+                  className='text-lg font-semibold text-ink'
+                >
+                  EngineRoom
+                </h3>
+                <span className='text-xs text-ink-faint'>
+                  v{appInfo?.currentVersion ?? version}
+                </span>
+              </div>
+              <p className='mt-2 max-w-sm text-sm leading-relaxed text-ink-dim'>
+                Revise suas partidas de xadrez com o Stockfish 19, direto no seu
+                computador.
+              </p>
+              <p className='mt-4 text-xs text-ink-faint'>GPL-3.0-or-later</p>
             </div>
           </section>
 

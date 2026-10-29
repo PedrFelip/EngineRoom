@@ -220,3 +220,26 @@ bun run test
 Execute também as verificações do app descritas no README. Ao atualizar a action
 Release Please, mantenha a dependência dos testes na mesma versão da biblioteca
 embutida na action. O CI valida a configuração usando essa implementação real.
+
+## Atualizações pelo aplicativo
+
+O updater oficial do Tauri usa o feed público
+`https://github.com/PedrFelip/EngineRoom/releases/latest/download/latest.json`.
+A chave pública de verificação fica em `app/src-tauri/tauri.conf.json`.
+Os secrets `TAURI_SIGNING_PRIVATE_KEY` e `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`
+assinam os instaladores no job de build. A chave privada original fica fora
+do repositório; mantenha um backup seguro dela. Não gere outra chave para uma
+release normal: os apps instalados só aceitam assinaturas da chave pública
+que já carregam.
+
+Os builds geram `.sig` para AppImage, NSIS e MSI. Após a verificação gráfica
+e o smoke Linux, a publicação gera `latest.json` com as URLs e assinaturas
+exatas dos instaladores. O feed usa AppImage para Linux x86_64 e NSIS para
+Windows x86_64; o MSI continua disponível para instalação manual. A ausência
+de qualquer instalador, assinatura ou feed bloqueia a publicação do draft.
+
+A primeira versão que inclui o updater exige instalação manual. A partir
+dela, novas versões podem ser instaladas pelo próprio app. Para gerar
+instaladores assinados localmente, forneça `TAURI_SIGNING_PRIVATE_KEY`
+(caminho do arquivo privado) e, se necessário, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`
+no ambiente antes de `bun run tauri build`.
