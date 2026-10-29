@@ -15,6 +15,9 @@ license = "GPL-3.0-or-later"
 name = "app_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+[features]
+bench-alloc = []
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
