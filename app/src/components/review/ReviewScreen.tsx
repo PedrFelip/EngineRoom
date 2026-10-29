@@ -9,7 +9,6 @@ import {
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useStore } from 'zustand'
-import { evalLabel } from '../../lib/eval-label'
 import { phaseBoundaries } from '../../lib/phase'
 import {
   selectDisplayedFen,
@@ -25,6 +24,7 @@ import Board from '../Board'
 import CandidateLines from '../CandidateLines'
 import EvalBar from '../EvalBar'
 import EvalGraph from '../EvalGraph'
+import { evalBarView } from './eval-bar-view'
 import ReviewAnalysisModal from './ReviewAnalysisModal'
 import ReviewHeader from './ReviewHeader'
 import ReviewLiveStatus from './ReviewLiveStatus'
@@ -142,10 +142,7 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
   const displayedPly = useStore(review.store, selectDisplayedPly)
   const displayedFen = useStore(review.store, selectDisplayedFen)
   const displayedPosition = useStore(review.store, selectDisplayedPosition)
-  const evalBarPositionRef = useRef(displayedPosition)
-  if (displayedPosition) evalBarPositionRef.current = displayedPosition
-  const evalBarPosition = displayedPosition ?? evalBarPositionRef.current
-  const evalBarStm = evalBarPosition?.fen.split(' ')[1] === 'b' ? 'b' : 'w'
+  const evalBar = evalBarView(displayedPosition, result !== null)
   const currentMove =
     currentPly > 0 ? (result?.moves[currentPly - 1] ?? null) : null
   const lastMoveUci = currentMove?.uci ?? null
@@ -163,11 +160,6 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
     },
     [result],
   )
-  const evalBarLabel =
-    evalBarPosition && result
-      ? evalLabel(evalBarPosition.cp, evalBarPosition.fen, evalBarStm)
-      : undefined
-
   const [selectedMultipv, setSelectedMultipv] = useState(1)
   // biome-ignore lint/correctness/useExhaustiveDependencies: reseta a linha selecionada sempre que o usuário navega para outro lance
   useEffect(() => {
@@ -341,9 +333,9 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
             />
             <div className='flex items-stretch gap-2'>
               <EvalBar
-                winPct={evalBarPosition?.winPct ?? 50}
+                winPct={evalBar.winPct}
                 orientation={orientation}
-                label={evalBarLabel}
+                label={evalBar.label}
               />
               <div className='min-w-0 flex-1'>
                 {displayedFen ? (
