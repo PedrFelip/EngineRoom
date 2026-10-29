@@ -207,3 +207,159 @@ fn history_conversion_preserves_metadata_fallback_and_decode_errors() {
     assert_eq!(error.code, ReviewErrorCode::InvalidPayload);
     assert_eq!(error.operation, "games.decode");
 }
+
+fn raw_line(multipv: u32, cp: i32, depth: u32) -> crate::review::types::RawLine {
+    crate::review::types::RawLine {
+        unstable: false,
+        multipv,
+        cp,
+        pv: vec!["e2e4".into()],
+        san: None,
+        depth: Some(depth),
+    }
+}
+
+fn store_candidate<R: tauri::Runtime>(
+    app: &tauri::App<R>,
+    fen: &str,
+    mode: Mode,
+    value: u32,
+    reached_depth: u32,
+    multipv: u32,
+    cp: i32,
+    lines: &[crate::review::types::RawLine],
+) {
+    let state = app.state::<DbState>();
+    let conn = state.0.lock().unwrap();
+    Cache::new(&conn)
+        .store(
+            fen,
+            mode,
+            value,
+            multipv,
+            reached_depth,
+            cp,
+            &serde_json::to_string(lines).unwrap(),
+        )
+        .unwrap();
+}
+
+#[tokio::test]
+async fn lookup_selects_first_valid_covering_candidate_and_rejects_all_invalid() {
+    let app = tauri::test::mock_builder()
+        .build(tauri::test::mock_context(tauri::test::noop_assets()))
+        .unwrap();
+    app.manage(DbState(std::sync::Mutex::new(
+        crate::db::open_memory().unwrap(),
+    )));
+    let repo = SqliteRepository::new(app.handle().clone());
+    let lines = |cp, depth, multipv| {
+        (1..=multipv)
+            .map(|slot| raw_line(slot, cp, depth))
+            .collect::<Vec<_>>()
+    };
+
+    // Corrupt shallower row, valid deeper row: the second candidate wins.
+    let corrupt = core::fen(&shakmaty::Chess::default());
+    store_candidate(
+        &app,
+        &corrupt,
+        Mode::Depth,
+        20,
+        20,
+        2,
+        40,
+        &lines(40, 20, 2),
+    );
+    {
+        let state = app.state::<DbState>();
+        let conn = state.0.lock().unwrap();
+        conn.execute(
+            "UPDATE position_cache SET lines_json = 'broken' WHERE reached_depth = 20",
+            [],
+        )
+        .unwrap();
+    }
+    store_candidate(
+        &app,
+        &corrupt,
+        Mode::Depth,
+        20,
+        30,
+        2,
+        60,
+        &lines(60, 30, 2),
+    );
+    let hit = repo
+        .lookup(std::slice::from_ref(&corrupt), Mode::Depth, 20, 2)
+        .await
+        .unwrap()[0]
+        .clone()
+        .unwrap();
+    assert_eq!(hit.cp, 60);
+    assert_eq!(hit.depth, 30);
+
+    // Incomplete shallower row (advertises more lines than it stores).
+    let incomplete = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1";
+    store_candidate(
+        &app,
+        incomplete,
+        Mode::Depth,
+        20,
+        20,
+        3,
+        40,
+        &lines(40, 20, 1),
+    );
+    store_candidate(
+        &app,
+        incomplete,
+        Mode::Depth,
+        20,
+        30,
+        2,
+        60,
+        &lines(60, 30, 2),
+    );
+    let hit = repo
+        .lookup(&[incomplete.into()], Mode::Depth, 20, 2)
+        .await
+        .unwrap()[0]
+        .clone()
+        .unwrap();
+    assert_eq!(hit.cp, 60, "candidato incompleto é ignorado");
+
+    // Insufficient per-line depth in the shallower row.
+    let shallow = "rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2";
+    store_candidate(&app, shallow, Mode::Depth, 20, 20, 2, 40, &lines(40, 10, 2));
+    store_candidate(&app, shallow, Mode::Depth, 20, 30, 2, 60, &lines(60, 30, 2));
+    let hit = repo
+        .lookup(&[shallow.into()], Mode::Depth, 20, 2)
+        .await
+        .unwrap()[0]
+        .clone()
+        .unwrap();
+    assert_eq!(hit.cp, 60, "profundidade insuficiente é ignorada");
+
+    // Time ordering follows the smaller covering budget first, then falls back.
+    let timed = "rnbqkbnr/pppppppp/8/8/3P4/8/PPP1PPPP/RNBQKBNR b KQkq - 0 1";
+    store_candidate(&app, timed, Mode::Time, 1000, 20, 2, 40, &lines(40, 20, 1));
+    store_candidate(&app, timed, Mode::Time, 2000, 25, 2, 60, &lines(60, 25, 2));
+    let hit = repo
+        .lookup(&[timed.into()], Mode::Time, 1000, 2)
+        .await
+        .unwrap()[0]
+        .clone()
+        .unwrap();
+    assert_eq!(hit.cp, 60, "candidato de tempo incompleto é ignorado");
+
+    // All candidates invalid: the position is a miss, not an error.
+    let invalid = "rnbqkbnr/pppppppp/8/8/3P4/8/PPP1PPPP/RNBQKBNR w KQkq - 0 2";
+    store_candidate(&app, invalid, Mode::Depth, 20, 20, 2, 40, &lines(40, 20, 1));
+    store_candidate(&app, invalid, Mode::Depth, 20, 30, 2, 60, &lines(60, 10, 2));
+    assert!(repo
+        .lookup(&[invalid.into()], Mode::Depth, 20, 2)
+        .await
+        .unwrap()[0]
+        .is_none());
+}

@@ -327,3 +327,116 @@ fn store_many_grava_todas_as_entries_numa_única_transação() {
     assert!(hit_b.is_some(), "fen_b cobre depth 15 (reached 18)");
     assert_eq!(hit_b.unwrap().cp, 12);
 }
+
+fn lines_with_cp(cp: i32) -> String {
+    format!(r#"[{{"multipv":1,"cp":{cp},"pv":["e2e4"],"san":"e4","depth":20}}]"#)
+}
+
+#[test]
+fn lookup_candidates_preserves_covering_order_and_bulk_shape() {
+    let conn = open_memory().unwrap();
+    let cache = Cache::new(&conn);
+    // Inserção fora de ordem: a consulta continua da entry mais rasa para a mais profunda.
+    cache
+        .store(FEN, Mode::Depth, 30, 1, 30, 30, &lines_with_cp(30))
+        .unwrap();
+    cache
+        .store(FEN, Mode::Depth, 20, 1, 20, 20, &lines_with_cp(20))
+        .unwrap();
+
+    let candidates = cache.lookup_candidates(FEN, Mode::Depth, 15, 1).unwrap();
+    assert_eq!(
+        candidates
+            .iter()
+            .map(|hit| hit.reached_depth)
+            .collect::<Vec<_>>(),
+        vec![20, 30]
+    );
+
+    let bulk = cache
+        .lookup_bulk_candidates(&[FEN.to_string(), FEN_B.to_string()], Mode::Depth, 15, 1)
+        .unwrap();
+    assert_eq!(bulk.len(), 2, "um vetor de candidatos por fen");
+    assert_eq!(
+        bulk[0].len(),
+        2,
+        "fen conhecido devolve todos os candidatos"
+    );
+    assert!(bulk[1].is_empty(), "fen desconhecido devolve lista vazia");
+}
+
+#[test]
+fn timed_collision_preserves_longer_provenance_in_both_orders() {
+    let conn = open_memory().unwrap();
+    let cache = Cache::new(&conn);
+
+    // Busca fraca primeiro, depois uma mais longa: a proveniência é atualizada.
+    let weak = lines_with_cp(30);
+    let strong = lines_with_cp(35);
+    cache
+        .store(FEN, Mode::Time, 3000, 1, 20, 30, &weak)
+        .unwrap();
+    cache
+        .store(FEN, Mode::Time, 5000, 1, 20, 35, &strong)
+        .unwrap();
+    let upgraded = cache.lookup(FEN, Mode::Time, 5000, 1).unwrap().unwrap();
+    assert_eq!(upgraded.cp, 35, "busca mais longa substitui a mais curta");
+
+    // Busca longa primeiro, depois uma mais fraca: a row existente permanece.
+    cache
+        .store(FEN_B, Mode::Time, 5000, 1, 20, 35, &strong)
+        .unwrap();
+    cache
+        .store(FEN_B, Mode::Time, 3000, 1, 20, 30, &weak)
+        .unwrap();
+    let preserved = cache.lookup(FEN_B, Mode::Time, 5000, 1).unwrap().unwrap();
+    assert_eq!(
+        preserved.cp, 35,
+        "busca fraca não reduz a cobertura de tempo"
+    );
+    assert!(
+        cache.lookup(FEN_B, Mode::Time, 3000, 1).unwrap().is_some(),
+        "a proveniência preservada também cobre o orçamento menor"
+    );
+
+    // Depth não carrega orçamento de tempo: não pode apagar uma row de time.
+    cache
+        .store("timed-depth", Mode::Time, 5000, 1, 20, 35, &strong)
+        .unwrap();
+    cache
+        .store("timed-depth", Mode::Depth, 20, 1, 20, 30, &weak)
+        .unwrap();
+    assert_eq!(
+        cache
+            .lookup("timed-depth", Mode::Time, 5000, 1)
+            .unwrap()
+            .unwrap()
+            .cp,
+        35
+    );
+}
+
+#[test]
+fn timed_collision_repairs_corrupt_rows_with_weaker_searches() {
+    let conn = open_memory().unwrap();
+    let cache = Cache::new(&conn);
+    cache
+        .store(FEN, Mode::Time, 5000, 1, 20, 35, &lines_with_cp(35))
+        .unwrap();
+    conn.execute(
+        "UPDATE position_cache SET lines_json = 'broken' WHERE fen = ?1",
+        [FEN],
+    )
+    .unwrap();
+
+    cache
+        .store(FEN, Mode::Time, 3000, 1, 20, 30, &lines_with_cp(30))
+        .unwrap();
+
+    let repaired = cache.lookup(FEN, Mode::Time, 3000, 1).unwrap().unwrap();
+    assert_eq!(repaired.cp, 30, "row corrompida é substituída");
+    assert!(
+        cache.lookup(FEN, Mode::Time, 5000, 1).unwrap().is_none(),
+        "a proveniência fraca resultante não promete o orçamento antigo"
+    );
+}

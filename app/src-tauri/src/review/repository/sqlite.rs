@@ -82,21 +82,23 @@ impl<R: tauri::Runtime> Repository for SqliteRepository<R> {
     ) -> Task<'a, Result<Vec<Option<RawPosition>>>> {
         Box::pin(async move {
             let owned = fens.to_vec();
-            let hits = self
+            let candidates = self
                 .db("cache.lookup", ReviewErrorCode::Cache, move |c| {
-                    Cache::new(c).lookup_bulk(&owned, mode, value, multipv)
+                    Cache::new(c).lookup_bulk_candidates(&owned, mode, value, multipv)
                 })
                 .await?;
-            Ok(hits
+            Ok(candidates
                 .into_iter()
                 .zip(fens)
-                .map(|(hit, f)| {
-                    hit.and_then(|h| shape(h, f, multipv)).filter(|raw| {
-                        mode != Mode::Depth
-                            || raw
-                                .lines
-                                .iter()
-                                .all(|line| line.depth.unwrap_or(raw.depth) >= value)
+                .map(|(hits, f)| {
+                    hits.into_iter().find_map(|hit| {
+                        shape(hit, f, multipv).filter(|raw| {
+                            mode != Mode::Depth
+                                || raw
+                                    .lines
+                                    .iter()
+                                    .all(|line| line.depth.unwrap_or(raw.depth) >= value)
+                        })
                     })
                 })
                 .collect())
