@@ -234,8 +234,9 @@ que já carregam.
 
 Os builds geram `.sig` para AppImage, NSIS e MSI. Após a verificação gráfica
 e o smoke Linux, a publicação gera `latest.json` com as URLs e assinaturas
-exatas dos instaladores. O feed usa AppImage para Linux x86_64 e NSIS para
-Windows x86_64; o MSI continua disponível para instalação manual. A ausência
+exatas dos instaladores. O feed identifica AppImage, NSIS e MSI separadamente,
+para que cada instalação receba uma atualização do mesmo tipo. Pacotes de tipo
+desconhecido não oferecem atualização automática. A ausência
 de qualquer instalador, assinatura ou feed bloqueia a publicação do draft.
 
 A primeira versão que inclui o updater exige instalação manual. A partir

@@ -4,6 +4,7 @@ use installation::InstallationGate;
 use serde::Serialize;
 use std::time::Duration;
 use tauri::ipc::Channel;
+use tauri::utils::{config::BundleType, platform::bundle_type};
 use tauri_plugin_updater::{Update, UpdaterExt};
 use tokio::sync::{Mutex, OnceCell};
 
@@ -45,6 +46,36 @@ impl Updates {
     }
 }
 
+// Only offer updates for bundle formats represented in the release feed. Unknown
+// installations must not fall back to an installer for a different package type.
+fn supports_bundle(bundle: Option<BundleType>) -> bool {
+    matches!(
+        bundle,
+        Some(BundleType::AppImage | BundleType::Nsis | BundleType::Msi)
+    )
+}
+
+#[cfg(test)]
+mod bundle_tests {
+    use super::*;
+
+    #[test]
+    fn only_published_package_types_are_supported() {
+        for bundle in [BundleType::AppImage, BundleType::Nsis, BundleType::Msi] {
+            assert!(supports_bundle(Some(bundle)));
+        }
+        for bundle in [
+            BundleType::Deb,
+            BundleType::Rpm,
+            BundleType::App,
+            BundleType::Dmg,
+        ] {
+            assert!(!supports_bundle(Some(bundle)));
+        }
+        assert!(!supports_bundle(None));
+    }
+}
+
 /// Cache the startup result, including failures, so navigation never checks again.
 #[tauri::command]
 pub async fn app_update_check(
@@ -58,7 +89,7 @@ pub async fn app_update_check(
                 current_version: app.package_info().version.to_string(),
                 available_version: None,
                 notes: None,
-                supported: !cfg!(debug_assertions),
+                supported: !cfg!(debug_assertions) && supports_bundle(bundle_type()),
             };
             if !info.supported {
                 return Ok(info);
