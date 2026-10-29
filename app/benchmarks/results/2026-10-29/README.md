@@ -79,10 +79,11 @@ alterar quotas, budgets ou scheduling nesta mudança.
 
 ## Revisão e correção
 
-Duas rodadas de revisão com GPT-6.1 Terra. A primeira encontrou uma corrida no
+Três rodadas de revisão com GPT-6.1 Terra. A primeira encontrou uma corrida no
 reset do pico do contador de memória; a correção sincroniza início/fim e todas
 as atualizações sob o mesmo mutex. O teste concorrente passou e a segunda rodada
-aprovou a correção, sem achados abertos. Os dados de memória anteriores a essa
+aprovou a correção; a terceira auditou os dados, hashes e reprodução, sem novos
+achados. Os dados de memória anteriores a essa
 correção não integram este relatório.
 
 Os testes cobrem equivalência de revisões/alvos com referências, crescimento e
