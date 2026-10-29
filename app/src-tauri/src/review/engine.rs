@@ -356,6 +356,7 @@ fn parse_info_borrowed(line: &str) -> Option<BorrowedInfo<'_>> {
     })
 }
 
+#[cfg(test)]
 pub fn parse_info(line: &str) -> Option<RawLine> {
     let info = parse_info_borrowed(line)?;
     Some(RawLine {
