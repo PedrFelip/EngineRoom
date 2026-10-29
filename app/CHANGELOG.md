@@ -1,5 +1,26 @@
 # Changelog
 
+## [2.3.1](https://github.com/PedrFelip/EngineRoom/compare/v2.3.0...v2.3.1) (2026-10-29)
+
+
+### Correções
+
+* **Linux:** corrige a reprodução de áudio no AppImage, incluindo os componentes necessários para tocar MP3 e enviar o som ao sistema. ([c3f0e2f](https://github.com/PedrFelip/EngineRoom/commit/c3f0e2f0ddb07db35e4c3fbc10c2af61a80bf453))
+
+## [2.3.0](https://github.com/PedrFelip/EngineRoom/compare/v2.2.0...v2.3.0) (2026-10-29)
+
+
+### Funcionalidades
+
+* adiciona atualizações pelo aplicativo e seção Sobre ([#45](https://github.com/PedrFelip/EngineRoom/issues/45)) ([b70b98d](https://github.com/PedrFelip/EngineRoom/commit/b70b98d374ad3adaa15184fe37e556156f39bfd4))
+* **review:** add F shortcut to flip the board ([#47](https://github.com/PedrFelip/EngineRoom/issues/47)) ([65b6a06](https://github.com/PedrFelip/EngineRoom/commit/65b6a0632d6ae4a19e63a7c6ad304790e8506d65))
+
+
+### Correções
+
+* seleciona o instalador correto para atualizações ([#48](https://github.com/PedrFelip/EngineRoom/issues/48)) ([44d445d](https://github.com/PedrFelip/EngineRoom/commit/44d445d98eaafdd763b60c1a34cc3bfc6a8c3a80))
+* **ui:** padroniza controles e estados de interação ([#46](https://github.com/PedrFelip/EngineRoom/issues/46)) ([266c450](https://github.com/PedrFelip/EngineRoom/commit/266c450511618eb6082d05b9a4586af9a2ac0fd4))
+
 ## [2.2.0](https://github.com/PedrFelip/EngineRoom/compare/v2.1.4...v2.2.0) (2026-10-26)
 
 
