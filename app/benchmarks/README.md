@@ -88,3 +88,19 @@ trabalho de threads Rust de fundo; execute somente este teste no processo.
 Para alternar baseline/candidato sem recompilar entre medições, preserve os dois
 executáveis de teste de cada versão e passe `--latency-binary /caminho/normal` e
 `--allocation-binary /caminho/instrumentado`. Ambos devem usar o mesmo harness.
+
+`experiment.py` executa sete cenários fake em ordem baseline/candidato/candidato/baseline,
+compara resultado completo e contadores e salva cada execução mais `summary.json`:
+
+```bash
+python3 benchmarks/experiment.py \
+  --baseline-normal /tmp/baseline-normal --baseline-alloc /tmp/baseline-alloc \
+  --candidate-normal /tmp/candidate-normal --candidate-alloc /tmp/candidate-alloc \
+  --output /tmp/comparison
+```
+
+Use `--scenario ID` repetidamente para selecionar cenários; `--engine stockfish`
+permite os cenários reais. A igualdade exata é exigida apenas para a engine fake.
+As distribuições mostram mediana, quartis e extremos; não são intervalos de confiança.
+CPU/RSS cobrem o processo inteiro, incluindo aquecimento e preparação do harness.
+O pico de bytes vivos é por lote, sem divisão pelo número de operações.
