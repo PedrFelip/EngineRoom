@@ -3,6 +3,8 @@ import { useEffect, useState } from 'react'
 import HomePage from './components/HomePage'
 import ReviewScreen from './components/ReviewScreen'
 import UciIpcBenchmark from './components/UciIpcBenchmark'
+import { runUi } from './lib/effect/ui-runtime'
+import { updatesStore } from './lib/updates-store'
 import type { ReviewConfig } from './types'
 
 type View = 'home' | 'review'
@@ -17,6 +19,10 @@ export default function App() {
       .then(setBenchmarkEnabled)
       .catch(() => setBenchmarkEnabled(false))
   }, [])
+
+  useEffect(() => {
+    if (benchmarkEnabled === false) void runUi(updatesStore.getState().check())
+  }, [benchmarkEnabled])
 
   if (benchmarkEnabled === null) return null
   if (benchmarkEnabled) return <UciIpcBenchmark />
