@@ -137,7 +137,7 @@ pub struct Target {
     #[serde(skip)]
     pub search: SearchBudget,
 }
-pub fn rank(game: &Game, raw: &[RawPosition]) -> Vec<Critical> {
+pub fn rank<T: std::borrow::Borrow<RawPosition>>(game: &Game, raw: &[T]) -> Vec<Critical> {
     let book = opening(&game.moves).map_or(0, |(n, _)| n);
     game.moves
         .iter()
@@ -145,8 +145,8 @@ pub fn rank(game: &Game, raw: &[RawPosition]) -> Vec<Critical> {
             rank_move(
                 m,
                 &game.positions[m.ply - 1],
-                &raw[m.ply - 1],
-                &raw[m.ply],
+                raw[m.ply - 1].borrow(),
+                raw[m.ply].borrow(),
                 book,
             )
         })
@@ -313,7 +313,11 @@ pub fn targets(critical: &[Critical], count: usize, profile: Profile) -> Vec<Tar
 
 /// Context follows the played sequence; Stockfish already searches continuations
 /// inside each position. Only selected decisions may open an optional sequence.
-pub fn review_targets(game: &Game, raw: &[RawPosition], profile: Profile) -> Vec<Target> {
+pub fn review_targets<T: std::borrow::Borrow<RawPosition>>(
+    game: &Game,
+    raw: &[T],
+    profile: Profile,
+) -> Vec<Target> {
     let positions = &game.positions;
     let forcing: Vec<_> = game
         .moves
@@ -327,7 +331,9 @@ pub fn review_targets(game: &Game, raw: &[RawPosition], profile: Profile) -> Vec
                 || (positions[i].is_check() || positions[i].legal_moves().len() == 1)
         })
         .collect();
-    let unstable = |i: usize| (win_pct(raw[i].cp) - (100.0 - win_pct(raw[i + 1].cp))).abs() >= 2.0;
+    let unstable = |i: usize| {
+        (win_pct(raw[i].borrow().cp) - (100.0 - win_pct(raw[i + 1].borrow().cp))).abs() >= 2.0
+    };
     let mut critical = rank(game, raw);
     let book = opening(&game.moves).map_or(0, |(n, _)| n);
     let sacrifices: Vec<_> = game
@@ -347,7 +353,7 @@ pub fn review_targets(game: &Game, raw: &[RawPosition], profile: Profile) -> Vec
                 && (material(before, color) - material(before, !color))
                     - (material(after, color) - material(after, !color))
                     >= 200
-                && win_pct(raw[i].cp) - win_pct(raw[i + 2].cp) <= 5.0
+                && win_pct(raw[i].borrow().cp) - win_pct(raw[i + 2].borrow().cp) <= 5.0
                 && game.moves[i + 1].san.contains('x')
         })
         .collect();

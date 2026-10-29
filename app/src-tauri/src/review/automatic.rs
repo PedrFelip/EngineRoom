@@ -256,7 +256,7 @@ async fn execute(
     loop {
         cancel.check()?;
         if state.complete() && state.final_targets.is_none() {
-            let raw: Vec<_> = state.baseline.iter().flatten().cloned().collect();
+            let raw: Vec<_> = state.baseline.iter().flatten().collect();
             state.final_targets = Some(
                 adaptive::review_targets(game, &raw, profile)
                     .into_iter()
@@ -455,7 +455,7 @@ async fn execute(
         },
     });
     let raw: Vec<_> = (0..count)
-        .map(|i| state.evaluation(i).cloned())
+        .map(|i| state.evaluation(i))
         .collect::<Result<_>>()?;
     let mut result = core::build(game, &raw)?;
     for (i, position) in result.positions.iter_mut().enumerate() {
