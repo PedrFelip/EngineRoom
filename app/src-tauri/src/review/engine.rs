@@ -296,7 +296,14 @@ pub async fn configure(
     ask(port, "isready", "readyok", 10000, cancel).await?;
     Ok(())
 }
-pub fn parse_info(line: &str) -> Option<RawLine> {
+struct BorrowedInfo<'a> {
+    depth: u32,
+    multipv: u32,
+    cp: i32,
+    pv: std::str::SplitWhitespace<'a>,
+}
+
+fn parse_info_borrowed(line: &str) -> Option<BorrowedInfo<'_>> {
     let mut words = line.split_whitespace();
     if words.next()? != "info" {
         return None;
@@ -304,7 +311,7 @@ pub fn parse_info(line: &str) -> Option<RawLine> {
     let mut depth = 0;
     let mut multipv = 1;
     let mut cp = None;
-    let mut pv = Vec::new();
+    let mut pv = "".split_whitespace();
     while let Some(token) = words.next() {
         match token {
             "depth" => depth = words.next()?.parse().ok()?,
@@ -331,7 +338,7 @@ pub fn parse_info(line: &str) -> Option<RawLine> {
                 });
             }
             "pv" => {
-                pv.extend(words.by_ref().map(str::to_owned));
+                pv = words;
                 break;
             }
             // Bounds from an unfinished aspiration window are not exact
@@ -341,15 +348,67 @@ pub fn parse_info(line: &str) -> Option<RawLine> {
             _ => {}
         }
     }
-    Some(RawLine {
-        unstable: false,
-        depth: Some(depth),
+    Some(BorrowedInfo {
+        depth,
         multipv,
         cp: cp?,
         pv,
+    })
+}
+
+pub fn parse_info(line: &str) -> Option<RawLine> {
+    let info = parse_info_borrowed(line)?;
+    Some(RawLine {
+        unstable: false,
+        depth: Some(info.depth),
+        multipv: info.multipv,
+        cp: info.cp,
+        pv: info.pv.map(str::to_owned).collect(),
         san: None,
     })
 }
+
+fn update_latest(latest: &mut BTreeMap<u32, RawLine>, info: BorrowedInfo<'_>) {
+    use std::collections::btree_map::Entry;
+    match latest.entry(info.multipv) {
+        Entry::Vacant(entry) => {
+            entry.insert(RawLine {
+                unstable: false,
+                depth: Some(info.depth),
+                multipv: info.multipv,
+                cp: info.cp,
+                pv: info.pv.map(str::to_owned).collect(),
+                san: None,
+            });
+        }
+        Entry::Occupied(mut entry) => {
+            let previous = entry.get_mut();
+            if Some(info.depth) < previous.depth {
+                return;
+            }
+            if Some(info.depth) > previous.depth {
+                previous.unstable =
+                    (super::scoring::win_pct(info.cp) - super::scoring::win_pct(previous.cp)).abs()
+                        >= 2.0
+                        || info.pv.clone().next() != previous.pv.first().map(String::as_str);
+            }
+            previous.depth = Some(info.depth);
+            previous.cp = info.cp;
+            let mut len = 0;
+            for (index, mv) in info.pv.enumerate() {
+                if let Some(existing) = previous.pv.get_mut(index) {
+                    existing.clear();
+                    existing.push_str(mv);
+                } else {
+                    previous.pv.push(mv.to_owned());
+                }
+                len = index + 1;
+            }
+            previous.pv.truncate(len);
+        }
+    }
+}
+
 pub async fn evaluate(
     port: &mut dyn EnginePort,
     fen: &str,
@@ -373,24 +432,8 @@ pub async fn evaluate(
         let mut latest: BTreeMap<u32, RawLine> = BTreeMap::new();
         loop {
             let line = port.next().await?;
-            if let Some(mut info) = parse_info(&line) {
-                if latest
-                    .get(&info.multipv)
-                    .is_none_or(|p| info.depth >= p.depth)
-                {
-                    if let Some(previous) = latest.get(&info.multipv) {
-                        info.unstable = if info.depth > previous.depth {
-                            (super::scoring::win_pct(info.cp)
-                                - super::scoring::win_pct(previous.cp))
-                            .abs()
-                                >= 2.0
-                                || info.pv.first() != previous.pv.first()
-                        } else {
-                            previous.unstable
-                        };
-                    }
-                    latest.insert(info.multipv, info);
-                }
+            if let Some(info) = parse_info_borrowed(&line) {
+                update_latest(&mut latest, info);
             }
             if line.trim().starts_with("bestmove") {
                 break;
@@ -416,5 +459,56 @@ pub async fn evaluate(
     tokio::select! {
         _ = cancel.cancelled() => Err(ReviewError::cancelled()),
         result = tokio::time::timeout(Duration::from_millis(timeout), read) => result.unwrap_or_else(|_| Err(ReviewError::new(ReviewErrorCode::EngineTimeout, "engine.evaluate", format!("A engine não respondeu a '{go}' em {timeout}ms.")))),
+    }
+}
+
+#[cfg(test)]
+mod info_update_tests {
+    use super::*;
+
+    #[test]
+    fn borrowed_updates_match_owned_updates_across_depths_and_pv_lengths() {
+        let inputs = [
+            "info depth 8 multipv 1 score cp 10 pv e2e4 e7e5",
+            "info depth 8 multipv 2 score mate -3 pv d2d4",
+            "info depth 9 multipv 1 score cp 80 pv d2d4 d7d5 c2c4",
+            "info depth 9 multipv 1 score cp 12 pv e2e4",
+            "info depth 7 multipv 1 score cp 999 pv a2a4",
+            "info depth 10 multipv 1 score cp 12 pv e2e4 e7e5 g1f3 b8c6",
+            "info depth 11 multipv 2 score cp 5 lowerbound pv a2a4",
+            "info string score cp 99 pv a2a4",
+            "info depth 12 multipv 2 score mate 0 pv",
+        ];
+        let mut actual = BTreeMap::new();
+        let mut expected: BTreeMap<u32, RawLine> = BTreeMap::new();
+        for line in inputs {
+            if let Some(info) = parse_info_borrowed(line) {
+                update_latest(&mut actual, info);
+            }
+            if let Some(mut info) = parse_info(line) {
+                if expected
+                    .get(&info.multipv)
+                    .is_none_or(|p| info.depth >= p.depth)
+                {
+                    if let Some(previous) = expected.get(&info.multipv) {
+                        info.unstable = if info.depth > previous.depth {
+                            (super::super::scoring::win_pct(info.cp)
+                                - super::super::scoring::win_pct(previous.cp))
+                            .abs()
+                                >= 2.0
+                                || info.pv.first() != previous.pv.first()
+                        } else {
+                            previous.unstable
+                        };
+                    }
+                    expected.insert(info.multipv, info);
+                }
+            }
+            assert_eq!(
+                serde_json::to_value(&actual).unwrap(),
+                serde_json::to_value(&expected).unwrap(),
+                "after {line}"
+            );
+        }
     }
 }
