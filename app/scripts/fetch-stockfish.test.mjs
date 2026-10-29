@@ -1,6 +1,32 @@
 import assert from 'node:assert/strict'
+import {
+  chmodSync,
+  copyFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { test } from 'node:test'
-import { assetFor, isExpectedVersion } from './fetch-stockfish.mjs'
+import { fileURLToPath } from 'node:url'
+import {
+  assetFor,
+  extractTar,
+  extractZip,
+  isExpectedVersion,
+  markExecutable,
+} from './fetch-stockfish.mjs'
+
+const FIXTURES = fileURLToPath(new URL('./fixtures/', import.meta.url))
+const FIXTURE_FILE = 'stockfish-linux-x86-64-universal'
+const FIXTURE_CONTENT = 'fixture stockfish binary\n'
+// Spaces, quotes, command substitution, backticks and separators must all be
+// treated as literal path characters, never as shell syntax.
+const SENSITIVE_DIR = "fixture dir's $(echo injected) `echo x` & ; (test)"
 
 test('selects official universal packages for supported Rust targets', () => {
   const targets = {
@@ -36,5 +62,43 @@ test('requires the exact released version from the UCI identity', () => {
     'Stockfish 19 by the Stockfish developers\n',
   ]) {
     assert.equal(isExpectedVersion(output), false)
+  }
+})
+
+test('extracts archives whose paths contain shell-sensitive characters', async () => {
+  const base = mkdtempSync(join(tmpdir(), 'stockfish-paths-'))
+  try {
+    const dir = join(base, SENSITIVE_DIR)
+    mkdirSync(dir, { recursive: true })
+    for (const [fixture, extract] of [
+      ['stockfish-linux-x86-64-universal.tar.gz', extractTar],
+      ['stockfish-linux-x86-64-universal.zip', extractZip],
+    ]) {
+      const archive = join(dir, fixture)
+      copyFileSync(join(FIXTURES, fixture), archive)
+      const outDir = join(dir, `${fixture}.out`)
+      mkdirSync(outDir)
+      await extract(archive, outDir)
+      assert.equal(
+        readFileSync(join(outDir, 'stockfish', FIXTURE_FILE), 'utf8'),
+        FIXTURE_CONTENT,
+      )
+    }
+  } finally {
+    rmSync(base, { recursive: true, force: true })
+  }
+})
+
+test('marks binaries executable through fs instead of a shell command', () => {
+  if (process.platform === 'win32') return
+  const dir = mkdtempSync(join(tmpdir(), 'stockfish-chmod-'))
+  try {
+    const binary = join(dir, "bin 'quoted' $(echo injected)")
+    writeFileSync(binary, FIXTURE_CONTENT, { mode: 0o600 })
+    chmodSync(binary, 0o600)
+    markExecutable(binary)
+    assert.equal(statSync(binary).mode & 0o111, 0o111)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
   }
 })
