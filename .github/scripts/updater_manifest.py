@@ -6,7 +6,7 @@ from pathlib import Path
 
 def build_manifest(release, signatures):
     platforms = {}
-    for platform, suffix in [('linux-x86_64', '.AppImage'), ('windows-x86_64', '.exe')]:
+    for platform, suffix in [('linux-x86_64-appimage', '.AppImage'), ('windows-x86_64-nsis', '.exe'), ('windows-x86_64-msi', '.msi')]:
         matches = [asset for asset in release['assets'] if asset['name'].endswith(suffix)]
         if len(matches) != 1:
             raise ValueError(f'Expected exactly one {suffix} installer')
