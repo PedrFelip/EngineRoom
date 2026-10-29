@@ -12,6 +12,10 @@ dist
 dist-ssr
 *.local
 
+# Benchmark runs are curated before committing; existing results stay tracked.
+/benchmarks/results/*
+!/benchmarks/results/2026-10-29/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
