@@ -28,23 +28,23 @@ pub fn position_analysis(raw: &RawPosition, ply: usize, phase: Phase) -> Positio
             .collect(),
     }
 }
-pub fn build(game: &Game, raw: &[RawPosition]) -> Result<ReviewResult> {
+pub fn build<T: std::borrow::Borrow<RawPosition>>(game: &Game, raw: &[T]) -> Result<ReviewResult> {
     if raw.len() != game.moves.len() + 1 {
         return Err(invalid("Avaliações incompletas."));
     }
-    let phases = phases(raw.iter().map(|r| &r.fen));
+    let phases = phases(raw.iter().map(|r| &r.borrow().fen));
     let positions: Vec<_> = raw
         .iter()
         .enumerate()
-        .map(|(i, r)| position_analysis(r, i, phases[i]))
+        .map(|(i, r)| position_analysis(r.borrow(), i, phases[i]))
         .collect();
     let book = opening(&game.moves);
     let moves: Vec<_> = game
         .moves
         .iter()
         .map(|m| {
-            let before = &raw[m.ply - 1];
-            let after = &raw[m.ply];
+            let before = raw[m.ply - 1].borrow();
+            let after = raw[m.ply].borrow();
             let win_pct_before = win_pct(before.cp);
             let win_pct_after = 100.0 - win_pct(after.cp);
             let win_pct_loss = (win_pct_before - win_pct_after).max(0.0);
