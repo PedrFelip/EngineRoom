@@ -401,17 +401,11 @@ fn timed_collision_preserves_longer_provenance_in_both_orders() {
 
     // Depth não carrega orçamento de tempo: não pode apagar uma row de time.
     cache
-        .store("timed-depth", Mode::Time, 5000, 1, 20, 35, &strong)
+        .store(FEN, Mode::Time, 5000, 1, 20, 35, &strong)
         .unwrap();
-    cache
-        .store("timed-depth", Mode::Depth, 20, 1, 20, 30, &weak)
-        .unwrap();
+    cache.store(FEN, Mode::Depth, 20, 1, 20, 30, &weak).unwrap();
     assert_eq!(
-        cache
-            .lookup("timed-depth", Mode::Time, 5000, 1)
-            .unwrap()
-            .unwrap()
-            .cp,
+        cache.lookup(FEN, Mode::Time, 5000, 1).unwrap().unwrap().cp,
         35
     );
 }
@@ -439,4 +433,27 @@ fn timed_collision_repairs_corrupt_rows_with_weaker_searches() {
         cache.lookup(FEN, Mode::Time, 5000, 1).unwrap().is_none(),
         "a proveniência fraca resultante não promete o orçamento antigo"
     );
+}
+
+#[test]
+fn timed_collision_replaces_incomplete_invalid_and_shallow_payloads() {
+    let conn = open_memory().unwrap();
+    let cache = Cache::new(&conn);
+    let valid = r#"[{"multipv":1,"cp":30,"pv":["e2e4"],"san":"e4","depth":20},{"multipv":2,"cp":20,"pv":["d2d4"],"san":"d4","depth":20}]"#;
+    for bad in [
+        r#"[{"multipv":1,"cp":35,"pv":["e2e4"],"san":"e4","depth":20}]"#,
+        r#"[{"multipv":1,"cp":35},{"multipv":2,"cp":20}]"#,
+        r#"[{"multipv":1,"cp":35,"pv":["e2e4"],"san":"e4","depth":20},{"multipv":2,"cp":20,"pv":["d2d4"],"san":"d4","depth":19}]"#,
+    ] {
+        cache.clear().unwrap();
+        cache.store(FEN, Mode::Time, 5000, 2, 20, 35, bad).unwrap();
+        cache
+            .store(FEN, Mode::Time, 3000, 2, 20, 30, valid)
+            .unwrap();
+        assert_eq!(
+            cache.lookup(FEN, Mode::Time, 3000, 2).unwrap().unwrap().cp,
+            30
+        );
+        assert!(cache.lookup(FEN, Mode::Time, 5000, 2).unwrap().is_none());
+    }
 }

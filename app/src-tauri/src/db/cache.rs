@@ -44,23 +44,24 @@ fn weakens_timed_provenance(existing: &str, existing_value: i64, mode: Mode, val
     }
 }
 
-/// Validação estrutural do payload para decidir se uma row existente pode
-/// bloquear a troca. JSON inválido, slots fora da sequência 1..N ou principal
-/// fora do `cp` da row são corrupção reparável; o adapter continua validando
-/// cobertura e profundidades.
-fn payload_is_consistent(cp: i32, lines_json: &str) -> bool {
-    let Ok(serde_json::Value::Array(lines)) = serde_json::from_str(lines_json) else {
-        return false;
+/// Only preserve a timed row that can serve its advertised coverage and depth.
+fn payload_is_consistent(
+    fen: &str,
+    multipv: u32,
+    reached_depth: u32,
+    cp: i32,
+    lines_json: &str,
+) -> bool {
+    let hit = CachedPosition {
+        cp,
+        lines_json: lines_json.to_owned(),
+        reached_depth,
     };
-    if lines.is_empty()
-        || lines.iter().enumerate().any(|(index, line)| {
-            line.get("multipv").and_then(serde_json::Value::as_u64) != Some(index as u64 + 1)
-                || line.get("cp").and_then(serde_json::Value::as_i64).is_none()
-        })
-    {
-        return false;
-    }
-    lines[0].get("cp").and_then(serde_json::Value::as_i64) == Some(i64::from(cp))
+    crate::review::repository::shape(hit, fen, multipv).is_some_and(|raw| {
+        raw.lines
+            .iter()
+            .all(|line| line.depth.unwrap_or(reached_depth) >= reached_depth)
+    })
 }
 
 /// Avaliação cacheada de uma posição. A chave (fen, reached_depth, multipv) é
@@ -292,7 +293,13 @@ impl<'a> Cache<'a> {
                     .optional()?;
                 if let Some((current_mode, current_value, cp, lines_json)) = current {
                     if weakens_timed_provenance(&current_mode, current_value, mode, value)
-                        && payload_is_consistent(cp, &lines_json)
+                        && payload_is_consistent(
+                            &entry.fen,
+                            multipv,
+                            entry.reached_depth,
+                            cp,
+                            &lines_json,
+                        )
                     {
                         continue;
                     }
