@@ -54,13 +54,18 @@ export function createChessComImportController(
   let cooldownTask = Promise.resolve()
   let tail = Promise.resolve()
   let disposed = false
-  let initialized = false
   let interacted = false
+  let autoSearch: 'idle' | 'running' | 'done' | 'cancelled' = 'idle'
 
-  function cancel() {
+  function abortCurrent() {
     current?.abort()
     current = undefined
     store.setState({ loading: false })
+  }
+  /** Explicit cancel (UI): the automatic saved-username search must not return. */
+  function cancel() {
+    autoSearch = 'done'
+    abortCurrent()
   }
   function coolDown(seconds: number | null) {
     const wait = Math.max(1, Math.min(seconds ?? 60, 86400))
@@ -77,15 +82,105 @@ export function createChessComImportController(
       .catch(() => {})
   }
 
+  function searchWith(append: boolean, automatic: boolean): Promise<void> {
+    if (disposed) return Promise.resolve()
+    if (store.getState().coolingDown) {
+      if (automatic) autoSearch = 'cancelled'
+      return Promise.resolve()
+    }
+    if (!automatic) {
+      interacted = true
+      autoSearch = 'done'
+    }
+    const state = store.getState()
+    const username = normalizeChessComUsername(state.username)
+    if (!username) {
+      if (automatic) autoSearch = 'done'
+      store.setState({
+        error: 'Informe um nome de usuário válido do Chess.com.',
+      })
+      return Promise.resolve()
+    }
+    if (append && (!state.cursor || state.items.length >= 100))
+      return Promise.resolve()
+    abortCurrent()
+    const owner = new AbortController()
+    current = owner
+    const cursor = append ? state.cursor : null
+    store.setState({
+      loading: true,
+      error: null,
+      ...(append
+        ? {}
+        : { items: [], cursor: null, result: null, selectedUrl: null }),
+    })
+    // Acquisition waits for the previous request's acknowledged cleanup.
+    tail = tail.then(async () => {
+      if (owner.signal.aborted || disposed) return
+      try {
+        const result = await runUi(
+          Effect.gen(function* () {
+            const service = yield* ChessComSearch
+            return yield* service.search(username, cursor)
+          }).pipe(Effect.provide(backend)),
+          owner.signal,
+        )
+        if (owner.signal.aborted || disposed || current !== owner) return
+        const items = append ? [...store.getState().items] : []
+        const seen = new Set(items.map((game) => game.url))
+        for (const game of result.items) {
+          if (!seen.has(game.url) && items.length < 100) {
+            items.push(game)
+            seen.add(game.url)
+          }
+        }
+        store.setState({
+          items,
+          result,
+          cursor: items.length < 100 ? result.nextCursor : null,
+          searchedUsername: username,
+        })
+        if (automatic) autoSearch = 'done'
+        if (!append) options.onUsernameSaved?.(username)
+        if (result.warning?.code === 'rateLimited') {
+          coolDown(result.warning.retryAfterSeconds)
+        }
+      } catch (error) {
+        if (owner.signal.aborted || disposed || current !== owner) return
+        if (automatic) autoSearch = 'done'
+        store.setState({ error: errorMessage(error) })
+        if (
+          error instanceof ChessComImportError &&
+          error.code === 'rateLimited'
+        ) {
+          coolDown(error.retryAfterSeconds)
+        }
+      } finally {
+        if (!disposed && current === owner) {
+          current = undefined
+          store.setState({ loading: false })
+        }
+      }
+    })
+    return tail
+  }
+
   const controller = {
     store,
     start(): Promise<void> {
-      if (disposed || initialized) return Promise.resolve()
-      initialized = true
+      if (disposed || interacted) return Promise.resolve()
+      if (autoSearch === 'running' || autoSearch === 'done')
+        return Promise.resolve()
       const saved = normalizeChessComUsername(options.savedUsername)
-      if (!saved || interacted) return Promise.resolve()
+      if (!saved || store.getState().coolingDown) return Promise.resolve()
       store.setState({ username: saved })
-      return controller.search()
+      autoSearch = 'running'
+      return searchWith(false, true)
+    },
+    /** Tab deactivation: abort in-flight work but allow a later start to resume. */
+    suspend() {
+      if (autoSearch === 'running') autoSearch = 'cancelled'
+      abortCurrent()
     },
     setUsername(username: string) {
       if (disposed) return
@@ -118,76 +213,7 @@ export function createChessComImportController(
       )
     },
     search(append = false): Promise<void> {
-      if (disposed || store.getState().coolingDown) return Promise.resolve()
-      interacted = true
-      const state = store.getState()
-      const username = normalizeChessComUsername(state.username)
-      if (!username) {
-        store.setState({
-          error: 'Informe um nome de usuário válido do Chess.com.',
-        })
-        return Promise.resolve()
-      }
-      if (append && (!state.cursor || state.items.length >= 100))
-        return Promise.resolve()
-      cancel()
-      const owner = new AbortController()
-      current = owner
-      const cursor = append ? state.cursor : null
-      store.setState({
-        loading: true,
-        error: null,
-        ...(append
-          ? {}
-          : { items: [], cursor: null, result: null, selectedUrl: null }),
-      })
-      // Acquisition waits for the previous request's acknowledged cleanup.
-      tail = tail.then(async () => {
-        if (owner.signal.aborted || disposed) return
-        try {
-          const result = await runUi(
-            Effect.gen(function* () {
-              const service = yield* ChessComSearch
-              return yield* service.search(username, cursor)
-            }).pipe(Effect.provide(backend)),
-            owner.signal,
-          )
-          if (owner.signal.aborted || disposed || current !== owner) return
-          const items = append ? [...store.getState().items] : []
-          const seen = new Set(items.map((game) => game.url))
-          for (const game of result.items) {
-            if (!seen.has(game.url) && items.length < 100) {
-              items.push(game)
-              seen.add(game.url)
-            }
-          }
-          store.setState({
-            items,
-            result,
-            cursor: items.length < 100 ? result.nextCursor : null,
-            searchedUsername: username,
-          })
-          if (!append) options.onUsernameSaved?.(username)
-          if (result.warning?.code === 'rateLimited') {
-            coolDown(result.warning.retryAfterSeconds)
-          }
-        } catch (error) {
-          if (owner.signal.aborted || disposed || current !== owner) return
-          store.setState({ error: errorMessage(error) })
-          if (
-            error instanceof ChessComImportError &&
-            error.code === 'rateLimited'
-          ) {
-            coolDown(error.retryAfterSeconds)
-          }
-        } finally {
-          if (!disposed && current === owner) {
-            current = undefined
-            store.setState({ loading: false })
-          }
-        }
-      })
-      return tail
+      return searchWith(append, false)
     },
     async dispose() {
       cancel()

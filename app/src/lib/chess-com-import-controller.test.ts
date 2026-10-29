@@ -159,6 +159,126 @@ describe('Chess.com import intents', () => {
     await controller.dispose()
   })
 
+  it('restarts an interrupted initial saved-username search when reactivated', async () => {
+    const search = vi
+      .fn()
+      .mockReturnValueOnce(Effect.never)
+      .mockReturnValue(Effect.succeed(page))
+    const controller = createChessComImportController(
+      Layer.succeed(ChessComSearch, { search }),
+      createChessComImportStore(),
+      { savedUsername: 'Alice' },
+    )
+    const first = controller.start()
+    await vi.waitFor(() => expect(search).toHaveBeenCalledOnce())
+    controller.suspend()
+    await first
+    await controller.start()
+    expect(search).toHaveBeenCalledTimes(2)
+    expect(controller.store.getState().items).toEqual([game])
+    expect(controller.store.getState().loading).toBe(false)
+    await controller.dispose()
+  })
+
+  it('does not restart an explicitly cancelled or completed saved-username search', async () => {
+    const search = vi.fn(() => Effect.never)
+    const controller = createChessComImportController(
+      Layer.succeed(ChessComSearch, { search }),
+      createChessComImportStore(),
+      { savedUsername: 'alice' },
+    )
+    const first = controller.start()
+    await vi.waitFor(() => expect(search).toHaveBeenCalledOnce())
+    controller.cancel()
+    await first
+    await controller.start()
+    expect(search).toHaveBeenCalledOnce()
+    await controller.dispose()
+
+    const completedSearch = vi.fn(() => Effect.succeed(page))
+    const completed = createChessComImportController(
+      Layer.succeed(ChessComSearch, { search: completedSearch }),
+      createChessComImportStore(),
+      { savedUsername: 'alice' },
+    )
+    await completed.start()
+    completed.suspend()
+    await completed.start()
+    expect(completedSearch).toHaveBeenCalledOnce()
+    await completed.dispose()
+  })
+
+  it('lets user interaction replace the automatic search without restarting it', async () => {
+    const search = vi.fn(() => Effect.never)
+    const controller = createChessComImportController(
+      Layer.succeed(ChessComSearch, { search }),
+      createChessComImportStore(),
+      { savedUsername: 'alice' },
+    )
+    const first = controller.start()
+    await vi.waitFor(() => expect(search).toHaveBeenCalledOnce())
+    controller.setUsername('bob')
+    await first
+    await controller.start()
+    expect(search).toHaveBeenCalledOnce()
+    expect(controller.store.getState().username).toBe('bob')
+    await controller.dispose()
+  })
+
+  it('ignores late results from a suspended search and waits for its teardown', async () => {
+    let resolveOld: (value: SearchResult) => void = () => {}
+    let finishCleanup: () => void = () => {}
+    let cleanupStarted: () => void = () => {}
+    const oldResult = new Promise<SearchResult>((resolve) => {
+      resolveOld = resolve
+    })
+    const cleanup = new Promise<void>((resolve) => {
+      finishCleanup = resolve
+    })
+    const teardown = new Promise<void>((resolve) => {
+      cleanupStarted = resolve
+    })
+    const oldGame = { ...game, url: 'https://www.chess.com/game/live/old' }
+    const newGame = { ...game, url: 'https://www.chess.com/game/live/new' }
+    const search = vi
+      .fn()
+      .mockImplementationOnce(() =>
+        Effect.uninterruptible(Effect.promise(() => oldResult)).pipe(
+          Effect.ensuring(
+            Effect.gen(function* () {
+              cleanupStarted()
+              yield* Effect.promise(() => cleanup)
+            }),
+          ),
+        ),
+      )
+      .mockImplementation(() =>
+        Effect.succeed({
+          ...page,
+          items: [newGame],
+          nextCursor: null,
+        }),
+      )
+    const controller = createChessComImportController(
+      Layer.succeed(ChessComSearch, { search }),
+      createChessComImportStore(),
+      { savedUsername: 'alice' },
+    )
+    const first = controller.start()
+    await vi.waitFor(() => expect(search).toHaveBeenCalledOnce())
+    controller.suspend()
+    const restarted = controller.start()
+    resolveOld({ ...page, items: [oldGame], nextCursor: null })
+    await teardown
+    expect(search).toHaveBeenCalledOnce()
+    expect(controller.store.getState().loading).toBe(true)
+    finishCleanup()
+    await Promise.all([first, restarted])
+    expect(search).toHaveBeenCalledTimes(2)
+    expect(controller.store.getState().items).toEqual([newGame])
+    await controller.dispose()
+  })
+
   it('validates usernames locally and preserves earlier results on pagination failure', async () => {
     const search = vi
       .fn()
