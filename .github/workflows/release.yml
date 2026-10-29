@@ -110,7 +110,7 @@ jobs:
         if: matrix.platform == 'ubuntu-22.04'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-alsa
 
       - uses: actions/setup-python@v5
         if: matrix.platform == 'ubuntu-22.04'
@@ -173,7 +173,7 @@ jobs:
           projectPath: app
           args: ${{ matrix.args }} -- --locked
 
-      - name: Verify AppImage host graphics compatibility
+      - name: Verify AppImage graphics and media inventory
         if: matrix.platform == 'ubuntu-22.04'
         run: python3 app/scripts/verify_appimage.py app/src-tauri/target/release/bundle/appimage/*.AppImage
 
