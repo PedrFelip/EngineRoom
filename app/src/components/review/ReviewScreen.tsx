@@ -240,11 +240,13 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
       switch (e.key) {
         case 'ArrowLeft':
           stopExplorePlayback()
-          review.prev()
+          if (e.shiftKey) review.prevCritical()
+          else review.prev()
           break
         case 'ArrowRight':
           stopExplorePlayback()
-          review.next()
+          if (e.shiftKey) review.nextCritical()
+          else review.next()
           break
         case 'Home':
           stopExplorePlayback()
@@ -271,6 +273,8 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
     analysisModalOpen,
     review.prev,
     review.next,
+    review.prevCritical,
+    review.nextCritical,
     review.first,
     review.last,
     review.flip,

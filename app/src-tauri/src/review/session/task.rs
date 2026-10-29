@@ -1,5 +1,12 @@
 //! Review execution, latest live intent and acknowledged teardown.
-use super::*;
+use super::Session;
+use crate::review::{
+    engine::Cancellation,
+    pipeline::{hash_mb, Pipeline},
+    repository::normalize,
+    types::{Envelope, Event, Progress, ReviewConfig, ReviewError, ReviewErrorCode},
+};
+use tokio::sync::watch;
 
 pub(super) async fn run_session(
     session_id: &str,
@@ -41,7 +48,7 @@ pub(super) async fn run_session(
                 progress: Progress {
                     stage: "preparing".into(),
                     completed: 0,
-                    total: config.meta.plies + 1,
+                    total: config.meta.plies.saturating_add(1),
                     current_ply: 0,
                     phase: None,
                     cached_positions: 0,
@@ -51,7 +58,7 @@ pub(super) async fn run_session(
                 },
             },
         );
-        let resources = tauri::async_runtime::spawn_blocking(crate::system::system_resources)
+        let resources = tokio::task::spawn_blocking(crate::system::system_resources)
             .await
             .ok();
         let sizing = resources.map(|r| {
@@ -91,8 +98,27 @@ pub(super) async fn run_session(
     let mut observed = 0;
     while root.check().is_ok() {
         let (id, job) = {
-            let latest = session.latest.lock().unwrap_or_else(|e| e.into_inner());
-            (*session.revision.borrow(), latest.clone())
+            let mut latest = match session.latest.lock() {
+                Ok(latest) => latest,
+                Err(error) => {
+                    publish(
+                        None,
+                        Event::Error {
+                            error: ReviewError::new(
+                                ReviewErrorCode::Session,
+                                "session.intent",
+                                error,
+                            ),
+                            fen: None,
+                        },
+                    );
+                    session.close.send_replace(true);
+                    break;
+                }
+            };
+            let id = *session.revision.borrow();
+            let job = if id != observed { latest.take() } else { None };
+            (id, job)
         };
         if id != observed {
             observed = id;
@@ -104,7 +130,7 @@ pub(super) async fn run_session(
                 if job.settings.threads_auto && !resources_detected {
                     // Detection is best-effort and remains outside the engine lease.
                     if let Ok(r) =
-                        tauri::async_runtime::spawn_blocking(crate::system::system_resources).await
+                        tokio::task::spawn_blocking(crate::system::system_resources).await
                     {
                         pipeline.set_detected_resources(r.threads as u32, r.memory_mb as u32);
                         resources_detected = true;

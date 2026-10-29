@@ -47,14 +47,38 @@ impl Cancellation {
         }
     }
 }
+/// Owns one process until explicitly awaited shutdown acknowledges its termination.
+///
+/// Transport failures leave teardown with the owner; dropping a future is not cleanup.
 pub trait EnginePort: Send {
+    /// Sends a UCI command without waiting for a response.
+    ///
+    /// # Errors
+    /// Returns a transport error if the command cannot be delivered.
     fn send(&mut self, command: &str) -> Result<()>;
+    /// Receives the next complete stdout line.
+    ///
+    /// # Errors
+    /// Returns a transport error on unexpected process exit or receive failure.
     fn next(&mut self) -> Task<'_, Result<String>>;
+    /// Kills and awaits actual process termination before releasing its lease share.
+    /// Await this future to completion; Drop is only best-effort cleanup.
     fn shutdown(&mut self) -> Task<'_, ()>;
 }
+/// Acquires exclusive engine ownership shared with review sessions and Settings probes.
+///
+/// A group retains its exclusive lease until every process finishes teardown.
 pub trait EngineFactory: Send + Sync {
+    /// Acquires one process, transferring teardown responsibility to the caller.
+    ///
+    /// # Errors
+    /// Returns cancellation or acquisition/spawn errors. Partial acquisition must be
+    /// fully torn down by the implementation before returning an error.
     fn acquire<'a>(&'a self, cancel: &'a Cancellation) -> Task<'a, Result<Box<dyn EnginePort>>>;
     /// One owner leases the whole group. Adapters without pool support stay serial.
+    ///
+    /// # Errors
+    /// Returns cancellation or acquisition/spawn errors after cleaning up any partial group.
     fn acquire_pool<'a>(
         &'a self,
         _count: usize,
@@ -142,6 +166,10 @@ impl Drop for Sidecar {
     }
 }
 impl EnginePort for Sidecar {
+    /// Sends a UCI command without waiting for a response.
+    ///
+    /// # Errors
+    /// Returns a transport error if the command cannot be delivered.
     fn send(&mut self, command: &str) -> Result<()> {
         self.child
             .as_mut()
@@ -280,14 +308,26 @@ pub fn parse_info(line: &str) -> Option<RawLine> {
     while let Some(token) = words.next() {
         match token {
             "depth" => depth = words.next()?.parse().ok()?,
-            "multipv" => multipv = words.next()?.parse().ok()?,
+            "multipv" => {
+                multipv = words.next()?.parse().ok()?;
+                if multipv == 0 {
+                    return None;
+                }
+            }
             "score" => {
                 let kind = words.next()?;
                 let n: i32 = words.next()?.parse().ok()?;
-                cp = Some(if kind == "mate" {
-                    (if n > 0 { 1 } else { -1 }) * (100000 - n.abs())
-                } else {
-                    n
+                cp = Some(match kind {
+                    "cp" => n,
+                    "mate" => {
+                        // Mate distances must fit the reserved score encoding.
+                        let distance = n.checked_abs()?;
+                        if distance > 100000 {
+                            return None;
+                        }
+                        (if n > 0 { 1 } else { -1 }) * (100000 - distance)
+                    }
+                    _ => return None,
                 });
             }
             "pv" => {

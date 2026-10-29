@@ -44,6 +44,8 @@ export interface UseReview {
   goTo: (ply: number) => void
   next: () => void
   prev: () => void
+  nextCritical: () => void
+  prevCritical: () => void
   first: () => void
   last: () => void
   flip: () => void
@@ -190,6 +192,8 @@ export function useReview(config: ReviewConfig): UseReview {
     goTo: store.goTo,
     next: store.next,
     prev: store.prev,
+    nextCritical: store.nextCritical,
+    prevCritical: store.prevCritical,
     first: store.first,
     last: store.last,
     flip,

@@ -1,0 +1,38 @@
+.ui-button {
+  --button-shadow: 0 2px 3px rgb(0 0 0 / 12%), 0 5px 10px -6px rgb(0 0 0 / 28%);
+  transition: color 160ms ease, background-color 160ms ease, border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+
+.ui-button[data-variant='default'],
+.ui-button[data-variant='outline'],
+.ui-button[data-variant='secondary'],
+.ui-button[data-variant='destructive'] {
+  background-image: linear-gradient(180deg, rgb(255 255 255 / 7%), transparent);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 14%), var(--button-shadow);
+}
+
+@media (hover: hover) {
+  .ui-button:not(:disabled):not([data-variant='link']):hover {
+    transform: translateY(-1px);
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 18%), 0 4px 10px -3px rgb(0 0 0 / 26%);
+  }
+}
+
+.ui-button:not(:disabled):not([data-variant='link']):active {
+  transform: translateY(1px);
+  box-shadow: inset 0 2px 4px rgb(0 0 0 / 16%);
+}
+
+.ui-button:disabled {
+  background-image: none;
+  box-shadow: none;
+}
+
+@media (pointer: coarse) {
+  .ui-button { min-height: 2.75rem; min-width: 2.75rem; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ui-button { transition: none; }
+  .ui-button:not(:disabled):hover,
+  .ui-button:not(:disabled):active { transform: none; }
+}

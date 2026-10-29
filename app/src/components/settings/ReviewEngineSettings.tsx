@@ -6,7 +6,7 @@ import { recommendedReviewThreads } from '../../lib/settings'
 import { useSettings } from '../../lib/settings-context'
 import { selectReviewEngineSettings } from '../../lib/settings-store'
 import { getSystemResources } from '../../lib/system'
-import { Switch } from '../ui/switch'
+import { SwitchField } from '../ui/switch-field'
 
 function fill(value: number, min: number, max: number): CSSProperties {
   if (min === max) return { '--fill': '100%' } as CSSProperties
@@ -82,24 +82,21 @@ export default function ReviewEngineSettings() {
             disabled={disabled || settings.reviewThreadsAuto}
             onChange={(reviewThreads) => updateSettings({ reviewThreads })}
           />
-          <label className='mt-2 flex flex-wrap items-center gap-2 text-xs text-ink-dim'>
-            <input
-              type='checkbox'
-              checked={settings.reviewThreadsAuto}
-              disabled={disabled}
-              onChange={(event) => {
-                const reviewThreadsAuto = event.target.checked
-                updateSettings({
-                  reviewThreadsAuto,
-                  ...(reviewThreadsAuto
-                    ? { reviewThreads: recommendedReviewThreads(maxThreads) }
-                    : {}),
-                })
-              }}
-              className='accent-[var(--brand)]'
-            />
-            Adaptar ao computador
-          </label>
+          <SwitchField
+            className='mt-2'
+            size='sm'
+            label='Adaptar ao computador'
+            checked={settings.reviewThreadsAuto}
+            disabled={disabled}
+            onCheckedChange={(reviewThreadsAuto) => {
+              updateSettings({
+                reviewThreadsAuto,
+                ...(reviewThreadsAuto
+                  ? { reviewThreads: recommendedReviewThreads(maxThreads) }
+                  : {}),
+              })
+            }}
+          />
         </div>
         <SettingRange
           icon={<MemoryStick size={13} aria-hidden='true' />}
@@ -112,29 +109,17 @@ export default function ReviewEngineSettings() {
           disabled={disabled}
           onChange={(reviewMemoryMb) => updateSettings({ reviewMemoryMb })}
         />
-        <label
-          htmlFor='review-move-feedback-switch'
-          className='flex items-center justify-between gap-3 border-t border-edge-soft pt-3 text-xs text-ink-dim sm:col-span-2'
-        >
-          <span>
-            <span className='block font-medium text-ink'>
-              Feedback dos movimentos
-            </span>
-            <span className='mt-0.5 block text-ink-faint'>
-              Classifica lances jogados em novas linhas
-            </span>
-          </span>
-          <Switch
-            id='review-move-feedback-switch'
-            size='sm'
-            checked={settings.reviewMoveFeedbackEnabled}
-            disabled={disabled}
-            onCheckedChange={(reviewMoveFeedbackEnabled) =>
-              updateSettings({ reviewMoveFeedbackEnabled })
-            }
-            aria-label='Feedback dos movimentos'
-          />
-        </label>
+        <SwitchField
+          className='border-t border-edge-soft pt-3 sm:col-span-2'
+          size='sm'
+          label='Feedback dos movimentos'
+          description='Classifica lances jogados em novas linhas'
+          checked={settings.reviewMoveFeedbackEnabled}
+          disabled={disabled}
+          onCheckedChange={(reviewMoveFeedbackEnabled) =>
+            updateSettings({ reviewMoveFeedbackEnabled })
+          }
+        />
       </div>
     </div>
   )

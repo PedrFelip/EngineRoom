@@ -3,12 +3,36 @@ mod engine;
 mod imports;
 mod review;
 mod system;
+mod updates;
+
+#[derive(Default)]
+struct Shutdown(tokio::sync::OnceCell<()>);
+
+async fn shutdown(app: &tauri::AppHandle) {
+    use tauri::Manager;
+    app.state::<Shutdown>()
+        .0
+        .get_or_init(|| async {
+            let reviews = app.state::<review::ReviewSessions>().begin_shutdown();
+            let imports = app.state::<imports::ImportTasks>().begin_shutdown();
+            if let review::ShutdownAction::Cleanup(cleanup) = reviews {
+                cleanup.await;
+            }
+            if let Some(cleanup) = imports {
+                cleanup.await;
+            }
+        })
+        .await;
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let benchmark_mode = std::env::args().any(|arg| arg == "--bench-uci-ipc");
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .manage(updates::Updates::default())
+        .manage(Shutdown::default())
         .setup(|app| {
             use tauri::Manager;
             let dir = app.path().app_data_dir()?;
@@ -33,6 +57,9 @@ pub fn run() {
         .manage(engine::BenchmarkUciState::default())
         .manage(engine::BenchmarkMode(benchmark_mode))
         .invoke_handler(tauri::generate_handler![
+            updates::app_update_check,
+            updates::app_update_install,
+            updates::app_update_restart,
             db::cache::cache_get,
             db::cache::cache_put,
             db::cache::cache_get_bulk,
@@ -66,24 +93,20 @@ pub fn run() {
             std::process::exit(1);
         }
     };
-    app.run(|app, event| {
-        if let tauri::RunEvent::ExitRequested { api, .. } = event {
+    app.run(move |app, event| {
+        if let tauri::RunEvent::ExitRequested { api, code, .. } = event {
             use tauri::Manager;
-            let cleanup = app.state::<review::ReviewSessions>().begin_shutdown();
-            let imports_cleanup = app.state::<imports::ImportTasks>().begin_shutdown();
-            if cleanup.is_some() || imports_cleanup.is_some() {
-                api.prevent_exit();
-                let app = app.clone();
-                tauri::async_runtime::spawn(async move {
-                    if let Some(cleanup) = cleanup {
-                        cleanup.await;
-                    }
-                    if let Some(cleanup) = imports_cleanup {
-                        cleanup.await;
-                    }
-                    app.exit(0);
-                });
+            let installation_finished = app.state::<updates::Updates>().prepare_exit();
+            if app.state::<Shutdown>().0.get().is_some() && installation_finished {
+                return;
             }
+            api.prevent_exit();
+            let app = app.clone();
+            tauri::async_runtime::spawn(async move {
+                app.state::<updates::Updates>().drain_installation().await;
+                shutdown(&app).await;
+                app.exit(code.unwrap_or(0));
+            });
         }
     });
 }

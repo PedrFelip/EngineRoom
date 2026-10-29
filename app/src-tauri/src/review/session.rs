@@ -1,9 +1,7 @@
 //! Window-owned sessions. IPC records intent; the task serializes all engine work.
 use super::{
-    engine::{self, Cancellation, EngineFactory, SidecarFactory},
-    pipeline::{hash_mb, Pipeline},
-    repository::{normalize, SqliteRepository},
-    types::*,
+    engine,
+    types::{LiveRequest, LiveSettings, Result, ReviewError, ReviewErrorCode},
 };
 use std::{
     collections::HashMap,
@@ -12,16 +10,21 @@ use std::{
         Arc, Mutex,
     },
 };
-use tauri::{ipc::Channel, WebviewWindow};
 use tokio::sync::{watch, Semaphore};
 
+mod ipc;
 mod task;
 mod validation;
 
-use task::run_session;
-use validation::{validate, validate_live};
+pub use ipc::{
+    __cmd__engine_probe, __cmd__review_session_analyze_position, __cmd__review_session_cancel_live,
+    __cmd__review_session_close, __cmd__review_session_open, __tauri_command_name_engine_probe,
+    __tauri_command_name_review_session_analyze_position,
+    __tauri_command_name_review_session_cancel_live, __tauri_command_name_review_session_close,
+    __tauri_command_name_review_session_open, engine_probe, review_session_analyze_position,
+    review_session_cancel_live, review_session_close, review_session_open,
+};
 
-#[derive(Clone)]
 struct Job {
     id: u64,
     request: LiveRequest,
@@ -35,10 +38,40 @@ struct Session {
     finished: watch::Receiver<u64>,
     done: watch::Receiver<bool>,
 }
+impl Session {
+    async fn cancel_live(&self, request_id: u64) -> Result<()> {
+        update(self, request_id, None)?;
+        let mut finished = self.finished.clone();
+        let mut done = self.done.clone();
+        tokio::select! {
+            _ = finished.wait_for(|id| *id >= request_id) => {},
+            _ = done.wait_for(|closed| *closed) => {},
+        }
+        Ok(())
+    }
+
+    async fn close(&self) {
+        self.close.send_replace(true);
+        let mut done = self.done.clone();
+        let _ = done.wait_for(|closed| *closed).await;
+    }
+}
+
 pub struct ReviewSessions {
     sessions: Arc<Mutex<HashMap<String, Arc<Session>>>>,
     permit: Arc<Semaphore>,
     exiting: AtomicBool,
+    shutdown_complete: Arc<AtomicBool>,
+}
+
+/// The action required for an application exit request.
+pub enum ShutdownAction {
+    /// Prevent exit and run this cleanup task once.
+    Cleanup(engine::Task<'static, ()>),
+    /// Prevent repeated exit requests until cleanup finishes.
+    Wait,
+    /// Allow exit after all sessions acknowledge cleanup.
+    Exit,
 }
 impl Default for ReviewSessions {
     fn default() -> Self {
@@ -46,6 +79,7 @@ impl Default for ReviewSessions {
             sessions: Arc::new(Mutex::new(HashMap::new())),
             permit: Arc::new(Semaphore::new(1)),
             exiting: AtomicBool::new(false),
+            shutdown_complete: Arc::new(AtomicBool::new(false)),
         }
     }
 }
@@ -126,9 +160,13 @@ impl ReviewSessions {
             }
         }
     }
-    pub fn begin_shutdown(&self) -> Option<engine::Task<'static, ()>> {
+    pub fn begin_shutdown(&self) -> ShutdownAction {
         if self.exiting.swap(true, Ordering::SeqCst) {
-            return None;
+            return if self.shutdown_complete.load(Ordering::SeqCst) {
+                ShutdownAction::Exit
+            } else {
+                ShutdownAction::Wait
+            };
         }
         let sessions: Vec<_> = self
             .sessions
@@ -140,11 +178,13 @@ impl ReviewSessions {
         for session in &sessions {
             session.close.send_replace(true);
         }
-        Some(Box::pin(async move {
+        let shutdown_complete = self.shutdown_complete.clone();
+        ShutdownAction::Cleanup(Box::pin(async move {
             for session in sessions {
                 let mut done = session.done.clone();
                 let _ = done.wait_for(|v| *v).await;
             }
+            shutdown_complete.store(true, Ordering::SeqCst);
         }))
     }
 }
@@ -157,40 +197,6 @@ fn remove(sessions: &Arc<Mutex<HashMap<String, Arc<Session>>>>, id: &str, s: &Ar
             sessions.remove(id);
         }
     }
-}
-#[tauri::command]
-pub fn review_session_open(
-    app: tauri::AppHandle,
-    window: WebviewWindow,
-    state: tauri::State<'_, ReviewSessions>,
-    session_id: String,
-    config: ReviewConfig,
-    on_event: Channel<Envelope>,
-) -> IpcResult<()> {
-    (|| -> Result<_> {
-        validate(&config)?;
-        let (session, finished, done) = state.register(&session_id, window.label())?;
-        let sessions = state.sessions.clone();
-        let factory = Arc::new(SidecarFactory {
-            app: app.clone(),
-            permit: state.permit.clone(),
-        });
-        tauri::async_runtime::spawn(async move {
-            run_session(
-                &session_id,
-                &config,
-                &session,
-                finished,
-                done,
-                Pipeline::new(factory, Arc::new(SqliteRepository::new(app))),
-                &mut |envelope| on_event.send(envelope).is_ok(),
-            )
-            .await;
-            remove(&sessions, &session_id, &session);
-        });
-        Ok(())
-    })()
-    .map_err(|error: ReviewError| ReviewErrorPayload::from(error))
 }
 fn update(s: &Session, id: u64, job: Option<Job>) -> Result<()> {
     if id == 0 || id > 9_007_199_254_740_991 {
@@ -216,131 +222,6 @@ fn update(s: &Session, id: u64, job: Option<Job>) -> Result<()> {
         s.revision.send_replace(id);
     }
     Ok(())
-}
-#[tauri::command]
-pub fn review_session_analyze_position(
-    window: WebviewWindow,
-    state: tauri::State<'_, ReviewSessions>,
-    session_id: String,
-    request_id: u64,
-    request: LiveRequest,
-    settings: LiveSettings,
-) -> IpcResult<()> {
-    (|| -> Result<_> {
-        validate_live(&settings)?;
-        let session = state.get(&session_id, window.label())?;
-        update(
-            &session,
-            request_id,
-            Some(Job {
-                id: request_id,
-                request,
-                settings,
-            }),
-        )
-    })()
-    .map_err(|error: ReviewError| ReviewErrorPayload::from(error))
-}
-#[tauri::command]
-pub async fn review_session_cancel_live(
-    window: WebviewWindow,
-    state: tauri::State<'_, ReviewSessions>,
-    session_id: String,
-    request_id: u64,
-) -> IpcResult<()> {
-    async {
-    let s = state.get(&session_id, window.label())?;
-    update(&s, request_id, None)?;
-    let mut finished = s.finished.clone();
-    let mut done = s.done.clone();
-    tokio::select! { _ = finished.wait_for(|v| *v >= request_id) => {}, _ = done.wait_for(|v| *v) => {} }
-    Ok(())
-
-    }.await.map_err(|error: ReviewError| ReviewErrorPayload::from(error))
-}
-#[tauri::command]
-pub async fn review_session_close(
-    window: WebviewWindow,
-    state: tauri::State<'_, ReviewSessions>,
-    session_id: String,
-) -> IpcResult<()> {
-    async {
-        let s = match state.get(&session_id, window.label()) {
-            Ok(s) => s,
-            Err(e) if e.code == ReviewErrorCode::SessionClosed => return Ok(()),
-            Err(e) => return Err(e),
-        };
-        s.close.send_replace(true);
-        let mut done = s.done.clone();
-        let _ = done.wait_for(|v| *v).await;
-        Ok(())
-    }
-    .await
-    .map_err(|error: ReviewError| ReviewErrorPayload::from(error))
-}
-#[derive(Clone, serde::Serialize)]
-pub struct ProbeResult {
-    pub ok: bool,
-    pub name: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub error: Option<String>,
-}
-#[tauri::command]
-pub fn engine_probe(
-    app: tauri::AppHandle,
-    window: WebviewWindow,
-    state: tauri::State<'_, ReviewSessions>,
-    session_id: String,
-    on_event: Channel<ProbeResult>,
-    timeout_ms: Option<u64>,
-) -> IpcResult<()> {
-    (|| -> Result<_> {
-        let timeout = timeout_ms.unwrap_or(8000).clamp(1, 30000);
-        let (session, _, done) = state.register(&session_id, window.label())?;
-        let sessions = state.sessions.clone();
-        let factory = SidecarFactory {
-            app,
-            permit: state.permit.clone(),
-        };
-        tauri::async_runtime::spawn(async move {
-            let cancel = Cancellation {
-                closed: session.close.subscribe(),
-                revision: None,
-            };
-            let mut owned = None;
-            let result = async {
-                let port = factory.acquire(&cancel).await?;
-                let port = owned.insert(port);
-                let lines = engine::ask(port.as_mut(), "uci", "uciok", timeout, &cancel).await?;
-                Ok::<_, ReviewError>(
-                    lines
-                        .iter()
-                        .find_map(|l| l.strip_prefix("id name ").map(str::to_owned)),
-                )
-            }
-            .await;
-            if let Some(mut port) = owned {
-                port.shutdown().await;
-            }
-            let payload = match result {
-                Ok(name) => ProbeResult {
-                    ok: true,
-                    name,
-                    error: None,
-                },
-                Err(e) => ProbeResult {
-                    ok: false,
-                    name: None,
-                    error: Some(e.message),
-                },
-            };
-            let _ = on_event.send(payload);
-            done.send_replace(true);
-            remove(&sessions, &session_id, &session);
-        });
-        Ok(())
-    })()
-    .map_err(|error: ReviewError| ReviewErrorPayload::from(error))
 }
 
 #[cfg(test)]

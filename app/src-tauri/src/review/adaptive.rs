@@ -187,7 +187,7 @@ pub fn rank_move(
     let capture = m.san.contains('x');
     let check = m.san.contains('+') || m.san.contains('#');
     let promotion = m.san.contains('=');
-    let mate = before.cp.abs() >= 90000 || after.cp.abs() >= 90000;
+    let mate = before.cp.unsigned_abs() >= 90000 || after.cp.unsigned_abs() >= 90000;
     let mut score =
         ((loss / 20.0) * 24.0).clamp(0.0, 24.0) + ((swing / 20.0) * 11.0).clamp(0.0, 11.0);
     let mut reasons = Vec::new();
@@ -335,7 +335,7 @@ pub fn review_targets(game: &Game, raw: &[RawPosition], profile: Profile) -> Vec
         .iter()
         .enumerate()
         .map(|(i, _)| {
-            if i + 2 >= positions.len() || i + 1 <= book {
+            if i + 2 >= positions.len() || i < book {
                 return false;
             }
             let before = &positions[i];

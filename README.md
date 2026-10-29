@@ -41,9 +41,24 @@ levam aos erros da partida. O histórico permite buscar jogadores nas partidas
 carregadas, e as configurações são organizadas por seção.
 
 **Atalhos na revisão:** `←` / `→` para o lance anterior ou seguinte;
+`Shift+←` / `Shift+→` para o erro ou blunder anterior ou seguinte;
 `Home` / `End` para o início ou fim da partida; `F` para virar o tabuleiro.
 A interface tem temas claro
 e escuro.
+
+## Atualizações
+
+O EngineRoom verifica novas versões uma vez ao iniciar. O ícone de download
+junto de Configurações aparece somente quando há uma atualização disponível.
+Um clique no ícone baixa, instala e reinicia o app, sem confirmação adicional.
+O download é validado por assinatura e o app aguarda a limpeza dos processos
+antes de reiniciar. No Linux, use o AppImage em um local com permissão de escrita;
+no Windows, o instalador pode solicitar permissão do sistema.
+A verificação exige internet; falhas não impedem a análise local.
+As versões de desenvolvimento não consultam atualizações.
+
+Em **Configurações → Sobre**, consulte a versão instalada, a descrição do app
+e sua licença.
 
 ## Rodar o projeto
 
@@ -87,6 +102,12 @@ para conectar as duas partes.
 O backend revalida o PGN e respeita posições iniciais definidas por FEN.
 A interface usa `chess.js` na prévia de importação e nas interações do
 tabuleiro, renderizado com Chessground.
+
+O `Pipeline` coordena a análise usando os contratos `EngineFactory` e
+`Repository`. A aquisição, configuração e limpeza da engine ficam em
+`pipeline/owned_engine.rs`; os comandos Tauri ficam em `session/ipc.rs`.
+O adaptador SQLite fica em `repository/sqlite.rs`, separado da validação e
+normalização de revisões salvas em `repository/saved_review.rs`.
 
 A análise automática divide os recursos entre até três processos Stockfish;
 a manual usa um. As sessões têm acesso exclusivo ao motor e aguardam a

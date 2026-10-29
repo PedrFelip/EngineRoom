@@ -21,7 +21,7 @@ pub fn position_analysis(raw: &RawPosition, ply: usize, phase: Phase) -> Positio
                 depth: l.depth,
                 multipv: l.multipv,
                 san: l.san.clone(),
-                cp: if white { l.cp } else { -l.cp },
+                cp: if white { l.cp } else { l.cp.saturating_neg() },
                 win_pct: white_win_pct(l.cp, white),
                 pv: l.pv.clone(),
             })

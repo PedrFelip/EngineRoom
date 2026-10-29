@@ -46,7 +46,11 @@ impl From<&ReviewError> for ReviewErrorPayload {
 }
 impl From<ReviewError> for ReviewErrorPayload {
     fn from(error: ReviewError) -> Self {
-        Self::from(&error)
+        Self {
+            code: error.code,
+            operation: error.operation,
+            message: error.message,
+        }
     }
 }
 fn serialize_error<S: serde::Serializer>(

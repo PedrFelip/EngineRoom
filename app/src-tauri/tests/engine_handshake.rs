@@ -79,17 +79,14 @@ async fn stockfish_uci_handshake_and_bestmove() {
     let mut name = String::new();
     while Instant::now() < deadline {
         let next = tokio::time::timeout(Duration::from_millis(500), lines.next_line()).await;
-        match next {
-            Ok(Ok(Some(line))) => {
-                if let Some(rest) = line.strip_prefix("id name") {
-                    name = rest.trim().to_string();
-                }
-                if line.starts_with("uciok") {
-                    got_uciok = true;
-                    break;
-                }
+        if let Ok(Ok(Some(line))) = next {
+            if let Some(rest) = line.strip_prefix("id name") {
+                name = rest.trim().to_string();
             }
-            _ => {}
+            if line.starts_with("uciok") {
+                got_uciok = true;
+                break;
+            }
         }
     }
     assert!(got_uciok, "engine não respondeu `uciok` a tempo");
@@ -105,14 +102,11 @@ async fn stockfish_uci_handshake_and_bestmove() {
     let mut bestmove: Option<String> = None;
     while Instant::now() < deadline {
         let next = tokio::time::timeout(Duration::from_millis(500), lines.next_line()).await;
-        match next {
-            Ok(Ok(Some(line))) => {
-                if let Some(rest) = line.strip_prefix("bestmove ") {
-                    bestmove = Some(rest.split_whitespace().next().unwrap_or("").to_string());
-                    break;
-                }
+        if let Ok(Ok(Some(line))) = next {
+            if let Some(rest) = line.strip_prefix("bestmove ") {
+                bestmove = Some(rest.split_whitespace().next().unwrap_or("").to_string());
+                break;
             }
-            _ => {}
         }
     }
 

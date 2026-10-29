@@ -23,6 +23,7 @@ struct Job {
 struct State<'a> {
     game: &'a Game,
     profile: Profile,
+    sizing: Option<(u32, u32)>,
     phases: Vec<Phase>,
     terminals: Vec<Option<i32>>,
     baseline: Vec<Option<RawPosition>>,
@@ -162,6 +163,7 @@ pub(super) async fn review(
     let mut state = State {
         game,
         profile,
+        sizing,
         phases: core::phases(&game.fens),
         terminals: game.positions.iter().map(core::terminal_position).collect(),
         baseline: vec![None; count],
@@ -180,7 +182,6 @@ pub(super) async fn review(
     let mut run = execute(
         factory,
         repository,
-        sizing,
         cancel,
         emit,
         &mut state,
@@ -207,7 +208,6 @@ pub(super) async fn review(
 async fn execute(
     factory: &dyn EngineFactory,
     repository: &dyn Repository,
-    sizing: Option<(u32, u32)>,
     cancel: &Cancellation,
     emit: &mut (dyn FnMut(Event) + Send),
     state: &mut State<'_>,
@@ -232,11 +232,11 @@ async fn execute(
         return Err(invalid_cache_count());
     }
     let mut queue = VecDeque::new();
-    for i in 0..count {
+    for (i, hit) in hits.iter_mut().enumerate() {
         cancel.check()?;
         state.baseline[i] = if let Some(cp) = state.terminals[i] {
             Some(core::terminal_raw(&game.fens[i], cp))
-        } else if let Some(hit) = hits[i].take() {
+        } else if let Some(hit) = hit.take() {
             state.cached += 1;
             Some(hit)
         } else {
@@ -312,7 +312,7 @@ async fn execute(
             .iter()
             .any(|t| !state.satisfied(t) && !refining[t.position_index]);
         if pool.is_none() && (!queue.is_empty() || needs_refinement) {
-            let acquired = Pool::acquire(factory, sizing, count, cancel).await?;
+            let acquired = Pool::acquire(factory, state.sizing, count, cancel).await?;
             let workers = acquired.len();
             *pool = Some(acquired);
             blocks = (0..workers).map(|_| VecDeque::new()).collect();
@@ -432,9 +432,9 @@ async fn execute(
                 ms: completed.value,
                 multipv: job.multipv,
             });
-            state.refined[job.index] = Some(raw.clone());
+            state.refined[job.index] = Some(raw);
         } else {
-            state.baseline[job.index] = Some(raw.clone());
+            state.baseline[job.index] = Some(raw);
             state.discover(job.index);
         }
         state.progress(job.index, Some(state.evaluation(job.index)?), emit);

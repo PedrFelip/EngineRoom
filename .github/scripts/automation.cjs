@@ -20,12 +20,29 @@ function validatePullRequest(pr) {
 
 async function checkPullRequest({ github, context }) {
   const number = context.payload.pull_request?.number || Number(context.payload.inputs?.pr_number);
-  if (!number) return;
+  if (!number) return context.sha;
   const { data: pr } = await github.rest.pulls.get({ ...context.repo, pull_number: number });
   validatePullRequest(pr);
-  if (context.eventName === 'workflow_dispatch' && pr.head.sha !== context.sha) {
+  await require('./release-policy.cjs').checkReleaseVersion({ github, context }, pr);
+  if (context.eventName !== 'workflow_dispatch') return context.sha;
+  if (pr.head.sha !== context.sha) {
     throw new Error('O PR mudou: execute CI novamente na branch atual.');
   }
+  if (pr.state !== 'open' || pr.head.repo?.full_name !== pr.base.repo.full_name) {
+    throw new Error('O CI manual de PR exige um PR interno e aberto.');
+  }
+  if (pr.mergeable !== true || !SHA.test(pr.merge_commit_sha || '')) {
+    throw new Error('O PR tem conflitos ou seu merge ainda não foi calculado. Resolva os conflitos ou execute CI novamente.');
+  }
+  const { data: merge } = await github.rest.git.getCommit({
+    ...context.repo, commit_sha: pr.merge_commit_sha,
+  });
+  const parents = merge.parents.map(parent => parent.sha);
+  if (parents.length !== 2 || parents[0] !== pr.base.sha || parents[1] !== pr.head.sha) {
+    throw new Error('O merge do PR está desatualizado: execute CI novamente.');
+  }
+  // Test the immutable integration commit, never just the dispatched branch head.
+  return pr.merge_commit_sha;
 }
 
 async function dispatchCI(github, repo, pr) {
@@ -112,6 +129,14 @@ function validateAssets(assets) {
       throw new Error(`Instalador ausente ou incompleto: ${extension}`);
     }
   }
+  for (const installer of assets.filter(asset => /\.(AppImage|exe|msi)$/.test(asset.name))) {
+    if (!assets.some(asset => asset.name === `${installer.name}.sig` && asset.size > 0 && asset.state === 'uploaded')) {
+      throw new Error(`Assinatura ausente ou incompleta: ${installer.name}`);
+    }
+  }
+  if (!assets.some(asset => asset.name === 'latest.json' && asset.size > 0 && asset.state === 'uploaded')) {
+    throw new Error('Manifest de atualização ausente ou incompleto: latest.json');
+  }
 }
 
 async function publish({ github, context }, id, tag, sha) {
@@ -125,6 +150,7 @@ async function publish({ github, context }, id, tag, sha) {
   });
   validateAssets(assets);
   if (!release.draft) return; // A retry never republishes or changes a published release.
+  await require('./release-policy.cjs').checkPublicationVersion({ github, context }, release);
   await github.rest.repos.updateRelease({
     ...context.repo, release_id: release.id, draft: false, prerelease: false, make_latest: 'true',
   });
@@ -143,9 +169,18 @@ async function syncDevelop({ github, context }) {
   const pr = prs[0] || (await github.rest.pulls.create({
     ...context.repo, head: 'main', base: 'develop',
     title: 'chore: sincroniza main com develop',
-    body: 'Traz versões, changelog e hotfixes da main para develop.\n\nUse **Create a merge commit** para preservar o histórico compartilhado.',
+    body: 'Incorpora todo o histórico exclusivo da main em develop, incluindo versões, changelog, hotfixes e automação. Este PR acompanha a main e pode receber novos commits até ser integrado.\n\nUse **Create a merge commit** para preservar o histórico compartilhado; squash faz os commits antigos reaparecerem nas próximas sincronizações.',
   })).data;
-  await dispatchCI(github, context.repo, pr);
+  const { data: current } = await github.rest.pulls.get({
+    ...context.repo, pull_number: pr.number,
+  });
+  if (current.head.sha !== main) {
+    throw new Error('A main mudou durante a sincronização: execute Release novamente para atualizar o CI.');
+  }
+  if (current.mergeable === false) {
+    throw new Error(`O PR #${pr.number} de sincronização tem conflitos. Resolva-os preservando o histórico antes de executar CI.`);
+  }
+  await dispatchCI(github, context.repo, current);
 }
 
 module.exports = { validatePullRequest, checkPullRequest, checkReleasePRs, tagCommit, selectDraft, validateAssets, publish, syncDevelop };
