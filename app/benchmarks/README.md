@@ -107,3 +107,6 @@ O pico de bytes vivos é por lote, sem divisão pelo número de operações.
 
 A fase A/B/B/A sem instrumentação termina antes da fase A/B/B/A de alocações
 em cada cenário, evitando intercalar a carga do contador com as medições de tempo.
+
+A comparação com dados brutos, ambiente, limites e reprodução está em
+[results/2026-10-29/README.md](results/2026-10-29/README.md).

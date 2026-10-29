@@ -1,0 +1,754 @@
+{
+  "schema": 1,
+  "order": [
+    "baseline",
+    "candidate",
+    "candidate",
+    "baseline"
+  ],
+  "samplesPerProcess": 15,
+  "warmupsPerProcess": 3,
+  "binaries": {
+    "baseline-normal": "04d69b1a50224c504409b7e0a89da24da2b39b565189680c3d1b96b6e55bd1bb",
+    "baseline-alloc": "07e21fdbb62ca9b97a9ed851ca19036d6c9b5c6c8e4bad7356edecde93aa8434",
+    "candidate-normal": "28d813f104941ea98f2ca9b1427b35935f0f8dc99741791205a80b2556538e0a",
+    "candidate-alloc": "7bb87b53a910bf5eb1d30fbca7bc0f3fc99ae4175055a165ca8c364eb74eba15"
+  },
+  "scenarios": {
+    "search-depth-pv3": {
+      "baseline": {
+        "latencyMsPerOperation": {
+          "median": 0.09650778166666667,
+          "min": 0.09434288666666667,
+          "max": 0.12065496999999999,
+          "q1": 0.09568804916666666,
+          "q3": 0.0971156975
+        },
+        "allocationCallsPerOperation": {
+          "median": 492.56,
+          "min": 492.56,
+          "max": 492.56,
+          "q1": 492.56,
+          "q3": 492.56
+        },
+        "allocatedBytesPerOperation": {
+          "median": 21777.85,
+          "min": 21777.85,
+          "max": 21777.85,
+          "q1": 21777.85,
+          "q3": 21777.85
+        },
+        "peakIncrementalLiveBytesPerBatch": {
+          "median": 18660.0,
+          "min": 18660,
+          "max": 18660,
+          "q1": 18660.0,
+          "q3": 18660.0
+        },
+        "cpuUserSecondsPerProcess": {
+          "median": 0.5507314999999999,
+          "min": 0.539679,
+          "max": 0.561784,
+          "q1": 0.5341527500000001,
+          "q3": 0.5673102499999999
+        },
+        "cpuSystemSecondsPerProcess": {
+          "median": 0.020181499999999998,
+          "min": 0.019674,
+          "max": 0.020689,
+          "q1": 0.01942025,
+          "q3": 0.02094275
+        },
+        "sampledRustRssKibPerProcess": [
+          20436,
+          20464
+        ]
+      },
+      "candidate": {
+        "latencyMsPerOperation": {
+          "median": 0.08943246999999999,
+          "min": 0.08727718666666667,
+          "max": 0.10921962333333333,
+          "q1": 0.089020775,
+          "q3": 0.09126454833333333
+        },
+        "allocationCallsPerOperation": {
+          "median": 306.56,
+          "min": 306.56,
+          "max": 306.56,
+          "q1": 306.56,
+          "q3": 306.56
+        },
+        "allocatedBytesPerOperation": {
+          "median": 12477.85,
+          "min": 12477.85,
+          "max": 12477.85,
+          "q1": 12477.85,
+          "q3": 12477.85
+        },
+        "peakIncrementalLiveBytesPerBatch": {
+          "median": 18628.0,
+          "min": 18628,
+          "max": 18628,
+          "q1": 18628.0,
+          "q3": 18628.0
+        },
+        "cpuUserSecondsPerProcess": {
+          "median": 0.5199235,
+          "min": 0.511078,
+          "max": 0.5287689999999999,
+          "q1": 0.50665525,
+          "q3": 0.53319175
+        },
+        "cpuSystemSecondsPerProcess": {
+          "median": 0.022586,
+          "min": 0.022461,
+          "max": 0.022711,
+          "q1": 0.0223985,
+          "q3": 0.0227735
+        },
+        "sampledRustRssKibPerProcess": [
+          20732,
+          20396
+        ]
+      },
+      "equivalentFakeWork": true,
+      "medianChangePercent": {
+        "latencyMsPerOperation": -7.331337996250364,
+        "allocationCallsPerOperation": -37.76189702777326,
+        "allocatedBytesPerOperation": -42.70394001244383,
+        "peakIncrementalLiveBytesPerBatch": -0.17148981779206984
+      }
+    },
+    "game-long-depth-pv3-cold": {
+      "baseline": {
+        "latencyMsPerOperation": {
+          "median": 13.521942300000001,
+          "min": 11.840753199999998,
+          "max": 15.370721600000001,
+          "q1": 11.9573833,
+          "q3": 15.121667950000003
+        },
+        "allocationCallsPerOperation": {
+          "median": 71240.8,
+          "min": 71240.8,
+          "max": 71240.8,
+          "q1": 71240.8,
+          "q3": 71240.8
+        },
+        "allocatedBytesPerOperation": {
+          "median": 3350929.6,
+          "min": 3350929.6,
+          "max": 3350929.6,
+          "q1": 3350929.6,
+          "q3": 3350929.6
+        },
+        "peakIncrementalLiveBytesPerBatch": {
+          "median": 514315.0,
+          "min": 514315,
+          "max": 514315,
+          "q1": 514315.0,
+          "q3": 514315.0
+        },
+        "cpuUserSecondsPerProcess": {
+          "median": 1.256623,
+          "min": 1.10785,
+          "max": 1.405396,
+          "q1": 1.0334634999999999,
+          "q3": 1.4797825
+        },
+        "cpuSystemSecondsPerProcess": {
+          "median": 0.032052,
+          "min": 0.029521,
+          "max": 0.034582999999999996,
+          "q1": 0.028255499999999996,
+          "q3": 0.0358485
+        },
+        "sampledRustRssKibPerProcess": [
+          27520,
+          27592
+        ]
+      },
+      "candidate": {
+        "latencyMsPerOperation": {
+          "median": 13.7976315,
+          "min": 11.1526198,
+          "max": 14.142020800000001,
+          "q1": 12.17072665,
+          "q3": 14.007626850000001
+        },
+        "allocationCallsPerOperation": {
+          "median": 47184.8,
+          "min": 47184.8,
+          "max": 47184.8,
+          "q1": 47184.8,
+          "q3": 47184.8
+        },
+        "allocatedBytesPerOperation": {
+          "median": 2148129.6,
+          "min": 2148129.6,
+          "max": 2148129.6,
+          "q1": 2148129.6,
+          "q3": 2148129.6
+        },
+        "peakIncrementalLiveBytesPerBatch": {
+          "median": 514315.0,
+          "min": 514315,
+          "max": 514315,
+          "q1": 514315.0,
+          "q3": 514315.0
+        },
+        "cpuUserSecondsPerProcess": {
+          "median": 1.2285115,
+          "min": 1.159976,
+          "max": 1.297047,
+          "q1": 1.12570825,
+          "q3": 1.3313147500000002
+        },
+        "cpuSystemSecondsPerProcess": {
+          "median": 0.0375355,
+          "min": 0.035607,
+          "max": 0.039464,
+          "q1": 0.03464275,
+          "q3": 0.04042825
+        },
+        "sampledRustRssKibPerProcess": [
+          27684,
+          27444
+        ]
+      },
+      "equivalentFakeWork": true,
+      "medianChangePercent": {
+        "latencyMsPerOperation": 2.0388284011535696,
+        "allocationCallsPerOperation": -33.767167128948586,
+        "allocatedBytesPerOperation": -35.89451715130034,
+        "peakIncrementalLiveBytesPerBatch": 0.0
+      }
+    },
+    "game-long-depth-pv3-warm": {
+      "baseline": {
+        "latencyMsPerOperation": {
+          "median": 1.4105759,
+          "min": 1.321657,
+          "max": 1.6227068,
+          "q1": 1.3773284499999998,
+          "q3": 1.4625194
+        },
+        "allocationCallsPerOperation": {
+          "median": 7541.0,
+          "min": 7541.0,
+          "max": 7541.0,
+          "q1": 7541.0,
+          "q3": 7541.0
+        },
+        "allocatedBytesPerOperation": {
+          "median": 548799.2,
+          "min": 548799.2,
+          "max": 548799.2,
+          "q1": 548799.2,
+          "q3": 548799.2
+        },
+        "peakIncrementalLiveBytesPerBatch": {
+          "median": 567131.0,
+          "min": 567131,
+          "max": 567131,
+          "q1": 567131.0,
+          "q3": 567131.0
+        },
+        "cpuUserSecondsPerProcess": {
+          "median": 0.16981249999999998,
+          "min": 0.166406,
+          "max": 0.17321899999999998,
+          "q1": 0.16470275,
+          "q3": 0.17492225
+        },
+        "cpuSystemSecondsPerProcess": {
+          "median": 0.028852499999999996,
+          "min": 0.026409,
+          "max": 0.031296,
+          "q1": 0.02518725,
+          "q3": 0.03251775
+        },
+        "sampledRustRssKibPerProcess": [
+          27640,
+          27612
+        ]
+      },
+      "candidate": {
+        "latencyMsPerOperation": {
+          "median": 1.3768402000000002,
+          "min": 1.2138309999999999,
+          "max": 1.7238152,
+          "q1": 1.29346045,
+          "q3": 1.4390302
+        },
+        "allocationCallsPerOperation": {
+          "median": 7541.0,
+          "min": 7541.0,
+          "max": 7541.0,
+          "q1": 7541.0,
+          "q3": 7541.0
+        },
+        "allocatedBytesPerOperation": {
+          "median": 548799.2,
+          "min": 548799.2,
+          "max": 548799.2,
+          "q1": 548799.2,
+          "q3": 548799.2
+        },
+        "peakIncrementalLiveBytesPerBatch": {
+          "median": 567131.0,
+          "min": 567131,
+          "max": 567131,
+          "q1": 567131.0,
+          "q3": 567131.0
+        },
+        "cpuUserSecondsPerProcess": {
+          "median": 0.16428749999999998,
+          "min": 0.160706,
+          "max": 0.167869,
+          "q1": 0.15891525,
+          "q3": 0.16965975
+        },
+        "cpuSystemSecondsPerProcess": {
+          "median": 0.03073,
+          "min": 0.030501,
+          "max": 0.030958999999999997,
+          "q1": 0.0303865,
+          "q3": 0.031073499999999997
+        },
+        "sampledRustRssKibPerProcess": [
+          27592,
+          27392
+        ]
+      },
+      "equivalentFakeWork": true,
+      "medianChangePercent": {
+        "latencyMsPerOperation": -2.391626001833702,
+        "allocationCallsPerOperation": 0.0,
+        "allocatedBytesPerOperation": 0.0,
+        "peakIncrementalLiveBytesPerBatch": 0.0
+      }
+    },
+    "adaptive-long-fast-cold": {
+      "baseline": {
+        "latencyMsPerOperation": {
+          "median": 23.7719098,
+          "min": 23.4020182,
+          "max": 24.139736,
+          "q1": 23.6339722,
+          "q3": 23.863247649999998
+        },
+        "allocationCallsPerOperation": {
+          "median": 122813.8,
+          "min": 122813.8,
+          "max": 122813.8,
+          "q1": 122813.8,
+          "q3": 122813.8
+        },
+        "allocatedBytesPerOperation": {
+          "median": 7182787.6,
+          "min": 7182787.6,
+          "max": 7182787.6,
+          "q1": 7182787.6,
+          "q3": 7182787.6
+        },
+        "peakIncrementalLiveBytesPerBatch": {
+          "median": 701040.0,
+          "min": 701040,
+          "max": 701040,
+          "q1": 701040.0,
+          "q3": 701040.0
+        },
+        "cpuUserSecondsPerProcess": {
+          "median": 2.160754,
+          "min": 2.152695,
+          "max": 2.168813,
+          "q1": 2.1486655,
+          "q3": 2.1728425000000002
+        },
+        "cpuSystemSecondsPerProcess": {
+          "median": 0.0379935,
+          "min": 0.036579,
+          "max": 0.039408,
+          "q1": 0.03587175,
+          "q3": 0.04011525
+        },
+        "sampledRustRssKibPerProcess": [
+          28540,
+          28596
+        ]
+      },
+      "candidate": {
+        "latencyMsPerOperation": {
+          "median": 21.997216199999997,
+          "min": 21.7235546,
+          "max": 22.3708788,
+          "q1": 21.77269735,
+          "q3": 22.214771050000003
+        },
+        "allocationCallsPerOperation": {
+          "median": 81654.8,
+          "min": 81654.8,
+          "max": 81654.8,
+          "q1": 81654.8,
+          "q3": 81654.8
+        },
+        "allocatedBytesPerOperation": {
+          "median": 5111542.6,
+          "min": 5111542.6,
+          "max": 5111542.6,
+          "q1": 5111542.6,
+          "q3": 5111542.6
+        },
+        "peakIncrementalLiveBytesPerBatch": {
+          "median": 642639.0,
+          "min": 642639,
+          "max": 642639,
+          "q1": 642639.0,
+          "q3": 642639.0
+        },
+        "cpuUserSecondsPerProcess": {
+          "median": 1.99366,
+          "min": 1.9782069999999998,
+          "max": 2.009113,
+          "q1": 1.9704804999999996,
+          "q3": 2.0168395
+        },
+        "cpuSystemSecondsPerProcess": {
+          "median": 0.049233,
+          "min": 0.048409,
+          "max": 0.050057,
+          "q1": 0.047997000000000005,
+          "q3": 0.05046899999999999
+        },
+        "sampledRustRssKibPerProcess": [
+          28824,
+          28888
+        ]
+      },
+      "equivalentFakeWork": true,
+      "medianChangePercent": {
+        "latencyMsPerOperation": -7.465507041424169,
+        "allocationCallsPerOperation": -33.513334820679766,
+        "allocatedBytesPerOperation": -28.836227873423404,
+        "peakIncrementalLiveBytesPerBatch": -8.330623074289623
+      }
+    },
+    "adaptive-long-fast-warm": {
+      "baseline": {
+        "latencyMsPerOperation": {
+          "median": 4.9823615,
+          "min": 4.709122,
+          "max": 6.633863199999999,
+          "q1": 4.8309289,
+          "q3": 5.23596745
+        },
+        "allocationCallsPerOperation": {
+          "median": 19865.0,
+          "min": 19865.0,
+          "max": 19865.0,
+          "q1": 19865.0,
+          "q3": 19865.0
+        },
+        "allocatedBytesPerOperation": {
+          "median": 2061266.2,
+          "min": 2061266.2,
+          "max": 2061266.2,
+          "q1": 2061266.2,
+          "q3": 2061266.2
+        },
+        "peakIncrementalLiveBytesPerBatch": {
+          "median": 735721.0,
+          "min": 735721,
+          "max": 735721,
+          "q1": 735721.0,
+          "q3": 735721.0
+        },
+        "cpuUserSecondsPerProcess": {
+          "median": 0.5038769999999999,
+          "min": 0.481359,
+          "max": 0.526395,
+          "q1": 0.47009999999999996,
+          "q3": 0.537654
+        },
+        "cpuSystemSecondsPerProcess": {
+          "median": 0.0339965,
+          "min": 0.033416,
+          "max": 0.034577,
+          "q1": 0.03312575,
+          "q3": 0.034867249999999995
+        },
+        "sampledRustRssKibPerProcess": [
+          28408,
+          28364
+        ]
+      },
+      "candidate": {
+        "latencyMsPerOperation": {
+          "median": 4.7128182,
+          "min": 4.6247571999999995,
+          "max": 5.1536588000000005,
+          "q1": 4.6694284,
+          "q3": 4.84044025
+        },
+        "allocationCallsPerOperation": {
+          "median": 16836.0,
+          "min": 16836.0,
+          "max": 16836.0,
+          "q1": 16836.0,
+          "q3": 16836.0
+        },
+        "allocatedBytesPerOperation": {
+          "median": 1896521.2,
+          "min": 1896521.2,
+          "max": 1896521.2,
+          "q1": 1896521.2,
+          "q3": 1896521.2
+        },
+        "peakIncrementalLiveBytesPerBatch": {
+          "median": 677320.0,
+          "min": 677320,
+          "max": 677320,
+          "q1": 677320.0,
+          "q3": 677320.0
+        },
+        "cpuUserSecondsPerProcess": {
+          "median": 0.4771005,
+          "min": 0.468002,
+          "max": 0.486199,
+          "q1": 0.46345274999999997,
+          "q3": 0.49074824999999994
+        },
+        "cpuSystemSecondsPerProcess": {
+          "median": 0.031536999999999996,
+          "min": 0.030754999999999998,
+          "max": 0.032319,
+          "q1": 0.030364,
+          "q3": 0.032709999999999996
+        },
+        "sampledRustRssKibPerProcess": [
+          28456,
+          28160
+        ]
+      },
+      "equivalentFakeWork": true,
+      "medianChangePercent": {
+        "latencyMsPerOperation": -5.4099506830245,
+        "allocationCallsPerOperation": -15.247923483513715,
+        "allocatedBytesPerOperation": -7.992417476209523,
+        "peakIncrementalLiveBytesPerBatch": -7.937927556777636
+      }
+    },
+    "adaptive-long-deep-cold": {
+      "baseline": {
+        "latencyMsPerOperation": {
+          "median": 23.8215542,
+          "min": 23.3147838,
+          "max": 25.000678799999996,
+          "q1": 23.529001049999998,
+          "q3": 24.060504
+        },
+        "allocationCallsPerOperation": {
+          "median": 122813.8,
+          "min": 122813.8,
+          "max": 122813.8,
+          "q1": 122813.8,
+          "q3": 122813.8
+        },
+        "allocatedBytesPerOperation": {
+          "median": 7182787.6,
+          "min": 7182787.6,
+          "max": 7182787.6,
+          "q1": 7182787.6,
+          "q3": 7182787.6
+        },
+        "peakIncrementalLiveBytesPerBatch": {
+          "median": 701040.0,
+          "min": 701040,
+          "max": 701040,
+          "q1": 701040.0,
+          "q3": 701040.0
+        },
+        "cpuUserSecondsPerProcess": {
+          "median": 2.1619785,
+          "min": 2.145399,
+          "max": 2.1785579999999998,
+          "q1": 2.13710925,
+          "q3": 2.1868477499999996
+        },
+        "cpuSystemSecondsPerProcess": {
+          "median": 0.0464065,
+          "min": 0.042436,
+          "max": 0.050377,
+          "q1": 0.04045075,
+          "q3": 0.05236224999999999
+        },
+        "sampledRustRssKibPerProcess": [
+          28648,
+          28752
+        ]
+      },
+      "candidate": {
+        "latencyMsPerOperation": {
+          "median": 22.207129600000002,
+          "min": 21.6420906,
+          "max": 23.904070400000002,
+          "q1": 21.88990385,
+          "q3": 22.4625992
+        },
+        "allocationCallsPerOperation": {
+          "median": 81654.8,
+          "min": 81654.8,
+          "max": 81654.8,
+          "q1": 81654.8,
+          "q3": 81654.8
+        },
+        "allocatedBytesPerOperation": {
+          "median": 5111542.6,
+          "min": 5111542.6,
+          "max": 5111542.6,
+          "q1": 5111542.6,
+          "q3": 5111542.6
+        },
+        "peakIncrementalLiveBytesPerBatch": {
+          "median": 642639.0,
+          "min": 642639,
+          "max": 642639,
+          "q1": 642639.0,
+          "q3": 642639.0
+        },
+        "cpuUserSecondsPerProcess": {
+          "median": 2.0217365000000003,
+          "min": 1.9921280000000001,
+          "max": 2.051345,
+          "q1": 1.9773237500000005,
+          "q3": 2.0661492499999996
+        },
+        "cpuSystemSecondsPerProcess": {
+          "median": 0.040935,
+          "min": 0.036525999999999996,
+          "max": 0.045343999999999995,
+          "q1": 0.0343215,
+          "q3": 0.047548499999999994
+        },
+        "sampledRustRssKibPerProcess": [
+          29004,
+          28676
+        ]
+      },
+      "equivalentFakeWork": true,
+      "medianChangePercent": {
+        "latencyMsPerOperation": -6.777158981507592,
+        "allocationCallsPerOperation": -33.513334820679766,
+        "allocatedBytesPerOperation": -28.836227873423404,
+        "peakIncrementalLiveBytesPerBatch": -8.330623074289623
+      }
+    },
+    "adaptive-long-deep-warm": {
+      "baseline": {
+        "latencyMsPerOperation": {
+          "median": 4.9571572,
+          "min": 4.8666068000000005,
+          "max": 5.3673164,
+          "q1": 4.9198537,
+          "q3": 5.0276207500000005
+        },
+        "allocationCallsPerOperation": {
+          "median": 19865.0,
+          "min": 19865.0,
+          "max": 19865.0,
+          "q1": 19865.0,
+          "q3": 19865.0
+        },
+        "allocatedBytesPerOperation": {
+          "median": 2061266.2,
+          "min": 2061266.2,
+          "max": 2061266.2,
+          "q1": 2061266.2,
+          "q3": 2061266.2
+        },
+        "peakIncrementalLiveBytesPerBatch": {
+          "median": 735721.0,
+          "min": 735721,
+          "max": 735721,
+          "q1": 735721.0,
+          "q3": 735721.0
+        },
+        "cpuUserSecondsPerProcess": {
+          "median": 0.4917235,
+          "min": 0.48893,
+          "max": 0.494517,
+          "q1": 0.4875332499999999,
+          "q3": 0.49591375000000004
+        },
+        "cpuSystemSecondsPerProcess": {
+          "median": 0.0341885,
+          "min": 0.031799,
+          "max": 0.036578,
+          "q1": 0.03060425,
+          "q3": 0.03777275
+        },
+        "sampledRustRssKibPerProcess": [
+          28616,
+          28416
+        ]
+      },
+      "candidate": {
+        "latencyMsPerOperation": {
+          "median": 4.6512397,
+          "min": 4.5869029999999995,
+          "max": 5.318935000000001,
+          "q1": 4.6344113,
+          "q3": 4.6977219
+        },
+        "allocationCallsPerOperation": {
+          "median": 16836.0,
+          "min": 16836.0,
+          "max": 16836.0,
+          "q1": 16836.0,
+          "q3": 16836.0
+        },
+        "allocatedBytesPerOperation": {
+          "median": 1896521.2,
+          "min": 1896521.2,
+          "max": 1896521.2,
+          "q1": 1896521.2,
+          "q3": 1896521.2
+        },
+        "peakIncrementalLiveBytesPerBatch": {
+          "median": 677320.0,
+          "min": 677320,
+          "max": 677320,
+          "q1": 677320.0,
+          "q3": 677320.0
+        },
+        "cpuUserSecondsPerProcess": {
+          "median": 0.4633085,
+          "min": 0.458845,
+          "max": 0.46777199999999997,
+          "q1": 0.45661324999999997,
+          "q3": 0.47000375
+        },
+        "cpuSystemSecondsPerProcess": {
+          "median": 0.035163,
+          "min": 0.03176,
+          "max": 0.038565999999999996,
+          "q1": 0.030058500000000002,
+          "q3": 0.0402675
+        },
+        "sampledRustRssKibPerProcess": [
+          28372,
+          28172
+        ]
+      },
+      "equivalentFakeWork": true,
+      "medianChangePercent": {
+        "latencyMsPerOperation": -6.171228542036156,
+        "allocationCallsPerOperation": -15.247923483513715,
+        "allocatedBytesPerOperation": -7.992417476209523,
+        "peakIncrementalLiveBytesPerBatch": -7.937927556777636
+      }
+    }
+  }
+}
