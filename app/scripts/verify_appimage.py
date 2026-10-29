@@ -1,4 +1,4 @@
-"""Reject AppImages that shadow the host graphics stack. Never modify the artifact."""
+"""Check AppImage graphics compatibility and bundled media components without modifying it."""
 
 import argparse
 from fnmatch import fnmatchcase
@@ -25,6 +25,13 @@ HOST_LIBRARIES = (
 )
 
 
+# WebKit needs these elements for MP3 playback and audio output. Ubuntu's
+# plugins-good supplies mpg123, autodetect and PulseAudio; ALSA is separate.
+MEDIA_PLUGINS = ("libgstcoreelements.so", "libgstapp.so", "libgstaudioconvert.so",
+                 "libgstaudioresample.so", "libgstplayback.so", "libgsttypefindfunctions.so",
+                 "libgstautodetect.so", "libgstaudioparsers.so", "libgstmpg123.so", "libgstpulseaudio.so", "libgstalsa.so")
+
+
 def validate_appdir(appdir):
     if not (appdir / "AppRun").is_file():
         raise ValueError("Extracted AppImage is missing AppRun")
@@ -38,6 +45,20 @@ def validate_appdir(appdir):
             "AppImage shadows host graphics libraries; fix the bundler before publishing:\n"
             + "\n".join(forbidden)
         )
+    scanner = appdir / "usr/lib/gstreamer1.0/gstreamer-1.0/gst-plugin-scanner"
+    if not scanner.is_file():
+        raise ValueError("AppImage is missing gst-plugin-scanner")
+    plugin_dir = appdir / "usr/lib/gstreamer-1.0"
+    missing = [name for name in MEDIA_PLUGINS if not (plugin_dir / name).is_file()]
+    if missing:
+        raise ValueError("AppImage is missing GStreamer plugins: " + ", ".join(missing))
+
+
+def media_warnings(output):
+    return [line for line in output.splitlines()
+            if "gstreamer" in line.lower() and any(
+                word in line.lower() for word in ("not found", "missing", "failed", "error", "warning")
+            )]
 
 
 def webkit_running(process_group):
@@ -52,7 +73,10 @@ def webkit_running(process_group):
 
 def smoke_test(appdir):
     env = os.environ.copy()
-    for key in ("APPDIR", "APPIMAGE", "LD_PRELOAD", "LD_LIBRARY_PATH", "EGL_PLATFORM"):
+    for key in ("APPDIR", "APPIMAGE", "LD_PRELOAD", "LD_LIBRARY_PATH", "EGL_PLATFORM",
+                "GST_PLUGIN_PATH", "GST_PLUGIN_PATH_1_0", "GST_PLUGIN_SYSTEM_PATH",
+                "GST_PLUGIN_SYSTEM_PATH_1_0", "GST_PLUGIN_SCANNER", "GST_PLUGIN_SCANNER_1_0",
+                "GST_REGISTRY", "GST_REGISTRY_1_0"):
         env.pop(key, None)
     for key in ("XDG_DATA_HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME"):
         env[key] = str(appdir.parent / key.lower())
@@ -70,7 +94,7 @@ def smoke_test(appdir):
             log.seek(0)
             output = log.read()
             webkit_alive = webkit_running(process.pid)
-            if process.poll() is not None or not webkit_alive or "EGL_BAD" in output:
+            if process.poll() is not None or not webkit_alive or "EGL_BAD" in output or media_warnings(output):
                 raise RuntimeError(
                     f"AppImage/WebKit startup failed (exit={process.poll()}, WebKit alive={webkit_alive}):\n{output}"
                 )
@@ -102,7 +126,7 @@ def verify(image, smoke=False):
         validate_appdir(appdir)
         if smoke:
             smoke_test(appdir)
-    print(f"Verified {image.name}: uses the host graphics libraries")
+    print(f"Verified {image.name}: host graphics and bundled media inventory checked")
 
 
 if __name__ == "__main__":
