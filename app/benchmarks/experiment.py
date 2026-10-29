@@ -69,10 +69,14 @@ def main():
         expected = None
         config = SimpleNamespace(scenario=scenario, engine=args.engine,
                                  samples=args.samples, warmups=args.warmups)
-        for index, version in enumerate(summary['order']):
-            print(f'{scenario}: {index + 1}/4 {version}', flush=True)
-            result = {'latency': run(str(getattr(args, f'{version}_normal').resolve()), config, False),
-                      'allocations': run(str(getattr(args, f'{version}_alloc').resolve()), config, True)}
+        results = [{} for _ in summary['order']]
+        # Keep instrumentation out of the latency phase, including its thermal load.
+        for key, kind, instrumented in [('latency', 'normal', False), ('allocations', 'alloc', True)]:
+            for index, version in enumerate(summary['order']):
+                print(f'{scenario}: {key} {index + 1}/4 {version}', flush=True)
+                results[index][key] = run(
+                    str(getattr(args, f'{version}_{kind}').resolve()), config, instrumented)
+        for index, (version, result) in enumerate(zip(summary['order'], results)):
             (args.output / f'{scenario}-{index + 1}-{version}.json').write_text(
                 json.dumps(result, indent=2) + '\n')
             if args.engine == 'fake':
