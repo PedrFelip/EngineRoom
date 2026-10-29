@@ -257,6 +257,26 @@ fn failure(mut result: SearchResult, error: ImportError, cursor: Cursor) -> Resu
     result.warning = Some(error);
     Ok(stop(result, StopReason::Error, cursor))
 }
+/// Close a search after the archive index was fully traversed.
+///
+/// A deadline or cancellation seen only at the finish line must not discard the
+/// page that was already collected. `resume` points at the last month that was
+/// processed with `before` set to its oldest accepted key, so retrying from it
+/// skips everything already emitted and cannot skip older games.
+pub(super) fn complete(
+    result: SearchResult,
+    cancel: &watch::Receiver<bool>,
+    deadline: Instant,
+    resume: Option<Cursor>,
+) -> Result<SearchResult> {
+    match check(cancel, deadline) {
+        Ok(()) => Ok(result),
+        Err(error) => match resume {
+            Some(cursor) => failure(result, error, cursor),
+            None => Err(error),
+        },
+    }
+}
 pub async fn search(
     http: &dyn Http,
     input: &str,
@@ -301,6 +321,7 @@ pub async fn search(
     };
     let mut seen = HashSet::new();
     let mut candidates = 0;
+    let mut resume = None;
     for (year, month) in index {
         if cursor
             .as_ref()
@@ -412,7 +433,7 @@ pub async fn search(
                 return Ok(stop(result, StopReason::Page, at));
             }
         }
+        resume = Some(at);
     }
-    check(cancel, deadline)?;
-    Ok(result)
+    complete(result, cancel, deadline, resume)
 }
