@@ -132,7 +132,7 @@ export default function EvalGraph({
             className='eval-timeline-plot block w-full cursor-crosshair select-none overflow-hidden rounded-xl border border-edge outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-default'
             aria-label={
               interactive
-                ? `Gráfico de avaliação das brancas. ${Number.isFinite(currentValue) ? `${Math.round(currentValue)}% para as brancas.` : 'Aguardando avaliação.'} Clique ou use as setas, Home e End para navegar entre posições.`
+                ? 'Gráfico de avaliação das brancas. Clique ou use as setas, Home e End para navegar entre posições.'
                 : 'Gráfico de avaliação das brancas. Análise em andamento.'
             }
             onKeyDown={(event) => {
