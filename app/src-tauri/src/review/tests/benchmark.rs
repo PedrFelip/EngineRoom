@@ -442,12 +442,7 @@ async fn benchmark_complete_pipeline() {
             let duration = start.elapsed();
             #[cfg(feature = "bench-alloc")]
             {
-                let after = crate::bench_alloc::snapshot();
-                allocations.push((
-                    after.0 - before.0,
-                    after.1 - before.1,
-                    crate::bench_alloc::peak_above(before.2),
-                ));
+                allocations.push(crate::bench_alloc::finish(before));
             }
             elapsed.push(duration.as_secs_f64() * 1000.0 / scenario.batch as f64);
             let current = serde_json::to_value(result).unwrap();
