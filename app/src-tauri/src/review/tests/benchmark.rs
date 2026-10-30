@@ -402,31 +402,76 @@ async fn benchmark_complete_pipeline() {
         .ok()
         .map(|n| n.parse().unwrap())
         .unwrap_or(fixture.samples);
+    let warmups = std::env::var("BENCH_WARMUPS")
+        .ok()
+        .map(|n| n.parse::<usize>().unwrap());
+    let filter = std::env::var("BENCH_SCENARIO").ok();
+    let engine = std::env::var("BENCH_ENGINE").ok();
+    assert!(samples > 0, "BENCH_SAMPLES must be positive");
     let mut reports = Vec::new();
     for scenario in &fixture.scenarios {
+        if filter.as_ref().is_some_and(|id| &scenario.id != id)
+            || engine
+                .as_ref()
+                .is_some_and(|name| name != scenario.engine.as_deref().unwrap_or("fake"))
+        {
+            continue;
+        }
         eprintln!("Rust {}", scenario.id);
         let game = &fixture.games[&scenario.game];
-        for _ in 0..scenario.warmups.unwrap_or(fixture.warmups) {
+        for _ in 0..warmups.unwrap_or(scenario.warmups.unwrap_or(fixture.warmups)) {
             execute(scenario, game).await;
         }
         let mut elapsed = Vec::new();
+        #[cfg(feature = "bench-alloc")]
+        let mut allocations = Vec::<(u64, u64, u64)>::new();
+        #[cfg(not(feature = "bench-alloc"))]
+        let allocations: Vec<(u64, u64)> = Vec::new();
+        let mut observed = None;
+        let mut stats_samples = Vec::new();
         let count = if std::env::var("BENCH_SAMPLES").is_ok() {
             samples
         } else {
             scenario.samples.unwrap_or(samples)
         };
         for _ in 0..count {
+            #[cfg(feature = "bench-alloc")]
+            let before = crate::bench_alloc::begin();
             let start = Instant::now();
-            execute(scenario, game).await;
-            elapsed.push(start.elapsed().as_secs_f64() * 1000.0 / scenario.batch as f64);
+            let (result, stats) = execute(scenario, game).await;
+            let duration = start.elapsed();
+            #[cfg(feature = "bench-alloc")]
+            {
+                allocations.push(crate::bench_alloc::finish(before));
+            }
+            elapsed.push(duration.as_secs_f64() * 1000.0 / scenario.batch as f64);
+            let current = serde_json::to_value(result).unwrap();
+            let stats = serde_json::to_value(stats).unwrap();
+            if scenario.engine.is_none() {
+                if let Some(first) = &observed {
+                    assert_eq!(first, &current, "fake result changed: {}", scenario.id);
+                    assert_eq!(
+                        &stats_samples[0], &stats,
+                        "fake work changed: {}",
+                        scenario.id
+                    );
+                }
+            }
+            if observed.is_none() {
+                observed = Some(current);
+            }
+            stats_samples.push(stats);
         }
-        let (result, stats) = execute(scenario, game).await;
         let mut report = serde_json::to_value(scenario).unwrap();
         report["elapsedMs"] = serde_json::json!(elapsed);
-        report["result"] = serde_json::to_value(result).unwrap();
-        report["stats"] = serde_json::to_value(stats).unwrap();
+        report["observed"] = serde_json::json!(observed);
+        report["statsSamples"] = serde_json::json!(stats_samples);
+        report["allocationSamples"] = serde_json::json!(allocations);
+        report["effectiveWarmups"] =
+            serde_json::json!(warmups.unwrap_or(scenario.warmups.unwrap_or(fixture.warmups)));
         reports.push(report);
     }
+    assert!(!reports.is_empty(), "no benchmark scenarios matched");
     let report =
         serde_json::json!({"samples":samples,"warmups":fixture.warmups,"scenarios":reports});
     if let Ok(path) = std::env::var("BENCH_REPORT_PATH") {
