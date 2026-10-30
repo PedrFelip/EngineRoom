@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.3.2](https://github.com/PedrFelip/EngineRoom/compare/v2.3.1...v2.3.2) (2026-10-29)
+
+Esta versão corrige os sons no AppImage Linux e melhora a importação de partidas do Chess.com, o reaproveitamento de análises e a preparação do Stockfish.
+
+### Correções
+
+- **Sons no Linux:** corrige a reprodução dos sons dos lances no AppImage. ([#64](https://github.com/PedrFelip/EngineRoom/pull/64))
+- **Importação do Chess.com:** retoma a busca inicial pelo usuário salvo ao voltar à aba de importação, caso ela tenha sido interrompida pela troca de aba. ([#58](https://github.com/PedrFelip/EngineRoom/pull/58))
+- **Resultados parciais:** preserva as partidas já encontradas quando a busca no Chess.com atinge o limite de tempo, com um aviso e a possibilidade de continuar de onde parou. ([#59](https://github.com/PedrFelip/EngineRoom/pull/59))
+- **Análises salvas:** melhora o reaproveitamento de resultados válidos do cache e preserva análises por tempo mais completas, evitando trabalho desnecessário do Stockfish. ([#60](https://github.com/PedrFelip/EngineRoom/pull/60))
+- **Preparação do Stockfish:** corrige falhas quando o caminho das pastas contém caracteres especiais. ([#56](https://github.com/PedrFelip/EngineRoom/pull/56))
+
 ## [2.3.1](https://github.com/PedrFelip/EngineRoom/compare/v2.3.0...v2.3.1) (2026-10-29)
 
 
