@@ -53,3 +53,9 @@ export function installAppUpdate(onProgress: (event: UpdateProgress) => void) {
 export function restartAfterFailedUpdate() {
   return ipc('app_update_restart', undefined, updateError).pipe(Effect.asVoid)
 }
+
+export function openUpdateReleasePage(version: string | null) {
+  return ipc('app_update_open_release_page', { version }, updateError).pipe(
+    Effect.asVoid,
+  )
+}

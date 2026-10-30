@@ -27,7 +27,7 @@ export default function UpdateButton() {
   if (restartRequired) label = 'Reiniciar o app'
 
   return (
-    <div className='relative inline-flex'>
+    <div className='inline-flex'>
       <Button
         onClick={() => {
           void runUi(restartRequired ? state.restart() : state.install())
@@ -88,14 +88,6 @@ export default function UpdateButton() {
       <span className='sr-only' role='status'>
         {state.busy ? label : ''}
       </span>
-      {state.error && (
-        <p
-          role='alert'
-          className='absolute right-0 top-full z-50 mt-2 w-64 rounded-xl border border-edge bg-panel-2 p-3 text-xs text-blunder shadow-lg'
-        >
-          {state.error}
-        </p>
-      )}
     </div>
   )
 }
