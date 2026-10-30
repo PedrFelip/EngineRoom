@@ -8,6 +8,20 @@ use tauri::utils::{config::BundleType, platform::bundle_type};
 use tauri_plugin_updater::{Update, UpdaterExt};
 use tokio::sync::{Mutex, OnceCell};
 
+fn update_failure(error: &tauri_plugin_updater::Error, installing: bool) -> String {
+    use tauri_plugin_updater::Error;
+    match error {
+        Error::Network(message) if message.contains("404") =>
+            "O arquivo da atualização não foi encontrado no servidor. Tente novamente mais tarde.".into(),
+        Error::Minisign(_) | Error::Base64(_) | Error::SignatureUtf8(_) | Error::SignedVersionMismatch { .. } | Error::MissingSignedVersion =>
+            "Não foi possível validar a assinatura da atualização. Tente novamente mais tarde.".into(),
+        Error::Io(error) if error.kind() == std::io::ErrorKind::PermissionDenied =>
+            "Sem permissão para instalar a atualização. Verifique as permissões da pasta do aplicativo.".into(),
+        _ if installing => format!("Não foi possível instalar a atualização: {error}"),
+        _ => format!("Não foi possível baixar ou validar a atualização: {error}"),
+    }
+}
+
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateInfo {
@@ -58,6 +72,16 @@ fn supports_bundle(bundle: Option<BundleType>) -> bool {
 #[cfg(test)]
 mod bundle_tests {
     use super::*;
+
+    #[test]
+    fn update_failures_distinguish_missing_download_and_permission() {
+        let missing = tauri_plugin_updater::Error::Network(
+            "Download request failed with status: 404 Not Found".into(),
+        );
+        assert!(update_failure(&missing, false).contains("não foi encontrado"));
+        let denied = tauri_plugin_updater::Error::Io(std::io::ErrorKind::PermissionDenied.into());
+        assert!(update_failure(&denied, true).contains("permissão"));
+    }
 
     #[test]
     fn only_published_package_types_are_supported() {
@@ -141,7 +165,7 @@ pub async fn app_update_install(
             || {},
         )
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| update_failure(&e, false))?;
     let installation = state.installation.begin()?;
     let _ = on_progress.send(UpdateProgress::Installing);
     let update = update.clone();
@@ -151,7 +175,7 @@ pub async fn app_update_install(
     })
     .await
     .map_err(|e| e.to_string())
-    .and_then(|result| result.map_err(|e| e.to_string()));
+    .and_then(|result| result.map_err(|e| update_failure(&e, true)));
     if let Err(error) = installed {
         use tauri::Manager;
         // Windows may reject the installer after the before-exit hook drained resources.

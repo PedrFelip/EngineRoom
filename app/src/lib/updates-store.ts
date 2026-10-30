@@ -4,6 +4,7 @@ import {
   checkAppUpdate,
   installAppUpdate,
   restartAfterFailedUpdate,
+  UpdateError,
   type UpdateInfo,
   type UpdateProgress,
 } from './updates'
@@ -94,7 +95,7 @@ export function createUpdatesStore(
                 })),
               ),
             ),
-            Effect.catchCause(() =>
+            Effect.catch((error) =>
               Effect.sync(() => {
                 set({
                   busy: false,
@@ -105,7 +106,9 @@ export function createUpdatesStore(
                   error:
                     get().progress?.status === 'restartRequired'
                       ? 'Não foi possível iniciar o instalador. Reinicie o app para continuar.'
-                      : 'Não foi possível instalar a atualização. Tente novamente.',
+                      : error instanceof UpdateError
+                        ? error.message
+                        : 'Não foi possível instalar a atualização. Tente novamente.',
                 })
               }),
             ),
