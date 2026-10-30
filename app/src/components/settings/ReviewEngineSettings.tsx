@@ -2,7 +2,7 @@ import { Cpu, MemoryStick, Split, Timer } from 'lucide-react'
 import type { CSSProperties, ReactNode } from 'react'
 import { useEffect, useState } from 'react'
 import { runUi } from '../../lib/effect/ui-runtime'
-import { recommendedReviewThreads } from '../../lib/settings'
+import { reviewThreadSettings } from '../../lib/settings'
 import { useSettings } from '../../lib/settings-context'
 import { selectReviewEngineSettings } from '../../lib/settings-store'
 import { getSystemResources } from '../../lib/system'
@@ -30,7 +30,7 @@ export default function ReviewEngineSettings() {
         const available = Math.max(1, threads)
         setMaxThreads(available)
         if (settings.reviewThreadsAuto) {
-          updateSettings({ reviewThreads: recommendedReviewThreads(available) })
+          updateSettings(reviewThreadSettings(true, available))
         }
       })
       .catch(() => {})
@@ -89,12 +89,9 @@ export default function ReviewEngineSettings() {
             checked={settings.reviewThreadsAuto}
             disabled={disabled}
             onCheckedChange={(reviewThreadsAuto) => {
-              updateSettings({
-                reviewThreadsAuto,
-                ...(reviewThreadsAuto
-                  ? { reviewThreads: recommendedReviewThreads(maxThreads) }
-                  : {}),
-              })
+              updateSettings(
+                reviewThreadSettings(reviewThreadsAuto, maxThreads),
+              )
             }}
           />
         </div>

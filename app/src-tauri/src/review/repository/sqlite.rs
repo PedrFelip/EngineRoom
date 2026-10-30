@@ -1,5 +1,5 @@
 //! SQLite and Tauri adapter for review persistence and tracked blocking operations.
-use super::{normalize, shape, Repository};
+use super::{normalize, shape, validate_game, Repository};
 use crate::db::{
     cache::{Cache, CachedPositionPut},
     games::{NewGame, Store, StoredGame},
@@ -228,6 +228,60 @@ pub async fn games_get_review_config(
     .map_err(|error: ReviewError| ReviewErrorPayload::from(error))
 }
 
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct EnginePolicy {
+    min_depth: u32,
+    max_depth: u32,
+    default_depth: u32,
+    custom_label: String,
+    custom_hint_prefix: String,
+    custom_hint_suffix: String,
+    tiers: Vec<EngineTier>,
+}
+
+fn engine_policy() -> &'static EnginePolicy {
+    static POLICY: std::sync::OnceLock<EnginePolicy> = std::sync::OnceLock::new();
+    POLICY.get_or_init(|| {
+        let policy: EnginePolicy = serde_json::from_str(include_str!("../engine-policy.json"))
+            .expect("bundled engine policy must be valid JSON");
+        assert!(
+            policy.min_depth <= policy.default_depth
+                && policy.default_depth <= policy.max_depth
+                && !policy.tiers.is_empty()
+                && policy
+                    .tiers
+                    .iter()
+                    .all(|tier| (policy.min_depth..=policy.max_depth).contains(&tier.depth)),
+            "bundled engine policy must have valid depth bounds and tiers"
+        );
+        policy
+    })
+}
+
+fn restored_engine(mode: Mode, stored_depth: u32) -> EngineTier {
+    let policy = engine_policy();
+    let depth = if mode == Mode::Depth {
+        stored_depth.clamp(policy.min_depth, policy.max_depth)
+    } else {
+        policy.default_depth
+    };
+    policy
+        .tiers
+        .iter()
+        .find(|tier| tier.depth == depth)
+        .cloned()
+        .unwrap_or_else(|| EngineTier {
+            id: "custom".into(),
+            depth,
+            label: policy.custom_label.clone(),
+            hint: format!(
+                "{}{depth}{}",
+                policy.custom_hint_prefix, policy.custom_hint_suffix
+            ),
+        })
+}
+
 fn review_config(stored: StoredGame) -> Result<ReviewConfig> {
     let review = normalize(serde_json::from_str(&stored.review_json).map_err(|e| {
         ReviewError::with_source(ReviewErrorCode::InvalidPayload, "games.decode", e)
@@ -237,52 +291,13 @@ fn review_config(stored: StoredGame) -> Result<ReviewConfig> {
         "auto-deep" => AnalysisKind::Deep,
         _ => AnalysisKind::Manual,
     };
-    let game = core::extract(&stored.pgn);
-    let meta = game.map(|g| g.meta).unwrap_or(PgnMeta {
-        white: stored.summary.white,
-        black: stored.summary.black,
-        white_elo: None,
-        black_elo: None,
-        event: None,
-        result: stored.summary.result,
-        plies: stored.summary.plies as usize,
-    });
-    let depth = if stored.summary.mode == Mode::Depth {
-        stored.summary.depth.clamp(15, 25)
-    } else {
-        20
-    };
-    let (tier, label, hint) = match depth {
-        15 => (
-            "fast",
-            "Rápido",
-            "Pré-visualização rápida dos lances críticos.",
-        ),
-        20 => (
-            "balanced",
-            "Equilibrado",
-            "Bom equilíbrio entre qualidade e tempo.",
-        ),
-        25 => (
-            "deep",
-            "Profundo",
-            "Análise profunda, mais lenta por lance.",
-        ),
-        _ => ("custom", "Personalizado", ""),
-    };
+    let game = core::extract(&stored.pgn)?;
+    validate_game(&review, &game)?;
+    let meta = game.meta;
     Ok(ReviewConfig {
         pgn: stored.pgn,
         meta,
-        engine: EngineTier {
-            id: tier.into(),
-            depth,
-            label: label.into(),
-            hint: if tier == "custom" {
-                format!("Profundidade fixa em d{depth}.")
-            } else {
-                hint.into()
-            },
-        },
+        engine: restored_engine(stored.summary.mode, stored.summary.depth),
         mode: stored.summary.mode,
         analysis_kind: kind,
         movetime_ms: if stored.summary.mode == Mode::Time && kind == AnalysisKind::Manual {

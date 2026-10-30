@@ -1,7 +1,8 @@
+import enginePolicy from '../../src-tauri/src/review/engine-policy.json'
 import { ENGINE_TIERS, type EngineTier } from '../types'
 
-export const MIN_DEPTH = 15
-export const MAX_DEPTH = 25
+export const MIN_DEPTH = enginePolicy.minDepth
+export const MAX_DEPTH = enginePolicy.maxDepth
 
 /**
  * Resolve um `EngineTier` para qualquer profundidade entre MIN_DEPTH e
@@ -15,8 +16,8 @@ export function resolveEngineTier(depth: number): EngineTier {
   if (matched) return matched
   return {
     id: 'custom',
-    label: 'Personalizado',
+    label: enginePolicy.customLabel,
     depth: clamped,
-    hint: `Profundidade fixa em d${clamped}.`,
+    hint: `${enginePolicy.customHintPrefix}${clamped}${enginePolicy.customHintSuffix}`,
   }
 }

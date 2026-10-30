@@ -194,15 +194,33 @@ fn history_conversion_preserves_metadata_fallback_and_decode_errors() {
         review_json,
     };
     let json = serde_json::to_string(&review).unwrap();
+    let mut custom_stored = stored(config.pgn.clone(), json.clone());
+    let custom_depth = (engine_policy().min_depth..=engine_policy().max_depth)
+        .find(|depth| {
+            engine_policy()
+                .tiers
+                .iter()
+                .all(|tier| tier.depth != *depth)
+        })
+        .unwrap();
+    custom_stored.summary.depth = custom_depth;
+    let custom = review_config(custom_stored).unwrap();
+    assert_eq!(custom.engine.depth, custom_depth);
+    assert_eq!(custom.engine.label, engine_policy().custom_label);
+    let mut timed_stored = stored(config.pgn.clone(), json.clone());
+    timed_stored.summary.mode = Mode::Time;
+    timed_stored.summary.depth = 1000;
+    let timed = review_config(timed_stored).unwrap();
+    assert_eq!(timed.engine.depth, engine_policy().default_depth);
+    assert_eq!(timed.movetime_ms, Some(1000));
     let current = review_config(stored(config.pgn, json.clone())).unwrap();
     assert_eq!(current.meta.white, "Alice");
     assert_eq!(
         serde_json::to_value(current.initial_result.unwrap()).unwrap(),
         serde_json::to_value(&review).unwrap()
     );
-    let fallback = review_config(stored("1. e5".into(), json)).unwrap();
-    assert_eq!(fallback.meta.white, "Legacy white");
-    assert_eq!(fallback.meta.black, "Legacy black");
+    let fallback = review_config(stored("1. e5".into(), json));
+    assert!(fallback.is_err());
     let error = review_config(stored("1. e4".into(), "{".into())).unwrap_err();
     assert_eq!(error.code, ReviewErrorCode::InvalidPayload);
     assert_eq!(error.operation, "games.decode");
@@ -219,6 +237,7 @@ fn raw_line(multipv: u32, cp: i32, depth: u32) -> crate::review::types::RawLine 
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn store_candidate<R: tauri::Runtime>(
     app: &tauri::App<R>,
     fen: &str,
@@ -362,4 +381,37 @@ async fn lookup_selects_first_valid_covering_candidate_and_rejects_all_invalid()
         .await
         .unwrap()[0]
         .is_none());
+}
+
+#[test]
+fn restored_engine_uses_bundled_policy_for_presets_bounds_and_custom_depth() {
+    let policy = engine_policy();
+    for tier in &policy.tiers {
+        let restored = restored_engine(Mode::Depth, tier.depth);
+        assert_eq!(restored.id, tier.id);
+        assert_eq!(restored.label, tier.label);
+        assert_eq!(restored.hint, tier.hint);
+    }
+    assert_eq!(restored_engine(Mode::Depth, 0).depth, policy.min_depth);
+    assert_eq!(
+        restored_engine(Mode::Depth, u32::MAX).depth,
+        policy.max_depth
+    );
+    assert_eq!(
+        restored_engine(Mode::Time, 1234).depth,
+        policy.default_depth
+    );
+    let custom_depth = (policy.min_depth..=policy.max_depth)
+        .find(|depth| policy.tiers.iter().all(|tier| tier.depth != *depth))
+        .expect("policy must offer a custom depth for this test");
+    let custom = restored_engine(Mode::Depth, custom_depth);
+    assert_eq!(custom.id, "custom");
+    assert_eq!(custom.label, policy.custom_label);
+    assert_eq!(
+        custom.hint,
+        format!(
+            "{}{custom_depth}{}",
+            policy.custom_hint_prefix, policy.custom_hint_suffix
+        )
+    );
 }
