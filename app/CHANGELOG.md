@@ -1,17 +1,10 @@
 # Changelog
 
-## [2.4.0](https://github.com/PedrFelip/EngineRoom/compare/v2.3.2...v2.4.0) (2026-10-30)
-
-
-### Funcionalidades
-
-* **updates:** melhora alerta de erro e adiciona download pelo GitHub ([ae4abfb](https://github.com/PedrFelip/EngineRoom/commit/ae4abfb0f379ca799fbb8eb1337d0b17bf761877))
-
+## [2.3.3](https://github.com/PedrFelip/EngineRoom/compare/v2.3.2...v2.3.3) (2026-10-30)
 
 ### Correções
 
-* corrige URLs e diagnóstico de atualizações ([3ae809e](https://github.com/PedrFelip/EngineRoom/commit/3ae809ec4f84f322ac0bb678b280bf98b6f1d245))
-* corrige URLs e diagnóstico de atualizações ([#69](https://github.com/PedrFelip/EngineRoom/issues/69)) ([6bc1d0f](https://github.com/PedrFelip/EngineRoom/commit/6bc1d0ff7826bbd60bbe7e3dfa4610b5487afda6))
+- Corrige a atualização do aplicativo e melhora o diagnóstico de erros. ([#69](https://github.com/PedrFelip/EngineRoom/pull/69))
 
 ## [2.3.2](https://github.com/PedrFelip/EngineRoom/compare/v2.3.1...v2.3.2) (2026-10-29)
 
