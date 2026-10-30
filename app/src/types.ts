@@ -1,3 +1,5 @@
+import enginePolicy from '../src-tauri/src/review/engine-policy.json'
+
 export type EngineTierId = 'fast' | 'balanced' | 'deep' | 'custom'
 
 /** Modo de análise: profundidade fixa ou tempo fixo por lance. */
@@ -13,26 +15,7 @@ export interface EngineTier {
   hint: string
 }
 
-export const ENGINE_TIERS: EngineTier[] = [
-  {
-    id: 'fast',
-    label: 'Rápido',
-    depth: 15,
-    hint: 'Pré-visualização rápida dos lances críticos.',
-  },
-  {
-    id: 'balanced',
-    label: 'Equilibrado',
-    depth: 20,
-    hint: 'Bom equilíbrio entre qualidade e tempo.',
-  },
-  {
-    id: 'deep',
-    label: 'Profundo',
-    depth: 25,
-    hint: 'Análise profunda, mais lenta por lance.',
-  },
-]
+export const ENGINE_TIERS: EngineTier[] = enginePolicy.tiers as EngineTier[]
 
 export interface PgnMeta {
   white: string
@@ -84,78 +67,12 @@ export interface GameCursor {
   id: number
 }
 
-/** Classificação de um lance, no vocabulário pt-BR do projeto. */
-export type Classification =
-  | 'livro'
-  | 'melhor'
-  | 'excelente'
-  | 'bom'
-  | 'imprecisao'
-  | 'erro'
-  | 'blunder'
-
-/** Fase do jogo inferida a partir do FEN (material não-peão + heurísticas de desenvolvimento/contato). */
-export type Phase = 'opening' | 'middlegame' | 'endgame'
-
-/** Resultado da análise do engine numa única posição. */
-export interface PositionAnalysis {
-  triageLines?: PvLine[]
-  /** Orçamento da busca ao vivo ou do refinamento; ausente em revisões antigas. */
-  search?: {
-    purpose: 'playback' | 'refinement'
-    movetimeMs: number
-    multipv: number
-  }
-  ply: number
-  fen: string
-  phase: Phase
-  depth: number
-  cp: number
-  winPct: number
-  pv: string[]
-  lines: PvLine[]
-}
-
-/** Uma linha candidata (multipv) numa posição, normalizada p/ POV das brancas. */
-export interface PvLine {
-  depth?: number
-  multipv: number
-  san: string | null
-  cp: number
-  winPct: number
-  pv: string[]
-}
-
-/** Lance jogado com sua avaliação e classificação. */
-export interface MoveAnalysis {
-  ply: number
-  color: 'w' | 'b'
-  san: string
-  uci: string
-  fenBefore: string
-  classification: Classification
-  winPctBefore: number
-  winPctAfter: number
-  winPctLoss: number
-  /** Perda em centipawns contra o melhor lance do Stockfish. */
-  cpLoss: number
-  bestUci: string | null
-  isBook: boolean
-  eco: { code: string; name: string } | null
-}
-
-/** Precisão agregada (0–100) por cor. */
-export interface AccuracyByColor {
-  white: number
-  black: number
-}
-
-/** Revisão completa de uma partida. */
-export interface ReviewResult {
-  positions: PositionAnalysis[]
-  moves: MoveAnalysis[]
-  /** Versão do algoritmo usado para produzir `accuracy`. Ausente em revisões antigas. */
-  accuracyModel?: string
-  accuracy: AccuracyByColor
-  accuracyByPhase: Record<Phase, AccuracyByColor>
-}
+// Live review shapes are derived from the validated Rust protocol. Historical
+// reviews are normalized by Rust before they reach this boundary.
+export type Classification = import('./lib/review-protocol').Classification
+export type Phase = import('./lib/review-protocol').Phase
+export type PositionAnalysis = import('./lib/review-protocol').PositionAnalysis
+export type PvLine = import('./lib/review-protocol').PvLine
+export type MoveAnalysis = ReviewResult['moves'][number]
+export type AccuracyByColor = ReviewResult['accuracy']
+export type ReviewResult = import('./lib/review-protocol').ReviewResult

@@ -103,7 +103,6 @@ pub fn validate_review(review: &ReviewResult) -> Result<()> {
         })
         && review.moves.iter().enumerate().all(|(i, m)| {
             m.played.ply == i + 1
-                && matches!(m.played.color.as_str(), "w" | "b")
                 && [m.win_pct_before, m.win_pct_after, m.win_pct_loss, m.cp_loss]
                     .iter()
                     .all(|v| v.is_finite())
@@ -115,6 +114,41 @@ pub fn validate_review(review: &ReviewResult) -> Result<()> {
             ReviewErrorCode::InvalidPayload,
             "review.validate",
             "Revisão inválida.",
+        ))
+    }
+}
+
+/// Restored reviews must describe the PGN mainline. Legacy JSON may omit newer
+/// analysis fields, but chess positions and moves must still match the game.
+pub fn validate_game(review: &ReviewResult, game: &core::Game) -> Result<()> {
+    validate_review(review)?;
+    let matches_game = review.positions.len() == game.fens.len()
+        && review
+            .positions
+            .iter()
+            .zip(&game.fens)
+            .all(|(saved, expected)| {
+                core::position(&saved.fen).is_ok_and(|position| core::fen(&position) == *expected)
+            })
+        && review
+            .moves
+            .iter()
+            .zip(&game.moves)
+            .all(|(saved, expected)| {
+                let played = &saved.played;
+                played.color == expected.color
+                    && played.san == expected.san
+                    && played.uci == expected.uci
+                    && core::position(&played.fen_before)
+                        .is_ok_and(|position| core::fen(&position) == expected.fen_before)
+            });
+    if matches_game {
+        Ok(())
+    } else {
+        Err(ReviewError::new(
+            ReviewErrorCode::InvalidPayload,
+            "review.restore",
+            "Revisão salva não corresponde ao PGN.",
         ))
     }
 }

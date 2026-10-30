@@ -8,31 +8,18 @@ import {
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { adaptiveProfileForKind } from '../../lib/adaptive-analysis'
-import { runUi } from '../../lib/effect/ui-runtime'
 import { resolveEngineTier } from '../../lib/engine-tier'
-import {
-  deleteGame,
-  getGame,
-  getReviewConfig,
-  listGames,
-} from '../../lib/games'
 import { type PgnParseResult, parsePgn, resultLabel } from '../../lib/pgn'
-import type {
-  AnalysisKind,
-  EngineMode,
-  GameCursor,
-  GameSummary,
-  ReviewConfig,
-} from '../../types'
+import type { AnalysisKind, EngineMode, ReviewConfig } from '../../types'
 import EngineTierSelector, { DEFAULT_TIME_MS } from '../EngineTierSelector'
 import PgnImporter from '../PgnImporter'
 import ReviewedGamesList from '../ReviewedGamesList'
 import SettingsModal from '../settings/SettingsModal'
 import { Button } from '../ui/button'
 import { SegmentedControl } from '../ui/segmented-control'
-
 import HomeHeader from './HomeHeader'
 import HowItWorks from './HowItWorks'
+import { useHistoryController } from './use-history-controller'
 
 interface Props {
   active?: boolean
@@ -44,8 +31,6 @@ interface PgnValidation {
   result: PgnParseResult
 }
 
-const HISTORY_PAGE_SIZE = 50
-
 function initialPgnValidation(): PgnValidation {
   return { source: '', result: parsePgn('') }
 }
@@ -54,10 +39,6 @@ export default function HomePage({ onStart, active = true }: Props) {
   const [view, setView] = useState<'new' | 'history'>('new')
   const [step, setStep] = useState<'import' | 'configure'>('import')
   const [readingPgn, setReadingPgn] = useState(false)
-  const historyRequest = useRef<AbortController | null>(null)
-  const [loadingHistory, setLoadingHistory] = useState(true)
-  const [pendingGame, setPendingGame] = useState<number | null>(null)
-  const historyAction = useRef(false)
   const pageTitle = useRef<HTMLHeadingElement>(null)
   const stepTitle = useRef<HTMLHeadingElement>(null)
   const previousLocation = useRef({ view, step, active })
@@ -80,13 +61,6 @@ export default function HomePage({ onStart, active = true }: Props) {
   const [lines, setLines] = useState(1)
   const [analysisKind, setAnalysisKind] = useState<AnalysisKind>('auto-fast')
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [games, setGames] = useState<GameSummary[]>([])
-  const [gamesTotal, setGamesTotal] = useState(0)
-  const [nextGamesCursor, setNextGamesCursor] = useState<GameCursor | null>(
-    null,
-  )
-  const [loadingMoreGames, setLoadingMoreGames] = useState(false)
-  const [historyError, setHistoryError] = useState<string | null>(null)
   const [validation, setValidation] =
     useState<PgnValidation>(initialPgnValidation)
 
@@ -106,143 +80,31 @@ export default function HomePage({ onStart, active = true }: Props) {
   const plies = canStart && parse.ok ? parse.meta.plies : 0
   const adaptiveProfile = adaptiveProfileForKind(analysisKind)
 
-  const invalidateHistory = useCallback(() => {
-    historyRequest.current?.abort()
-    historyRequest.current = null
-    setLoadingMoreGames(false)
-    setLoadingHistory(false)
-  }, [])
-
-  const loadHistory = useCallback(() => {
-    invalidateHistory()
-    const controller = new AbortController()
-    historyRequest.current = controller
-    setLoadingHistory(true)
-    setHistoryError(null)
-    void runUi(listGames(HISTORY_PAGE_SIZE), controller.signal)
-      .then((page) => {
-        if (controller.signal.aborted) return
-        setGames(page.games)
-        setGamesTotal(page.total)
-        setNextGamesCursor(page.nextCursor)
-      })
-      .catch((error) => {
-        if (controller.signal.aborted) return
-        console.warn('Falha ao listar partidas analisadas:', error)
-        setHistoryError('Não foi possível carregar o histórico.')
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setLoadingHistory(false)
-      })
-  }, [invalidateHistory])
-
   useEffect(() => {
-    loadHistory()
-    return () => historyRequest.current?.abort()
-  }, [loadHistory])
-
-  const clearGames = useCallback(() => {
-    invalidateHistory()
-    setGames([])
-    setGamesTotal(0)
-    setNextGamesCursor(null)
-    setHistoryError(null)
-  }, [invalidateHistory])
-
-  const wasActive = useRef(active)
-  useEffect(() => {
-    if (!active) {
-      setSettingsOpen(false)
-      invalidateHistory()
-    } else if (!wasActive.current) {
-      loadHistory()
-    }
-    wasActive.current = active
-  }, [active, invalidateHistory, loadHistory])
+    if (!active) setSettingsOpen(false)
+  }, [active])
 
   const importPgn = useCallback(function importPgn(nextPgn: string): void {
     setPgn(nextPgn)
     setValidation({ source: nextPgn, result: parsePgn(nextPgn) })
   }, [])
 
-  const openStored = useCallback(
-    function openStored(id: number): void {
-      if (historyAction.current) return
-      historyAction.current = true
-      setPendingGame(id)
-      setHistoryError(null)
-      void runUi(getReviewConfig(id))
-        .then((config) => {
-          if (config) onStart(config)
-          else setHistoryError('Esta partida não está mais disponível.')
-        })
-        .catch((error) => {
-          console.warn('Falha ao abrir partida:', error)
-          setHistoryError(
-            'Não foi possível abrir a revisão salva. Você pode reanalisar o PGN.',
-          )
-        })
-        .finally(() => {
-          historyAction.current = false
-          setPendingGame(null)
-        })
-    },
-    [onStart],
-  )
-
-  const removeStored = useCallback(
-    async (id: number): Promise<boolean> => {
-      if (historyAction.current) return false
-      historyAction.current = true
-      invalidateHistory()
-      setPendingGame(id)
-      setHistoryError(null)
-      try {
-        await runUi(deleteGame(id))
-        setGames((previous) => previous.filter((game) => game.id !== id))
-        setGamesTotal((total) => Math.max(0, total - 1))
-        return true
-      } catch (error) {
-        console.warn('Falha ao excluir partida:', error)
-        setHistoryError('Não foi possível excluir a partida. Tente novamente.')
-        return false
-      } finally {
-        historyAction.current = false
-        setPendingGame(null)
-      }
-    },
-    [invalidateHistory],
-  )
-
-  const reanalyzeStored = useCallback(
-    function reanalyzeStored(id: number): void {
-      if (historyAction.current) return
-      historyAction.current = true
-      setPendingGame(id)
-      setHistoryError(null)
-      void runUi(getGame(id))
-        .then((game) => {
-          if (!game) {
-            setHistoryError('Esta partida não está mais disponível.')
-            return
-          }
-          importPgn(game.pgn)
-          setView('new')
-          setStep('configure')
-          window.scrollTo({ top: 0 })
-        })
-        .catch((error) => {
-          console.warn('Falha ao carregar partida:', error)
-          setHistoryError('Não foi possível carregar o PGN para reanálise.')
-        })
-        .finally(() => {
-          historyAction.current = false
-          setPendingGame(null)
-        })
-    },
-    [importPgn],
-  )
-
+  const {
+    games,
+    gamesTotal,
+    nextGamesCursor,
+    loadingHistory,
+    loadingMoreGames,
+    pendingGame,
+    historyError,
+    clearGames,
+    setHistoryError,
+    loadHistory,
+    openStored,
+    removeStored,
+    reanalyzeStored,
+    loadMoreGames,
+  } = useHistoryController({ active, onStart, importPgn, setView, setStep })
   const hasGames = games.length > 0
   const configuring = view === 'new' && step === 'configure'
   let pageHeading =
@@ -250,38 +112,6 @@ export default function HomePage({ onStart, active = true }: Props) {
       ? 'Cada partida, uma descoberta.'
       : 'Seu jogo, em perspectiva.'
   if (configuring) pageHeading = 'Prepare sua análise'
-
-  const loadMoreGames = useCallback(
-    function loadMoreGames(): void {
-      if (!nextGamesCursor || loadingMoreGames || historyAction.current) return
-      const controller = new AbortController()
-      historyRequest.current?.abort()
-      historyRequest.current = controller
-      setHistoryError(null)
-      setLoadingMoreGames(true)
-      void runUi(
-        listGames(HISTORY_PAGE_SIZE, nextGamesCursor),
-        controller.signal,
-      )
-        .then((page) => {
-          if (controller.signal.aborted) return
-          setGames((previous) => [...previous, ...page.games])
-          setGamesTotal(page.total)
-          setNextGamesCursor(page.nextCursor)
-        })
-        .catch((error) => {
-          if (controller.signal.aborted) return
-          console.warn('Falha ao carregar mais partidas analisadas:', error)
-          setHistoryError(
-            'Não foi possível carregar mais partidas. Tente novamente.',
-          )
-        })
-        .finally(() => {
-          if (!controller.signal.aborted) setLoadingMoreGames(false)
-        })
-    },
-    [loadingMoreGames, nextGamesCursor],
-  )
 
   function startReview(): void {
     if (!canStart || !parse.ok) return

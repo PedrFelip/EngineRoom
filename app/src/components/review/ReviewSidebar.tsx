@@ -7,6 +7,7 @@ import {
 import { memo, type ReactNode, useState } from 'react'
 import { useStore } from 'zustand'
 import type { ReviewStore } from '../../lib/review-store'
+import { selectActiveVariation } from '../../lib/review-store'
 import { useSettings } from '../../lib/settings-context'
 import MoveList from '../MoveList'
 import ReviewSummary from '../ReviewSummary'
@@ -35,7 +36,7 @@ export default memo(function ReviewSidebar({
     !analysisEnabled && selectedView === 'analysis' ? 'moves' : selectedView
   const result = useStore(store, (state) => state.result)
   const currentPly = useStore(store, (state) => state.currentPly)
-  const variation = useStore(store, (state) => state.variation)
+  const variation = useStore(store, selectActiveVariation)
   const variations = useStore(store, (state) => state.variations)
   const showVariationFeedback = useSettings(
     (state) => state.settings.reviewMoveFeedbackEnabled,

@@ -165,3 +165,9 @@ export const ProbeResultSchema = S.Struct({
   name: S.NullOr(S.String),
   error: S.optional(S.String),
 })
+
+export type Classification = typeof Classification.Type
+export type Phase = typeof Phase.Type
+export type PvLine = typeof PvLineSchema.Type
+export type PositionAnalysis = typeof PositionAnalysisSchema.Type
+export type ReviewResult = typeof ReviewResultSchema.Type
