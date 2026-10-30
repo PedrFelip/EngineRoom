@@ -3,6 +3,7 @@ import {
   DEFAULT_SETTINGS,
   loadSettings,
   recommendedReviewThreads,
+  reviewThreadSettings,
   saveSettings,
 } from './settings'
 
@@ -133,5 +134,12 @@ describe('configurações da análise na revisão', () => {
   it('recomenda cerca de um terço dos processadores lógicos', () => {
     expect(recommendedReviewThreads(32)).toBe(11)
     expect(recommendedReviewThreads(2)).toBe(1)
+    expect(reviewThreadSettings(true, 32)).toEqual({
+      reviewThreadsAuto: true,
+      reviewThreads: 11,
+    })
+    expect(reviewThreadSettings(false, 32)).toEqual({
+      reviewThreadsAuto: false,
+    })
   })
 })

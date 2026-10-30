@@ -3,14 +3,14 @@ use super::{
     engine::Task,
     types::{RawPosition, Result, ReviewConfig, ReviewResult},
 };
-use crate::db::mode::Mode;
+use crate::review::types::Mode;
 
 mod cache_entry;
 mod saved_review;
 mod sqlite;
 
 pub use cache_entry::shape;
-pub use saved_review::{normalize, validate_review};
+pub use saved_review::{normalize, validate_game, validate_review};
 pub use sqlite::{
     __cmd__games_get_review_config, __tauri_command_name_games_get_review_config,
     games_get_review_config, SqliteRepository,

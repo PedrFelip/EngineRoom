@@ -9,7 +9,7 @@ use super::{
     scoring,
     types::*,
 };
-use crate::db::mode::Mode;
+use crate::review::types::Mode;
 use std::collections::VecDeque;
 use tokio::task::JoinSet;
 

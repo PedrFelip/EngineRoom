@@ -1,4 +1,5 @@
 import { Schema } from 'effect'
+import enginePolicy from '../../src-tauri/src/review/engine-policy.json'
 import { normalizeChessComUsername } from './chess-com-account'
 import { SettingsInputSchema } from './effect/schemas'
 
@@ -51,7 +52,21 @@ function clampInteger(
 }
 
 export function recommendedReviewThreads(logicalCores: number): number {
-  return Math.max(1, Math.ceil(logicalCores / 3))
+  return Math.max(1, Math.ceil(logicalCores / enginePolicy.threadCoreDivisor))
+}
+
+/** Compute the persisted thread settings for either automatic or manual sizing. */
+export function reviewThreadSettings(
+  auto: boolean,
+  logicalCores: number,
+): Pick<Settings, 'reviewThreadsAuto'> &
+  Partial<Pick<Settings, 'reviewThreads'>> {
+  return auto
+    ? {
+        reviewThreadsAuto: true,
+        reviewThreads: recommendedReviewThreads(logicalCores),
+      }
+    : { reviewThreadsAuto: false }
 }
 
 export function loadSettings(): Settings {

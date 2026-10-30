@@ -1,0 +1,29 @@
+{
+  "minDepth": 15,
+  "maxDepth": 25,
+  "defaultDepth": 20,
+  "customLabel": "Personalizado",
+  "customHintPrefix": "Profundidade fixa em d",
+  "customHintSuffix": ".",
+  "threadCoreDivisor": 3,
+  "tiers": [
+    {
+      "id": "fast",
+      "label": "Rápido",
+      "depth": 15,
+      "hint": "Pré-visualização rápida dos lances críticos."
+    },
+    {
+      "id": "balanced",
+      "label": "Equilibrado",
+      "depth": 20,
+      "hint": "Bom equilíbrio entre qualidade e tempo."
+    },
+    {
+      "id": "deep",
+      "label": "Profundo",
+      "depth": 25,
+      "hint": "Análise profunda, mais lenta por lance."
+    }
+  ]
+}

@@ -1,3 +1,4 @@
+import { selectActiveVariation } from './review-store'
 /**
  * Ponte React da revisão: o estado e as transições moram no `ReviewStore`
  * (puro) e a orquestração de I/O na `ReviewSession` (seam `Backend`); este
@@ -60,7 +61,7 @@ export function useReview(config: ReviewConfig): UseReview {
   const [store] = useState(createReviewStore)
   const result = useStore(store, (state) => state.result)
   const currentPly = useStore(store, (state) => state.currentPly)
-  const variation = useStore(store, (state) => state.variation)
+  const variation = useStore(store, selectActiveVariation)
 
   const [sessionState, setSessionState] = useState<ReviewSessionState>({
     status: 'running',
