@@ -10,6 +10,7 @@ import {
 } from './updates'
 
 type Status = 'checking' | 'current' | 'available' | 'unsupported' | 'error'
+export type UpdateErrorKind = 'check' | 'install' | 'restart'
 
 interface UpdateState {
   status: Status
@@ -17,9 +18,11 @@ interface UpdateState {
   progress: UpdateProgress | null
   busy: boolean
   error: string | null
+  errorKind: UpdateErrorKind | null
   check: () => Effect.Effect<void>
   install: () => Effect.Effect<void>
   restart: () => Effect.Effect<void>
+  dismissError: () => void
 }
 
 interface UpdatePort {
@@ -40,6 +43,7 @@ export function createUpdatesStore(
     progress: null,
     busy: false,
     error: null,
+    errorKind: null,
     check: () =>
       Effect.suspend(() => {
         if (checked) return Effect.void
@@ -50,7 +54,7 @@ export function createUpdatesStore(
               let status: Status = 'current'
               if (!info.supported) status = 'unsupported'
               else if (info.availableVersion) status = 'available'
-              set({ info, status })
+              set({ info, status, error: null, errorKind: null })
             }),
           ),
           Effect.asVoid,
@@ -58,6 +62,7 @@ export function createUpdatesStore(
             Effect.sync(() => {
               set({
                 status: 'error',
+                errorKind: 'check',
                 error:
                   'Não foi possível verificar as atualizações. A próxima verificação será ao abrir o app novamente.',
               })
@@ -76,6 +81,7 @@ export function createUpdatesStore(
         set({
           busy: true,
           error: null,
+          errorKind: null,
           progress: { status: 'downloading', downloaded: 0, total: null },
         })
         // Installation must finish even if the UI unmounts after download starts.
@@ -103,6 +109,7 @@ export function createUpdatesStore(
                     get().progress?.status === 'restartRequired'
                       ? get().progress
                       : null,
+                  errorKind: 'install',
                   error:
                     get().progress?.status === 'restartRequired'
                       ? 'Não foi possível iniciar o instalador. Reinicie o app para continuar.'
@@ -118,10 +125,14 @@ export function createUpdatesStore(
       (port.restart ?? restartAfterFailedUpdate)().pipe(
         Effect.catchCause(() =>
           Effect.sync(() =>
-            set({ error: 'Feche e abra o EngineRoom para continuar.' }),
+            set({
+              errorKind: 'restart',
+              error: 'Feche e abra o EngineRoom para continuar.',
+            }),
           ),
         ),
       ),
+    dismissError: () => set({ error: null, errorKind: null }),
   }))
 }
 

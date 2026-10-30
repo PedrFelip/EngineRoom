@@ -28,6 +28,7 @@ import EngineTierSelector, { DEFAULT_TIME_MS } from '../EngineTierSelector'
 import PgnImporter from '../PgnImporter'
 import ReviewedGamesList from '../ReviewedGamesList'
 import SettingsModal from '../settings/SettingsModal'
+import UpdateAlert from '../UpdateAlert'
 import { Button } from '../ui/button'
 import { SegmentedControl } from '../ui/segmented-control'
 
@@ -307,6 +308,8 @@ export default function HomePage({ onStart, active = true }: Props) {
         }}
         onOpenSettings={() => setSettingsOpen(true)}
       />
+
+      <UpdateAlert />
 
       {view === 'history' && historyError && (
         <p

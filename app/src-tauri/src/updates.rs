@@ -8,6 +8,19 @@ use tauri::utils::{config::BundleType, platform::bundle_type};
 use tauri_plugin_updater::{Update, UpdaterExt};
 use tokio::sync::{Mutex, OnceCell};
 
+fn release_page_url(version: Option<&str>) -> String {
+    let version = version.filter(|version| {
+        !version.is_empty()
+            && version.chars().all(|character| {
+                character.is_ascii_alphanumeric() || matches!(character, '.' | '-')
+            })
+    });
+    match version {
+        Some(version) => format!("https://github.com/PedrFelip/EngineRoom/releases/tag/v{version}"),
+        None => "https://github.com/PedrFelip/EngineRoom/releases/latest".into(),
+    }
+}
+
 fn update_failure(error: &tauri_plugin_updater::Error, installing: bool) -> String {
     use tauri_plugin_updater::Error;
     match error {
@@ -81,6 +94,22 @@ mod bundle_tests {
         assert!(update_failure(&missing, false).contains("não foi encontrado"));
         let denied = tauri_plugin_updater::Error::Io(std::io::ErrorKind::PermissionDenied.into());
         assert!(update_failure(&denied, true).contains("permissão"));
+    }
+
+    #[test]
+    fn release_page_uses_the_available_version_and_rejects_unsafe_values() {
+        assert_eq!(
+            release_page_url(Some("2.3.2")),
+            "https://github.com/PedrFelip/EngineRoom/releases/tag/v2.3.2"
+        );
+        assert_eq!(
+            release_page_url(None),
+            "https://github.com/PedrFelip/EngineRoom/releases/latest"
+        );
+        assert_eq!(
+            release_page_url(Some("../other")),
+            "https://github.com/PedrFelip/EngineRoom/releases/latest"
+        );
     }
 
     #[test]
@@ -188,6 +217,11 @@ pub async fn app_update_install(
     crate::shutdown(&app).await;
     app.request_restart();
     Ok(())
+}
+
+#[tauri::command]
+pub fn app_update_open_release_page(version: Option<String>) -> Result<(), String> {
+    open::that_detached(release_page_url(version.as_deref())).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
