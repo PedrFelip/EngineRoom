@@ -8,6 +8,33 @@ use tauri::utils::{config::BundleType, platform::bundle_type};
 use tauri_plugin_updater::{Update, UpdaterExt};
 use tokio::sync::{Mutex, OnceCell};
 
+fn release_page_url(version: Option<&str>) -> String {
+    let version = version.filter(|version| {
+        !version.is_empty()
+            && version.chars().all(|character| {
+                character.is_ascii_alphanumeric() || matches!(character, '.' | '-')
+            })
+    });
+    match version {
+        Some(version) => format!("https://github.com/PedrFelip/EngineRoom/releases/tag/v{version}"),
+        None => "https://github.com/PedrFelip/EngineRoom/releases/latest".into(),
+    }
+}
+
+fn update_failure(error: &tauri_plugin_updater::Error, installing: bool) -> String {
+    use tauri_plugin_updater::Error;
+    match error {
+        Error::Network(message) if message.contains("404") =>
+            "O arquivo da atualização não foi encontrado no servidor. Tente novamente mais tarde.".into(),
+        Error::Minisign(_) | Error::Base64(_) | Error::SignatureUtf8(_) | Error::SignedVersionMismatch { .. } | Error::MissingSignedVersion =>
+            "Não foi possível validar a assinatura da atualização. Tente novamente mais tarde.".into(),
+        Error::Io(error) if error.kind() == std::io::ErrorKind::PermissionDenied =>
+            "Sem permissão para instalar a atualização. Verifique as permissões da pasta do aplicativo.".into(),
+        _ if installing => format!("Não foi possível instalar a atualização: {error}"),
+        _ => format!("Não foi possível baixar ou validar a atualização: {error}"),
+    }
+}
+
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateInfo {
@@ -58,6 +85,32 @@ fn supports_bundle(bundle: Option<BundleType>) -> bool {
 #[cfg(test)]
 mod bundle_tests {
     use super::*;
+
+    #[test]
+    fn update_failures_distinguish_missing_download_and_permission() {
+        let missing = tauri_plugin_updater::Error::Network(
+            "Download request failed with status: 404 Not Found".into(),
+        );
+        assert!(update_failure(&missing, false).contains("não foi encontrado"));
+        let denied = tauri_plugin_updater::Error::Io(std::io::ErrorKind::PermissionDenied.into());
+        assert!(update_failure(&denied, true).contains("permissão"));
+    }
+
+    #[test]
+    fn release_page_uses_the_available_version_and_rejects_unsafe_values() {
+        assert_eq!(
+            release_page_url(Some("2.3.2")),
+            "https://github.com/PedrFelip/EngineRoom/releases/tag/v2.3.2"
+        );
+        assert_eq!(
+            release_page_url(None),
+            "https://github.com/PedrFelip/EngineRoom/releases/latest"
+        );
+        assert_eq!(
+            release_page_url(Some("../other")),
+            "https://github.com/PedrFelip/EngineRoom/releases/latest"
+        );
+    }
 
     #[test]
     fn only_published_package_types_are_supported() {
@@ -141,7 +194,7 @@ pub async fn app_update_install(
             || {},
         )
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| update_failure(&e, false))?;
     let installation = state.installation.begin()?;
     let _ = on_progress.send(UpdateProgress::Installing);
     let update = update.clone();
@@ -151,7 +204,7 @@ pub async fn app_update_install(
     })
     .await
     .map_err(|e| e.to_string())
-    .and_then(|result| result.map_err(|e| e.to_string()));
+    .and_then(|result| result.map_err(|e| update_failure(&e, true)));
     if let Err(error) = installed {
         use tauri::Manager;
         // Windows may reject the installer after the before-exit hook drained resources.
@@ -164,6 +217,11 @@ pub async fn app_update_install(
     crate::shutdown(&app).await;
     app.request_restart();
     Ok(())
+}
+
+#[tauri::command]
+pub fn app_update_open_release_page(version: Option<String>) -> Result<(), String> {
+    open::that_detached(release_page_url(version.as_deref())).map_err(|error| error.to_string())
 }
 
 #[tauri::command]

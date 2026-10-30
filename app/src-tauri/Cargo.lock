@@ -76,6 +76,7 @@ name = "app"
 version = "2.3.2"
 dependencies = [
  "criterion",
+ "open",
  "pgn-reader",
  "reqwest 0.12.28",
  "rusqlite",

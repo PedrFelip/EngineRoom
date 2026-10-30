@@ -1,7 +1,7 @@
 import { Deferred, Effect, Fiber } from 'effect'
 import { describe, expect, it, vi } from 'vitest'
 import { runUi } from './effect/ui-runtime'
-import type { UpdateInfo } from './updates'
+import { UpdateError, type UpdateInfo } from './updates'
 import { createUpdatesStore } from './updates-store'
 
 const info: UpdateInfo = {
@@ -12,6 +12,31 @@ const info: UpdateInfo = {
 }
 
 describe('atualizações do app', () => {
+  it('mostra o diagnóstico devolvido pelo atualizador', async () => {
+    const store = createUpdatesStore({
+      check: () => Effect.succeed(info),
+      install: () =>
+        Effect.fail(new UpdateError({ message: 'Arquivo não encontrado.' })),
+    })
+    await runUi(store.getState().check())
+    await runUi(store.getState().install())
+    expect(store.getState().error).toBe('Arquivo não encontrado.')
+    expect(store.getState().errorKind).toBe('install')
+  })
+
+  it('permite dispensar o aviso de erro sem perder a atualização disponível', async () => {
+    const store = createUpdatesStore({
+      check: () => Effect.succeed(info),
+      install: () =>
+        Effect.fail(new UpdateError({ message: 'Arquivo não encontrado.' })),
+    })
+    await runUi(store.getState().check())
+    await runUi(store.getState().install())
+    store.getState().dismissError()
+    expect(store.getState().error).toBeNull()
+    expect(store.getState().errorKind).toBeNull()
+    expect(store.getState().info?.availableVersion).toBe('2.2.0')
+  })
   it('consulta somente uma vez, inclusive após uma falha', async () => {
     const check = vi.fn(() => Effect.fail('offline'))
     const store = createUpdatesStore({ check, install: () => Effect.void })
@@ -19,6 +44,7 @@ describe('atualizações do app', () => {
     await runUi(store.getState().check())
     expect(check).toHaveBeenCalledTimes(1)
     expect(store.getState().status).toBe('error')
+    expect(store.getState().errorKind).toBe('check')
     expect(store.getState().busy).toBe(false)
   })
 

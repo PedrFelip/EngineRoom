@@ -59,6 +59,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             updates::app_update_check,
             updates::app_update_install,
+            updates::app_update_open_release_page,
             updates::app_update_restart,
             db::cache::cache_get,
             db::cache::cache_put,
