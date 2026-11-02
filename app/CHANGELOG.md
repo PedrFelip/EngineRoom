@@ -5,7 +5,7 @@
 
 ### Desempenho
 
-* reduzir alocações da pipeline Rust em até 43% ([#54](https://github.com/PedrFelip/EngineRoom/issues/54)) ([4f71698](https://github.com/PedrFelip/EngineRoom/commit/4f71698c9f6989a10aa9a359918cd16d1d0af9c5))
+- **Revisão de partidas:** reduz o trabalho de gerenciamento de memória durante o processamento das análises e a montagem das revisões automáticas. Em benchmarks isolados, algumas operações alocaram até 43% menos memória; o ganho de tempo na análise com Stockfish depende do cenário. ([#54](https://github.com/PedrFelip/EngineRoom/pull/54))
 
 ## [2.3.3](https://github.com/PedrFelip/EngineRoom/compare/v2.3.2...v2.3.3) (2026-10-30)
 
