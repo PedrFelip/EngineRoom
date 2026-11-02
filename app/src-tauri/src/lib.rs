@@ -1,3 +1,6 @@
+#[cfg(all(test, feature = "bench-alloc"))]
+mod bench_alloc;
+
 mod db;
 mod engine;
 mod imports;

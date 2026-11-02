@@ -1,0 +1,368 @@
+{
+  "cases": [
+    {
+      "adaptive": {
+        "classificationDisagreements": 0,
+        "meanWinPctError": 0.0
+      },
+      "elapsedMs": 5491,
+      "game": "sacrifice",
+      "plies": 5,
+      "positions": [
+        {
+          "cp": 99992,
+          "depth": 72,
+          "ply": 0,
+          "refined": true,
+          "triageDepth": 14
+        },
+        {
+          "cp": -99988,
+          "depth": 78,
+          "ply": 1,
+          "refined": true,
+          "triageDepth": 22
+        },
+        {
+          "cp": 99988,
+          "depth": 79,
+          "ply": 2,
+          "refined": true,
+          "triageDepth": 27
+        },
+        {
+          "cp": -99988,
+          "depth": 78,
+          "ply": 3,
+          "refined": true,
+          "triageDepth": 28
+        },
+        {
+          "cp": 99988,
+          "depth": 89,
+          "ply": 4,
+          "refined": true,
+          "triageDepth": 17
+        },
+        {
+          "cp": -3764,
+          "depth": 20,
+          "ply": 5,
+          "refined": false,
+          "triageDepth": null
+        }
+      ],
+      "profile": "auto-fast",
+      "referenceMs": 30714,
+      "triage": {
+        "classificationDisagreements": 0,
+        "meanWinPctError": 0.23682883973395027
+      }
+    },
+    {
+      "adaptive": {
+        "classificationDisagreements": 0,
+        "meanWinPctError": 0.0
+      },
+      "elapsedMs": 14569,
+      "game": "sacrifice",
+      "plies": 5,
+      "positions": [
+        {
+          "cp": 99992,
+          "depth": 84,
+          "ply": 0,
+          "refined": true,
+          "triageDepth": 15
+        },
+        {
+          "cp": -99988,
+          "depth": 71,
+          "ply": 1,
+          "refined": true,
+          "triageDepth": 27
+        },
+        {
+          "cp": 99988,
+          "depth": 99,
+          "ply": 2,
+          "refined": true,
+          "triageDepth": 48
+        },
+        {
+          "cp": -99988,
+          "depth": 102,
+          "ply": 3,
+          "refined": true,
+          "triageDepth": 56
+        },
+        {
+          "cp": 99988,
+          "depth": 103,
+          "ply": 4,
+          "refined": true,
+          "triageDepth": 15
+        },
+        {
+          "cp": -99985,
+          "depth": 93,
+          "ply": 5,
+          "refined": true,
+          "triageDepth": 24
+        }
+      ],
+      "profile": "auto-deep",
+      "referenceMs": 30714,
+      "triage": {
+        "classificationDisagreements": 0,
+        "meanWinPctError": 0.0
+      }
+    },
+    {
+      "adaptive": {
+        "classificationDisagreements": 0,
+        "meanWinPctError": 0.0
+      },
+      "elapsedMs": 5444,
+      "game": "exchange",
+      "plies": 5,
+      "positions": [
+        {
+          "cp": 99987,
+          "depth": 57,
+          "ply": 0,
+          "refined": true,
+          "triageDepth": 14
+        },
+        {
+          "cp": -99988,
+          "depth": 83,
+          "ply": 1,
+          "refined": true,
+          "triageDepth": 20
+        },
+        {
+          "cp": 99988,
+          "depth": 90,
+          "ply": 2,
+          "refined": true,
+          "triageDepth": 23
+        },
+        {
+          "cp": -99988,
+          "depth": 87,
+          "ply": 3,
+          "refined": true,
+          "triageDepth": 34
+        },
+        {
+          "cp": 99988,
+          "depth": 82,
+          "ply": 4,
+          "refined": true,
+          "triageDepth": 15
+        },
+        {
+          "cp": -99985,
+          "depth": 75,
+          "ply": 5,
+          "refined": true,
+          "triageDepth": 22
+        }
+      ],
+      "profile": "auto-fast",
+      "referenceMs": 30688,
+      "triage": {
+        "classificationDisagreements": 0,
+        "meanWinPctError": 1.6572763212259172
+      }
+    },
+    {
+      "adaptive": {
+        "classificationDisagreements": 0,
+        "meanWinPctError": 0.0
+      },
+      "elapsedMs": 14551,
+      "game": "exchange",
+      "plies": 5,
+      "positions": [
+        {
+          "cp": 99987,
+          "depth": 69,
+          "ply": 0,
+          "refined": true,
+          "triageDepth": 15
+        },
+        {
+          "cp": -99988,
+          "depth": 74,
+          "ply": 1,
+          "refined": true,
+          "triageDepth": 36
+        },
+        {
+          "cp": 99988,
+          "depth": 99,
+          "ply": 2,
+          "refined": true,
+          "triageDepth": 44
+        },
+        {
+          "cp": -99988,
+          "depth": 99,
+          "ply": 3,
+          "refined": true,
+          "triageDepth": 54
+        },
+        {
+          "cp": 99988,
+          "depth": 99,
+          "ply": 4,
+          "refined": true,
+          "triageDepth": 18
+        },
+        {
+          "cp": -99985,
+          "depth": 92,
+          "ply": 5,
+          "refined": true,
+          "triageDepth": 23
+        }
+      ],
+      "profile": "auto-deep",
+      "referenceMs": 30688,
+      "triage": {
+        "classificationDisagreements": 0,
+        "meanWinPctError": 0.8549390126580979
+      }
+    },
+    {
+      "adaptive": {
+        "classificationDisagreements": 0,
+        "meanWinPctError": 0.0
+      },
+      "elapsedMs": 5457,
+      "game": "promotion",
+      "plies": 5,
+      "positions": [
+        {
+          "cp": 99992,
+          "depth": 99,
+          "ply": 0,
+          "refined": true,
+          "triageDepth": 16
+        },
+        {
+          "cp": -99993,
+          "depth": 101,
+          "ply": 1,
+          "refined": true,
+          "triageDepth": 35
+        },
+        {
+          "cp": 99993,
+          "depth": 73,
+          "ply": 2,
+          "refined": true,
+          "triageDepth": 41
+        },
+        {
+          "cp": 0,
+          "depth": 64,
+          "ply": 3,
+          "refined": true,
+          "triageDepth": 33
+        },
+        {
+          "cp": 99993,
+          "depth": 95,
+          "ply": 4,
+          "refined": true,
+          "triageDepth": 13
+        },
+        {
+          "cp": -99992,
+          "depth": 84,
+          "ply": 5,
+          "refined": true,
+          "triageDepth": 13
+        }
+      ],
+      "profile": "auto-fast",
+      "referenceMs": 19770,
+      "triage": {
+        "classificationDisagreements": 0,
+        "meanWinPctError": 0.0
+      }
+    },
+    {
+      "adaptive": {
+        "classificationDisagreements": 0,
+        "meanWinPctError": 0.0
+      },
+      "elapsedMs": 14523,
+      "game": "promotion",
+      "plies": 5,
+      "positions": [
+        {
+          "cp": 99992,
+          "depth": 127,
+          "ply": 0,
+          "refined": true,
+          "triageDepth": 22
+        },
+        {
+          "cp": -99993,
+          "depth": 177,
+          "ply": 1,
+          "refined": true,
+          "triageDepth": 52
+        },
+        {
+          "cp": 99993,
+          "depth": 245,
+          "ply": 2,
+          "refined": true,
+          "triageDepth": 55
+        },
+        {
+          "cp": 0,
+          "depth": 98,
+          "ply": 3,
+          "refined": true,
+          "triageDepth": 50
+        },
+        {
+          "cp": 99993,
+          "depth": 164,
+          "ply": 4,
+          "refined": true,
+          "triageDepth": 30
+        },
+        {
+          "cp": -99992,
+          "depth": 117,
+          "ply": 5,
+          "refined": true,
+          "triageDepth": 49
+        }
+      ],
+      "profile": "auto-deep",
+      "referenceMs": 19770,
+      "triage": {
+        "classificationDisagreements": 0,
+        "meanWinPctError": 0.0
+      }
+    }
+  ],
+  "excludes": [
+    "frontend IPC",
+    "rendering"
+  ],
+  "reference": "Stockfish 19, 5000ms/position, MultiPV 1",
+  "resources": {
+    "hashMb": 96,
+    "threads": 6
+  },
+  "samplesPerCase": 1
+}
