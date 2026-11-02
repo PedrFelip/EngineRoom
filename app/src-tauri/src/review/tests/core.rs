@@ -355,3 +355,41 @@ fn equal_piece_exchange_is_not_a_sacrifice_context_seed() {
     );
     assert!(targets.is_empty());
 }
+
+#[test]
+fn borrowed_and_owned_positions_produce_equivalent_reviews_and_targets() {
+    let corpus = [
+        "1. e4 e5 2. Nf3 Nc6 3. Bb5 a6",
+        "1. f3 e5 2. g4 Qh4#",
+        "[FEN \"7k/8/8/8/8/8/8/R6K w - - 0 1\"]\n1. Ra2 Kg7 2. Ra3",
+    ];
+    for pgn in corpus {
+        let game = core::extract(pgn).unwrap();
+        let raw: Vec<_> = game
+            .fens
+            .iter()
+            .enumerate()
+            .map(|(i, fen)| {
+                let mut position = core::terminal_raw(fen, (i as i32 - 2) * 150);
+                position.pv = vec![format!("move-{i}")];
+                position.lines[0].pv = position.pv.clone();
+                position.lines[0].unstable = i % 2 == 0;
+                position
+            })
+            .collect();
+        let borrowed: Vec<_> = raw.iter().collect();
+        assert_eq!(
+            serde_json::to_value(core::build(&game, &raw).unwrap()).unwrap(),
+            serde_json::to_value(core::build(&game, &borrowed).unwrap()).unwrap(),
+            "review for {pgn}"
+        );
+        for kind in [AnalysisKind::Fast, AnalysisKind::Deep] {
+            let profile = adaptive::profile(kind).unwrap().unwrap();
+            assert_eq!(
+                format!("{:?}", adaptive::review_targets(&game, &raw, profile)),
+                format!("{:?}", adaptive::review_targets(&game, &borrowed, profile)),
+                "targets for {pgn}"
+            );
+        }
+    }
+}

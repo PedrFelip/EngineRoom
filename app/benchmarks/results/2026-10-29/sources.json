@@ -1,0 +1,36 @@
+{
+  "sources": {
+    "baseline": {
+      "commit": "933532e97e404e3d1c9283524c62b115d1009562",
+      "sha256": {
+        "app/src-tauri/src/review/adaptive.rs": "bab45edecc83c4236fbd206d3918b2712fcc13d1b861d5f5e301d7821f1493f4",
+        "app/src-tauri/src/review/automatic.rs": "7ad61b1dfd0261b6cd841e6da149d0acf1ec4e2d3b7af575f79973246e343474",
+        "app/src-tauri/src/review/core/build.rs": "f5472d1a152e0a58304e63c37a355c082a84bf08367b472107fad096be77268d",
+        "app/src-tauri/src/review/engine.rs": "67e85ec119f35f0fc7dedc8badfc78416d1890b56623068c25f8cf86f6816fe6",
+        "app/src-tauri/src/review/tests/core.rs": "e757ef731c11e0c9dd5780b914d62dd4c2dcef6878652d49f66346aef84f3268"
+      }
+    },
+    "candidate": {
+      "commit": "1e113bc767f6d069191d67ea0e60d6d9ecdbb700",
+      "sha256": {
+        "app/src-tauri/src/review/adaptive.rs": "632d249c89b248fb8d5f451b8e2b25d99f667a870c0f2ec88201b74590030541",
+        "app/src-tauri/src/review/automatic.rs": "056fab551894d4eb4cf24cd7849a8fb859e662ad4d5f1b46829dbac9f4e2798d",
+        "app/src-tauri/src/review/core/build.rs": "3a4b8e2a4b5713dd54b472236d209369db1129c4dc6776b81865e44b28c419dd",
+        "app/src-tauri/src/review/engine.rs": "a99292c9da5a2152346a288b8eea7d08e03e9699238127b79b46b358a883e422",
+        "app/src-tauri/src/review/tests/core.rs": "d7550b399e44fea23542bd1789e8df62cd2baacacf6fa58a07d873773cd2e4bd"
+      }
+    }
+  },
+  "normalBinarySha256": {
+    "candidate-normal": "28d813f104941ea98f2ca9b1427b35935f0f8dc99741791205a80b2556538e0a",
+    "baseline-normal": "04d69b1a50224c504409b7e0a89da24da2b39b565189680c3d1b96b6e55bd1bb"
+  },
+  "instrumentationSha256": {
+    "app/src-tauri/src/bench_alloc.rs": "90278ccd0334d409cb489300edcef48f4faffa3337a67dae01bf5eade1721459",
+    "app/src-tauri/src/review/tests/benchmark.rs": "8382901b647822997fb374b6c36d48c4c4ae2ee000637d862008fac800d29ede"
+  },
+  "instrumentedBinarySha256": {
+    "baseline-alloc-corrected": "07e21fdbb62ca9b97a9ed851ca19036d6c9b5c6c8e4bad7356edecde93aa8434",
+    "candidate-alloc": "7bb87b53a910bf5eb1d30fbca7bc0f3fc99ae4175055a165ca8c364eb74eba15"
+  }
+}
