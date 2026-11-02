@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.3.4](https://github.com/PedrFelip/EngineRoom/compare/v2.3.3...v2.3.4) (2026-11-02)
+
+
+### Desempenho
+
+* reduzir alocações da pipeline Rust em até 43% ([#54](https://github.com/PedrFelip/EngineRoom/issues/54)) ([4f71698](https://github.com/PedrFelip/EngineRoom/commit/4f71698c9f6989a10aa9a359918cd16d1d0af9c5))
+
 ## [2.3.3](https://github.com/PedrFelip/EngineRoom/compare/v2.3.2...v2.3.3) (2026-10-30)
 
 ### Correções
