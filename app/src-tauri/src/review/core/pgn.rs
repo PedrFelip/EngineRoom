@@ -80,11 +80,10 @@ impl Visitor for PgnVisitor {
             Err(e) => return ControlFlow::Break(Err(invalid(format!("Lance inválido: {e}")))),
         };
         let color = if state.pos.turn().is_white() {
-            "w"
+            MoveColor::White
         } else {
-            "b"
-        }
-        .into();
+            MoveColor::Black
+        };
         let before = fen(&state.pos);
         let uci = m.to_uci(CastlingMode::Standard).to_string();
         let san = san::SanPlus::from_move_and_play_unchecked(&mut state.pos, m).to_string();

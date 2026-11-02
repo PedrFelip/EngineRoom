@@ -128,3 +128,27 @@ fn cache_shape_corruption_and_covering_queries_are_preserved() {
     )
     .is_none());
 }
+
+#[test]
+fn restored_review_requires_valid_positions_and_matching_pgn() {
+    let pgn = "[FEN \"7k/8/8/8/8/8/8/R6K w - - 0 1\"]\n1. Ra2 Kg7";
+    let game = core::extract(pgn).unwrap();
+    let raw: Vec<_> = game
+        .fens
+        .iter()
+        .map(|fen| core::terminal_raw(fen, 0))
+        .collect();
+    let review = core::build(&game, &raw).unwrap();
+    let mut legacy = serde_json::to_value(&review).unwrap();
+    legacy.as_object_mut().unwrap().remove("accuracyModel");
+    let restored = repository::normalize(legacy).unwrap();
+    assert!(repository::validate_game(&restored, &game).is_ok());
+    let mut corrupt = restored.clone();
+    corrupt.positions[1].fen = "not a fen".into();
+    assert!(repository::validate_game(&corrupt, &game).is_err());
+    let other = core::extract("1. e4 e5").unwrap();
+    assert!(repository::validate_game(&restored, &other).is_err());
+    let mut wrong_move = restored;
+    wrong_move.moves[0].played.uci = "a1a3".into();
+    assert!(repository::validate_game(&wrong_move, &game).is_err());
+}

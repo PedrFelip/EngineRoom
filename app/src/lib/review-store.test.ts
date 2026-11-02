@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { MoveAnalysis } from '../types'
 import { selectDisplayedPosition } from './review-selectors'
-import { createReviewStore } from './review-store'
+import { createReviewStore, selectActiveVariation } from './review-store'
 
 const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1'
 const AFTER_E4 = 'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1'
@@ -13,7 +13,7 @@ function mainlineMove(
   san: string,
   uci: string,
   fenBefore: string,
-): MoveAnalysis {
+): { -readonly [K in keyof MoveAnalysis]: MoveAnalysis[K] } {
   return {
     ply,
     color,
@@ -49,6 +49,7 @@ function e4e5Result() {
       mainlineMove(1, 'w', 'e4', 'e2e4', START_FEN),
       mainlineMove(2, 'b', 'e5', 'e7e5', AFTER_E4),
     ],
+    accuracyModel: 'test',
     accuracy: { white: 100, black: 100 },
     accuracyByPhase: {
       opening: { white: 100, black: 100 },
@@ -86,11 +87,13 @@ describe('createReviewStore — resultado e snapshot', () => {
     store.first()
     store.exploreLine(['d2d4', 'd7d5'])
     expect(store.makeMove('d7', 'd5')).toBe(true)
-    const variation = store.getSnapshot().variation
+    const variation = selectActiveVariation(store.getSnapshot())
     if (!variation) throw new Error('Variação esperada após explorar linha')
     expect(store.getSnapshot().variations[0]).toBe(variation)
     store.setVariationClassification(variation.path[1], 'bom')
-    expect(store.getSnapshot().variation?.path).toEqual(variation.path)
+    expect(selectActiveVariation(store.getSnapshot())?.path).toEqual(
+      variation.path,
+    )
   })
 
   it('setResult posiciona no último lance e expõe o resultado no snapshot', () => {
@@ -233,15 +236,15 @@ describe('createReviewStore — erros e blunders', () => {
     store.setResult(result)
     store.goTo(1)
     expect(store.exploreLine(['d7d5'])).not.toEqual([])
-    expect(store.getSnapshot().variation).not.toBeNull()
+    expect(selectActiveVariation(store.getSnapshot())).not.toBeNull()
 
     store.prevCritical()
-    expect(store.getSnapshot().variation).toBeNull()
+    expect(selectActiveVariation(store.getSnapshot())).toBeNull()
     expect(store.getSnapshot().currentPly).toBe(1)
 
     store.exploreLine(['d7d5'])
     store.nextCritical()
-    expect(store.getSnapshot().variation).toBeNull()
+    expect(selectActiveVariation(store.getSnapshot())).toBeNull()
     expect(store.getSnapshot().currentPly).toBe(2)
   })
 
@@ -254,11 +257,11 @@ describe('createReviewStore — erros e blunders', () => {
     expect(store.exploreLine(['d2d4'])).not.toEqual([])
 
     store.prevCritical()
-    expect(store.getSnapshot().variation).not.toBeNull()
+    expect(selectActiveVariation(store.getSnapshot())).not.toBeNull()
     expect(store.getSnapshot().currentPly).toBe(0)
 
     store.nextCritical()
-    expect(store.getSnapshot().variation).toBeNull()
+    expect(selectActiveVariation(store.getSnapshot())).toBeNull()
     expect(store.getSnapshot().currentPly).toBe(2)
   })
 })
@@ -269,25 +272,25 @@ describe('createReviewStore — ramificações locais', () => {
     store.setResult(e4e5Result())
     store.first()
     store.exploreLine(['e2e4', 'e7e5'])
-    const initial = store.getState().variation
+    const initial = selectActiveVariation(store.getState())
     if (!initial) throw new Error('Variação esperada')
     const rootId = initial.roots[0].id
     store.setVariationClassification(rootId, 'bom')
-    const before = store.getState().variation
+    const before = selectActiveVariation(store.getState())
     if (!before) throw new Error('Variação esperada')
     store.prev()
 
     expect(store.makeMove('e2', 'e4')).toBe(true)
 
     const after = store.getState()
-    expect(after.variation?.roots).toBe(before.roots)
-    expect(after.variation?.roots).toHaveLength(1)
-    expect(after.variation?.roots[0].classification).toBe('bom')
-    expect(after.variation?.path).toEqual([rootId])
+    expect(selectActiveVariation(after)?.roots).toBe(before.roots)
+    expect(selectActiveVariation(after)?.roots).toHaveLength(1)
+    expect(selectActiveVariation(after)?.roots[0].classification).toBe('bom')
+    expect(selectActiveVariation(after)?.path).toEqual([rootId])
     expect(after.variations).toHaveLength(1)
-    expect(after.variations[0]).toBe(after.variation)
+    expect(after.variations[0]).toBe(selectActiveVariation(after))
     store.next()
-    expect(store.getState().variation?.path).toEqual([
+    expect(selectActiveVariation(store.getState())?.path).toEqual([
       rootId,
       before.roots[0].children[0].id,
     ])
@@ -302,16 +305,20 @@ describe('createReviewStore — ramificações locais', () => {
     store.prev()
     store.makeMove('d2', 'd4')
     store.makeMove('d7', 'd5')
-    const branch = store.getState().variation
+    const branch = selectActiveVariation(store.getState())
     if (!branch) throw new Error('Variação esperada')
     store.prev()
     store.makeMove('d7', 'd5')
 
-    expect(before.variation?.roots.map((move) => move.uci)).toEqual(['e2e4'])
-    expect(store.getState().variation?.roots).toBe(branch.roots)
+    expect(
+      selectActiveVariation(before)?.roots.map((move) => move.uci),
+    ).toEqual(['e2e4'])
+    expect(selectActiveVariation(store.getState())?.roots).toBe(branch.roots)
     expect(branch.roots.map((move) => move.uci)).toEqual(['e2e4', 'd2d4'])
-    expect(store.getState().variation?.path).toEqual(branch.path)
-    expect(store.getState().variations[0]).toBe(store.getState().variation)
+    expect(selectActiveVariation(store.getState())?.path).toEqual(branch.path)
+    expect(store.getState().variations[0]).toBe(
+      selectActiveVariation(store.getState()),
+    )
   })
 
   it('cria uma ramificação com um lance legal e permite navegar nela', () => {
@@ -320,20 +327,20 @@ describe('createReviewStore — ramificações locais', () => {
     store.goTo(0)
 
     expect(store.makeMove('d2', 'd4')).toBe(true)
-    expect(store.getSnapshot().variation?.roots[0]?.san).toBe('d4')
-    expect(store.getSnapshot().variation?.path).toHaveLength(1)
+    expect(selectActiveVariation(store.getSnapshot())?.roots[0]?.san).toBe('d4')
+    expect(selectActiveVariation(store.getSnapshot())?.path).toHaveLength(1)
 
     store.prev()
-    expect(store.getSnapshot().variation?.path).toHaveLength(0)
+    expect(selectActiveVariation(store.getSnapshot())?.path).toHaveLength(0)
     store.next()
-    expect(store.getSnapshot().variation?.path).toEqual([
-      store.getSnapshot().variation?.roots[0]?.id,
+    expect(selectActiveVariation(store.getSnapshot())?.path).toEqual([
+      selectActiveVariation(store.getSnapshot())?.roots[0]?.id,
     ])
-    expect(store.getSnapshot().variation?.roots[0]?.san).toBe('d4')
+    expect(selectActiveVariation(store.getSnapshot())?.roots[0]?.san).toBe('d4')
     store.prev()
-    expect(store.getSnapshot().variation?.path).toHaveLength(0)
+    expect(selectActiveVariation(store.getSnapshot())?.path).toHaveLength(0)
     store.prev()
-    expect(store.getSnapshot().variation).toBeNull()
+    expect(selectActiveVariation(store.getSnapshot())).toBeNull()
   })
 
   it('carrega uma PV e cria uma alternativa sem apagar sua continuação', () => {
@@ -343,11 +350,13 @@ describe('createReviewStore — ramificações locais', () => {
     store.exploreLine(['e2e4', 'e7e5', 'g1f3'])
 
     expect(
-      store.getSnapshot().variation?.roots[0]?.children[0]?.children[0]?.san,
+      selectActiveVariation(store.getSnapshot())?.roots[0]?.children[0]
+        ?.children[0]?.san,
     ).toBe('Nf3')
-    expect(store.getSnapshot().variation?.path).toHaveLength(1)
+    expect(selectActiveVariation(store.getSnapshot())?.path).toHaveLength(1)
     expect(store.makeMove('c7', 'c5')).toBe(true)
-    const children = store.getSnapshot().variation?.roots[0]?.children
+    const children = selectActiveVariation(store.getSnapshot())?.roots[0]
+      ?.children
     expect(children?.map((move) => move.san)).toEqual(['e5', 'c5'])
   })
 
@@ -359,11 +368,11 @@ describe('createReviewStore — ramificações locais', () => {
 
     store.exploreLine(['d7d5', 'c2c4'])
 
-    const root = store.getSnapshot().variation?.roots[0]
+    const root = selectActiveVariation(store.getSnapshot())?.roots[0]
     expect(root?.san).toBe('d4')
     expect(root?.children[0]?.san).toBe('d5')
     expect(root?.children[0]?.children[0]?.san).toBe('c4')
-    expect(store.getSnapshot().variation?.path).toEqual([
+    expect(selectActiveVariation(store.getSnapshot())?.path).toEqual([
       root?.id,
       root?.children[0]?.id,
     ])
@@ -379,18 +388,21 @@ describe('createReviewStore — ramificações locais', () => {
     store.prev()
     expect(store.makeMove('b1', 'c3')).toBe(true)
 
-    const alternative = store.getSnapshot().variation?.roots[0]?.children[1]
+    const alternative = selectActiveVariation(store.getSnapshot())?.roots[0]
+      ?.children[1]
     expect(alternative?.san).toBe('c5')
     expect(alternative?.children.map((move) => move.san)).toEqual([
       'Nf3',
       'Nc3',
     ])
 
-    const nestedPath = store.getSnapshot().variation?.path
-    const variationId = store.getSnapshot().variation?.id
+    const nestedPath = selectActiveVariation(store.getSnapshot())?.path
+    const variationId = selectActiveVariation(store.getSnapshot())?.id
     expect(nestedPath).toHaveLength(3)
     store.goToVariation(variationId ?? '', nestedPath?.slice(0, 2) ?? [])
-    expect(store.getSnapshot().variation?.path).toEqual(nestedPath?.slice(0, 2))
+    expect(selectActiveVariation(store.getSnapshot())?.path).toEqual(
+      nestedPath?.slice(0, 2),
+    )
   })
 
   it('preserva linhas alternativas ao navegar pela partida principal', () => {
@@ -398,17 +410,17 @@ describe('createReviewStore — ramificações locais', () => {
     store.setResult(e4e5Result())
     store.goTo(0)
     store.makeMove('d2', 'd4')
-    const savedId = store.getSnapshot().variation?.id
+    const savedId = selectActiveVariation(store.getSnapshot())?.id
 
     store.goTo(2)
-    expect(store.getSnapshot().variation).toBeNull()
+    expect(selectActiveVariation(store.getSnapshot())).toBeNull()
     expect(store.getSnapshot().variations).toHaveLength(1)
 
     store.goToVariation(
       savedId ?? '',
       store.getSnapshot().variations[0]?.path ?? [],
     )
-    expect(store.getSnapshot().variation?.id).toBe(savedId)
+    expect(selectActiveVariation(store.getSnapshot())?.id).toBe(savedId)
     expect(store.getSnapshot().currentPly).toBe(0)
   })
 
@@ -418,6 +430,6 @@ describe('createReviewStore — ramificações locais', () => {
     store.goTo(0)
 
     expect(store.makeMove('e2', 'e5')).toBe(false)
-    expect(store.getSnapshot().variation).toBeNull()
+    expect(selectActiveVariation(store.getSnapshot())).toBeNull()
   })
 })
