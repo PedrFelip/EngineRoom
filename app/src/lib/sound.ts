@@ -13,9 +13,6 @@
  *   capture → Capture.mp3
  */
 
-import captureSound from '../../public/sounds/Capture.mp3?inline'
-import moveSound from '../../public/sounds/Move.mp3?inline'
-
 /** Categoria de som associada a um lance. */
 export type SoundType = 'move' | 'capture'
 
@@ -49,8 +46,8 @@ export function playMoveSound(
 
 /** Caminho do arquivo de áudio para cada tipo de som. */
 const SOUND_FILE: Record<SoundType, string> = {
-  move: moveSound,
-  capture: captureSound,
+  move: '/sounds/Move.mp3',
+  capture: '/sounds/Capture.mp3',
 }
 
 /**
