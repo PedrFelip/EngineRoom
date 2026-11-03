@@ -19,6 +19,7 @@ interface Row {
   num: number
   white?: MoveAnalysis
   black?: MoveAnalysis
+  variations: ReviewVariation[]
 }
 
 const MoveButton = memo(function MoveButton({
@@ -95,17 +96,17 @@ export default function MoveList({
     const nextRows: Row[] = []
     moves.forEach((move) => {
       const num = Math.ceil(move.ply / 2)
-      if (!nextRows[num - 1]) nextRows[num - 1] = { num }
+      if (!nextRows[num - 1]) nextRows[num - 1] = { num, variations: [] }
       if (move.color === 'w') nextRows[num - 1].white = move
       else nextRows[num - 1].black = move
     })
-    const lastVariationRow = variations.reduce(
-      (last, variation) =>
-        Math.max(last, Math.ceil((variation.basePly + 1) / 2)),
-      0,
-    )
-    while (nextRows.length < lastVariationRow) {
-      nextRows.push({ num: nextRows.length + 1 })
+    for (const variation of variations) {
+      const num = Math.ceil((variation.basePly + 1) / 2)
+      while (nextRows.length < num) {
+        nextRows.push({ num: nextRows.length + 1, variations: [] })
+      }
+      if (!nextRows[num - 1]) nextRows[num - 1] = { num, variations: [] }
+      nextRows[num - 1].variations.push(variation)
     }
     return nextRows
   }, [moves, variations])
@@ -141,19 +142,15 @@ export default function MoveList({
               )}
             </div>
           ) : null}
-          {variations
-            .filter(
-              (variation) => Math.ceil((variation.basePly + 1) / 2) === row.num,
-            )
-            .map((variation) => (
-              <VariationLine
-                key={variation.id}
-                variation={variation}
-                active={variation.id === activeVariation?.id}
-                onSelect={onSelectVariation}
-                showFeedback={showVariationFeedback}
-              />
-            ))}
+          {row.variations.map((variation) => (
+            <VariationLine
+              key={variation.id}
+              variation={variation}
+              active={variation.id === activeVariation?.id}
+              onSelect={onSelectVariation}
+              showFeedback={showVariationFeedback}
+            />
+          ))}
         </div>
       ))}
     </div>

@@ -4,7 +4,7 @@ import {
   ListTree,
   Target,
 } from 'lucide-react'
-import { memo, type ReactNode, useState } from 'react'
+import { memo, type ReactNode, useCallback, useMemo, useState } from 'react'
 import { useStore } from 'zustand'
 import type { ReviewStore } from '../../lib/review-store'
 import { useSettings } from '../../lib/settings-context'
@@ -40,13 +40,34 @@ export default memo(function ReviewSidebar({
   const showVariationFeedback = useSettings(
     (state) => state.settings.reviewMoveFeedbackEnabled,
   )
-  const criticalMoves =
-    result?.moves.filter(
-      (move) =>
-        move.classification === 'erro' || move.classification === 'blunder',
-    ) ?? []
-  const filteredCriticalMoves = criticalMoves.filter(
-    (move) => learningColor === 'all' || move.color === learningColor,
+  const criticalMoves = useMemo(
+    () =>
+      result?.moves.filter(
+        (move) =>
+          move.classification === 'erro' || move.classification === 'blunder',
+      ) ?? [],
+    [result?.moves],
+  )
+  const filteredCriticalMoves = useMemo(
+    () =>
+      criticalMoves.filter(
+        (move) => learningColor === 'all' || move.color === learningColor,
+      ),
+    [criticalMoves, learningColor],
+  )
+  const navigateTo = useCallback(
+    (ply: number) => {
+      onNavigate()
+      store.goTo(ply)
+    },
+    [onNavigate, store],
+  )
+  const navigateToVariation = useCallback(
+    (variationId: string, path: string[]) => {
+      onNavigate()
+      store.goToVariation(variationId, path)
+    },
+    [onNavigate, store],
   )
   const tabs = [
     { id: 'moves', label: 'Lances', icon: ListOrdered },
@@ -93,20 +114,11 @@ export default memo(function ReviewSidebar({
             <MoveList
               moves={result.moves}
               currentPly={variation ? -1 : currentPly}
-              onSelect={(ply) => {
-                onNavigate()
-                store.goTo(ply)
-              }}
-              onBranchFrom={(ply) => {
-                onNavigate()
-                store.goTo(ply)
-              }}
+              onSelect={navigateTo}
+              onBranchFrom={navigateTo}
               variations={variations}
               activeVariation={variation}
-              onSelectVariation={(variationId, path) => {
-                onNavigate()
-                store.goToVariation(variationId, path)
-              }}
+              onSelectVariation={navigateToVariation}
               showVariationFeedback={showVariationFeedback}
             />
           </div>
