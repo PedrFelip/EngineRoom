@@ -13,6 +13,8 @@ use crate::db::mode::Mode;
 use std::collections::VecDeque;
 use tokio::task::JoinSet;
 
+mod scheduler;
+
 struct Job {
     worker: usize,
     index: usize,
@@ -31,6 +33,7 @@ struct State<'a> {
     budgets: Vec<Option<SearchBudget>>,
     critical: Vec<Option<adaptive::Critical>>,
     book: usize,
+    baseline_completed: usize,
     cached: usize,
     searched: usize,
     refinement_stage: bool,
@@ -38,8 +41,13 @@ struct State<'a> {
     ready_targets: Vec<Target>,
 }
 impl State<'_> {
+    fn set_baseline(&mut self, index: usize, raw: RawPosition) {
+        debug_assert!(self.baseline[index].is_none());
+        self.baseline[index] = Some(raw);
+        self.baseline_completed += 1;
+    }
     fn complete(&self) -> bool {
-        self.baseline.iter().all(Option::is_some)
+        self.baseline_completed == self.baseline.len()
     }
     fn targets(&self) -> &[Target] {
         self.final_targets.as_deref().unwrap_or(&self.ready_targets)
@@ -108,7 +116,7 @@ impl State<'_> {
         emit: &mut (dyn FnMut(Event) + Send),
     ) {
         let targets = self.targets();
-        let remaining = self.baseline.iter().filter(|p| p.is_none()).count() as u64
+        let remaining = (self.baseline.len() - self.baseline_completed) as u64
             * self.profile.triage_ms as u64
             + targets
                 .iter()
@@ -121,7 +129,7 @@ impl State<'_> {
                 targets.len(),
             )
         } else {
-            (self.baseline.iter().flatten().count(), self.baseline.len())
+            (self.baseline_completed, self.baseline.len())
         };
         emit(Event::Progress {
             progress: Progress {
@@ -171,6 +179,7 @@ pub(super) async fn review(
         budgets: vec![None; count],
         critical: vec![None; game.moves.len()],
         book: core::opening(&game.moves).map_or(0, |(n, _)| n),
+        baseline_completed: 0,
         cached: 0,
         searched: 0,
         refinement_stage: false,
@@ -234,7 +243,7 @@ async fn execute(
     let mut queue = VecDeque::new();
     for (i, hit) in hits.iter_mut().enumerate() {
         cancel.check()?;
-        state.baseline[i] = if let Some(cp) = state.terminals[i] {
+        let baseline = if let Some(cp) = state.terminals[i] {
             Some(core::terminal_raw(&game.fens[i], cp))
         } else if let Some(hit) = hit.take() {
             state.cached += 1;
@@ -243,16 +252,16 @@ async fn execute(
             queue.push_back(i);
             None
         };
-        if let Some(raw) = &state.baseline[i] {
-            state.progress(i, Some(raw), emit);
+        if let Some(raw) = baseline {
+            state.set_baseline(i, raw);
+            state.progress(i, state.baseline[i].as_ref(), emit);
         }
         state.discover(i);
     }
     let mut waiters = JoinSet::new();
     let mut blocks: Vec<VecDeque<usize>> = vec![];
     let mut busy = vec![];
-    let mut refining = vec![false; count];
-    let mut cache_checked = vec![None; count];
+    let mut positions = scheduler::Positions::new(count);
     loop {
         cancel.check()?;
         if state.complete() && state.final_targets.is_none() {
@@ -264,31 +273,16 @@ async fn execute(
                     .collect(),
             );
         }
-        let targets = state.targets().to_vec();
         if state.complete() && !state.refinement_stage {
             state.refinement_stage = true;
-            if let Some(target) = targets.first() {
+            if let Some(target) = state.targets().first() {
                 state.progress(target.position_index, None, emit);
             }
         }
         // Query only selected positions, grouped by budget. Recheck only if a
         // later overlapping decision raises the required coverage.
-        let mut groups: Vec<(SearchBudget, Vec<usize>)> = vec![];
-        for target in &targets {
-            let i = target.position_index;
-            if state.satisfied(target) || refining[i] || cache_checked[i] == Some(target.search) {
-                continue;
-            }
-            let slot = groups
-                .iter()
-                .position(|(budget, _)| *budget == target.search)
-                .unwrap_or_else(|| {
-                    groups.push((target.search, vec![]));
-                    groups.len() - 1
-                });
-            groups[slot].1.push(i);
-        }
-        for (budget, indexes) in groups {
+        let plan = positions.plan(state.targets(), &state.budgets);
+        for (budget, indexes) in plan.groups {
             let fens: Vec<_> = indexes.iter().map(|&i| game.fens[i].clone()).collect();
             let hits = cancellable(
                 repository.lookup(&fens, Mode::Time, budget.ms, budget.multipv),
@@ -299,7 +293,7 @@ async fn execute(
                 return Err(invalid_cache_count());
             }
             for (i, hit) in indexes.into_iter().zip(hits) {
-                cache_checked[i] = Some(budget);
+                positions.checked(i, budget);
                 if let Some(raw) = hit {
                     state.budgets[i] = Some(budget);
                     state.refined[i] = Some(raw);
@@ -308,9 +302,10 @@ async fn execute(
                 }
             }
         }
-        let needs_refinement = targets
+        let needs_refinement = state
+            .targets()
             .iter()
-            .any(|t| !state.satisfied(t) && !refining[t.position_index]);
+            .any(|t| !state.satisfied(t) && !positions.is_refining(t.position_index));
         if pool.is_none() && (!queue.is_empty() || needs_refinement) {
             let acquired = Pool::acquire(factory, state.sizing, count, cancel).await?;
             let workers = acquired.len();
@@ -326,19 +321,21 @@ async fn execute(
                 let prefer_refinement =
                     state.complete() || (pool.len() > 1 && worker == pool.len() - 1);
                 let target = if prefer_refinement {
-                    targets
-                        .iter()
-                        .find(|t| !state.satisfied(t) && !refining[t.position_index])
+                    plan.candidates.iter().find(|&&(i, _, search)| {
+                        !state.budgets[i]
+                            .is_some_and(|b| b.ms >= search.ms && b.multipv >= search.multipv)
+                            && !positions.is_refining(i)
+                    })
                 } else {
                     None
                 };
-                let job = if let Some(target) = target {
+                let job = if let Some(&(index, _, search)) = target {
                     Some(Job {
                         worker,
-                        index: target.position_index,
+                        index: index,
                         refinement: true,
-                        value: target.search.ms,
-                        multipv: target.search.multipv,
+                        value: search.ms,
+                        multipv: search.multipv,
                     })
                 } else {
                     if blocks[worker].is_empty() {
@@ -376,7 +373,7 @@ async fn execute(
                         .await?;
                     busy[worker] = true;
                     if job.refinement {
-                        refining[job.index] = true;
+                        positions.start(job.index);
                     }
                     waiters.spawn(async move { (job, receiver.await) });
                 }
@@ -427,14 +424,14 @@ async fn execute(
             });
         pending[buffer].2.push(raw.clone());
         if job.refinement {
-            refining[job.index] = false;
+            positions.finish(job.index);
             state.budgets[job.index] = Some(SearchBudget {
                 ms: completed.value,
                 multipv: job.multipv,
             });
             state.refined[job.index] = Some(raw);
         } else {
-            state.baseline[job.index] = Some(raw);
+            state.set_baseline(job.index, raw);
             state.discover(job.index);
         }
         state.progress(job.index, Some(state.evaluation(job.index)?), emit);
