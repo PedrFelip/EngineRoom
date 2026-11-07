@@ -136,3 +136,18 @@ merge, Conventional Commits, sincronização e retomada de builds.
 
 GPL-3.0-or-later. Veja [LICENSE](LICENSE) e os
 [avisos de terceiros](THIRD_PARTY_NOTICES.md).
+
+## Experimento com Rune
+
+O diretório [`experimental/`](experimental/README.md) contém um estudo independente
+de frontend desktop nativo com Rune, inspirado no visual do OpenCode. Para abrir:
+
+```sh
+cd experimental
+cargo run
+```
+
+O protótipo usa componentes do Rune/OpenCode com a paleta original do OpenCode, valida PGN
+localmente e reproduz os fluxos de importação, configuração, revisão e preferências.
+Inclui validação headless por PNG e árvore de elementos. A integração com Stockfish
+e a persistência permanecem no app principal.

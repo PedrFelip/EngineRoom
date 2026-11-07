@@ -1,0 +1,17 @@
+[package]
+name = "engineroom-rune"
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+publish = false
+
+[dependencies]
+rune = { git = "https://github.com/anomalyco/rune", rev = "d03349e25189ce1edc8c26ada6bf6d4aac72c826", default-features = false }
+
+rune-kit = { git = "https://github.com/anomalyco/rune", rev = "d03349e25189ce1edc8c26ada6bf6d4aac72c826", default-features = false }
+rune-theme-opencode = { git = "https://github.com/anomalyco/rune", rev = "d03349e25189ce1edc8c26ada6bf6d4aac72c826" }
+pgn-reader = "0.29"
+shakmaty = "0.30"
+
+[profile.dev]
+debug = 0

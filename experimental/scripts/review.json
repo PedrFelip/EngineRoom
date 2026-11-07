@@ -1,0 +1,10 @@
+{"events":[
+  {"t":0.1,"type":"tap","key":"load-demo"},
+  {"t":0.5,"type":"tap","key":"continue"},
+  {"t":0.9,"type":"tap","key":"profile/segment2"},
+  {"t":1.3,"type":"tap","key":"start-review"},
+  {"t":1.7,"type":"tap","key":"next"},
+  {"t":2.1,"type":"tap","key":"move-16"},
+  {"t":2.5,"type":"tap","key":"flip"},
+  {"t":2.9,"type":"tap","key":"review-tabs/segment2"}
+]}
