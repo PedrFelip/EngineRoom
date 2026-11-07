@@ -1,0 +1,75 @@
+# Experimento: continuidade da análise local
+
+Este documento propõe hipóteses de arquitetura, não resultados medidos nem uma mudança aprovada para produção. O experimento independente em `app/benchmarks/continuity_experiment.py` deve testar as hipóteses com Stockfish real; não deve usar ou escrever o SQLite do aplicativo. Nenhuma melhoria de velocidade ou qualidade é presumida.
+
+## Ponto de partida
+
+Hoje o Rust possui a revisão, a seleção adaptativa e a sessão. A fila automática limitada usa até três processos, blocos roubáveis de quatro posições de triagem e refinamentos hard antecipados; após todas as triagens, a seleção global aplica as quotas soft. Resultados são publicados e gravados por conclusão; a avaliação de triagem permanece separada da refinada. O trabalho local de afinidade associa preferencialmente refinamento ao worker de origem ou à triagem imediatamente anterior, sem esperar esse worker. Ela pode melhorar a reutilização da tabela de transposição, mas não garante retenção de qualquer entrada nem continuidade da árvore de busca.
+
+`profiles.json` é a fonte de verdade: Rápido usa 180 ms/MultiPV 3 na triagem e 500 ou 2.000 ms no refinamento; Profundo usa 450 ms/MultiPV 5 e 1.800 ou 6.000 ms. Refinamentos usam MultiPV 1 ou 2 conforme o alvo. Os orçamentos existentes são buscas separadas, não um total acumulado. A detecção atual usa paralelismo disponível e memória total; o Hash configurado é apenas uma parcela da memória do processo. O pipeline usa `EngineFactory`, `EnginePort` e `Repository`, com lease exclusivo compartilhado também pelas sondas de configurações. A proposta deve preservar esses limites e as alterações locais de afinidade.
+
+## Modelo proposto
+
+- **SearchWork** identifica uma posição e geração de revisão, FEN e contexto necessário, perfil, prioridade, requisitos de cobertura, orçamento total autorizado e checkpoints imutáveis. É uma unidade lógica do planejador, não um processo nem uma árvore serializada. Não há dois `go` simultâneos para a mesma geração e posição.
+- **EngineExecution** é o empréstimo temporário e exclusivo de um processo configurado, associado a um SearchWork e a um único `go`. Carrega identidade do processo, configuração Threads/Hash/MultiPV, instante e limites, além da geração de cancelamento. Uma execução ocupa o worker até `bestmove` ou até encerramento confirmado do processo. Afinidade é apenas preferência entre workers livres.
+- **Checkpoint** é uma fotografia imutável de uma iteração concluída e coerente: posição, geração, motor/build, opções, MultiPV, profundidade, linhas completas, pontuação, nós, tempo e proveniência. Aceitar somente conjuntos de linhas da mesma profundidade/iteração quando o protocolo permitir identificá-los; descartar conjuntos parciais ou ambíguos. Checkpoint não contém estado retomável do motor. A triagem é fixada separadamente e nunca substituída por atualizações posteriores para a classificação adaptativa.
+- **Planejador** mantém janela limitada de SearchWork ativos, preenchida em ordem da partida, e uma fila limitada de eventos/checkpoints coalescidos por posição. Workers livres avançam triagem e refinamentos elegíveis, sem esperar afinidade. Um limite explícito de concorrência e prioridade impede que refinamentos hard impeçam progresso da triagem; com um worker, triagem tem progresso garantido. Publicação continua em ordem de conclusão, não de índice.
+
+Hipótese central: uma execução contínua pode capturar um checkpoint de triagem e continuar a busca da mesma posição quando a evidência local justificar promoção hard, evitando uma segunda inicialização. A decisão exige as avaliações adjacentes e deve acontecer antes de consumir o orçamento extra; se ainda não houver evidência, o planejador encerra a busca no limite de triagem e registra o checkpoint. Não segurar indefinidamente processos aguardando vizinhos. A promoção é conservadora e pode perder oportunidades; nunca inventar pontuação ausente. Após todas as triagens, reconciliar globalmente com a seleção adaptativa completa: satisfazer alvos hard e soft, suas quotas e cobertura, deduplicar posições e agendar o déficit. Trabalho hard antecipado que deixe de ser alvo permanece custo já gasto, contabilizado; não força exclusão de alvo global obrigatório nem altera baseline.
+
+### Limites UCI
+
+No Stockfish UCI padrão, `go` é uma busca por vez e `MultiPV` é fixado antes dela. Um `go` contínuo não muda de MultiPV na fronteira de triagem; portanto, continuidade com MultiPV de triagem diferente do refinamento exige manter o MultiPV de triagem durante todo o `go`, ou parar e iniciar outro `go` com a configuração de refinamento. Ambos são variantes experimentais, com custos e qualidade medidos separadamente. `stop` e `bestmove` encerram a busca; nova busca no mesmo processo pode aproveitar entradas residuais de hash, sem garantia de continuidade. Um checkpoint UCI é observação, não mecanismo de pausa/retomada ou migração entre processos. Para decisão online, usar limite superior por `go`, observar iterações e emitir `stop` quando o orçamento ou decisão o exigir; medir overshoot e não contar `info` incompleto como resultado final.
+
+Um fork futuro poderia expor pausa, retomada ou estado de busca com contrato explícito, sujeito a investigação de viabilidade, manutenção, distribuição GPL e testes próprios. Não se presume que seja possível serializar, migrar ou restaurar uma busca do Stockfish existente; esta opção não é pré-requisito do experimento stock.
+
+## Contratos e ciclo de vida
+
+Em um protótipo Rust posterior, manter o núcleo puro e os adaptadores existentes. Contratos conceituais, sujeitos a validação:
+
+```text
+SearchWork { id, generation, position, budget, coverage, baseline?, checkpoints[] }
+EngineExecution { work_id, generation, worker_id, options, started_at, limit }
+Planner.accept_checkpoint(execution, checkpoint) -> actions
+Planner.reconcile(all_baselines, profile) -> bounded work requests
+EnginePort.start(position, options, limit) -> event stream
+EnginePort.stop_and_wait() -> completion | terminated
+Repository.lookup_compatible(requests) / write_completed(results)
+```
+
+Estados por geração: `Pending → Queued → RunningTriage → BaselineReady`; daí `Completed` ou `RunningPromoted → Completed`. Se a triagem terminou antes da decisão, `BaselineReady → QueuedRefinement → RunningRefinement → Completed`. Reconciliação pode reabrir um trabalho concluído para cobertura insuficiente, criando nova execução, sem modificar checkpoints anteriores. Qualquer estado não terminal pode ir a `Cancelling → Cancelled`; falha vai a `Failed` somente após limpeza. Eventos atrasados são rejeitados por geração, identidade de execução e sequência; apenas o planejador é autoritativo para transições. Cache hit compatível pode satisfazer a etapa sem execução, mas não cria afinidade.
+
+O cancelamento invalida geração primeiro, bloqueia novas submissões e para todas as execuções possuídas; aguarda `bestmove` e drenagem quando seguro ou mata e aguarda o processo após interrupção/falha de busca ao vivo, conforme contrato atual. Não reutilizar processo contaminado, não parar processo de outro dono e manter o lease até todos terminarem. Fechamento idempotente aguarda também operações de banco; cancelamento não vira erro de análise. Para navegação, o request ID mais recente prevalece depois da limpeza anterior. Backpressure limita janela, filas e checkpoints em memória; progresso intermediário pode ser coalescido, mas baseline, conclusão, falha e cancelamento não podem ser perdidos. Uma fila cheia suspende produtores de trabalho, não a leitura de stdout necessária para evitar deadlock.
+
+## Recursos e responsividade
+
+Comparar combinações de processos e Threads sob um orçamento total de CPU, sem assumir que mais workers ou SMT aumentam throughput. Respeitar afinidade/cotas de CPU disponíveis, deixar capacidade para renderização e sistema e medir latência de interação, inclusive durante navegação e cancelamento. Em laptops, testar na bateria e na tomada, aquecimento sustentado, throttling e consumo energético quando disponíveis; não inferir desempenho sustentado a partir de uma execução curta. Sob pressão de memória ou baixa capacidade, reduzir concorrência e Hash antes de iniciar novas buscas; não redimensionar uma busca ativa sem medir impacto e respeitar UCI.
+
+Hash não é RSS total: somar Hash por processo, redes NNUE e seus mapeamentos, pilhas/threads, estruturas do motor, executável, buffers, runtime e memória do app. Medir RSS e, onde disponível, PSS ou memória privada para evitar contar páginas compartilhadas como privadas; registrar pico agregado e disponibilidade real, não apenas RAM instalada. O custo NNUE por processo e compartilhamento dependem de plataforma/build: medir, não presumir. Definir teto conservador para memória adicional e margem do sistema, limitar workers pelo menor teto de CPU e memória, e usar fallback conservador quando telemetria faltar. Não alterar unilateralmente limites/configurações do usuário em produção; qualquer política automática requer validação e comunicação apropriada.
+
+## Protocolo de avaliação
+
+Comparar baseline atual, afinidade oportunista, continuidade com MultiPV fixo de triagem e reinício com MultiPV de refinamento. Usar mesmos PGNs, posições, versões/binários, perfis, hardware e configurações; registrar seed/ordem, cache frio e quente separadamente, aquecimento, repetições e dispersão. Isolar arquivos temporários e cache experimental; nunca escrever resultados experimentais no DB do app. Registrar hits e trabalho evitado, incluindo casos terminais e posições repetidas.
+
+Comparabilidade exige duas visões: (1) orçamento UCI nominal total por posição, triagem **mais** refinamento, incluindo trabalho antecipado descartado, e (2) custo efetivo: tempo de CPU agregado, nós e tempo de parede, inclusive inicialização, espera e overshoot. Uma busca contínua recebe no máximo o total autorizado equivalente para a posição; não comparar apenas duração do segundo `go`. Como MultiPV e paralelismo mudam custo por milissegundo, apresentar também curvas de qualidade em custos equivalentes, não apenas tempos nominais. O conjunto de alvos e a cobertura final devem ser reportados; cache hits não são trabalho de motor grátis oculto.
+
+Medir throughput e p50/p95 de conclusão por posição e partida, tempo até primeira triagem e cobertura completa, latência de navegação e cancelamento até processo encerrado, overshoot, utilização de CPU, RSS/PSS/pico, falhas, temperatura/energia quando disponíveis. Para qualidade, comparar profundidade, nós, estabilidade de melhor lance, avaliações, classificação e seleção hard/soft contra referência independente mais cara, com incerteza e casos divergentes; profundidade isolada não prova qualidade. Exercitar posições táticas, mates, finais, FEN inicial, partidas curtas/longas, recursos baixos e concorrência com outros apps. Nenhum resultado é assumido neste documento.
+
+## Cache e adoção
+
+No experimento, checkpoints e resultados ficam somente em memória ou artefatos isolados, identificados por motor/configuração; nunca no SQLite de produção. Para uma futura integração, manter a chave e a consulta atuais: profundidade alcançada e MultiPV suficientes; buscas por tempo somente aceitam entradas por tempo com orçamento suficiente. Tempo de checkpoint parcial não equivale automaticamente ao orçamento solicitado, e somar tempos de `go` separados não prova cobertura equivalente. Somente resultados finais validados com proveniência e orçamento corretamente representáveis podem entrar no cache existente; caso contrário, não gravar até definir contrato/migração compatível. Preservar prefetch em lote, flush a cada oito posições e ao final, falhas reais fatais e flush de falha best-effort sem mascarar erro original.
+
+1. **Caracterização:** harness standalone reproduz baseline e afinidade com Stockfish real; valida medição de recursos, isolação de DB e repetibilidade. Prosseguir somente com dados suficientes por perfil e máquina, incluindo laptop e baixa memória.
+2. **Protótipo stock isolado:** implementar janela, checkpoints e variantes de `go` no harness. Exigir orçamento auditável, MultiPV constante por execução, reconciliação determinística e ausência de duplicação; comparar qualidade e custos com intervalos de variação. Sem ganho mensurável consistente ou com regressão de qualidade, abandonar ou revisar hipótese.
+3. **Protótipo Rust atrás de opção experimental:** apenas após resultados favoráveis, manter seams e lease; testes com engine falsa para ordens adversas, hard antecipado, quotas finais, cache, backpressure e cancelamento, além de teste com sidecar real. Exigir nenhuma perda de resultados obrigatórios, limpeza integral e responsividade dentro de limites quantitativos definidos antes da comparação.
+4. **Decisão de produção:** definir previamente limiares de melhoria de throughput/latência e limites de regressão de qualidade, memória e interação por classe de máquina; repetir medições independentes. Só adotar se todos forem cumpridos, com fallback para pipeline atual e verificação completa do repositório. Limiares ainda não foram estabelecidos; não há evidência aqui para escolher valores.
+
+## Evidências do primeiro protótipo
+
+Foram implementados dois harnesses standalone, sem integrar a pipeline nem escrever no banco: `continuity_experiment.py` (comparação por posição) e `continuity_window.py` (uma janela fixa de duas ou três posições). O segundo ainda não desliza por uma partida, não implementa quotas/reconciliação Rust e usa um limiar experimental de diferença de avaliações vizinhas; portanto, não valida a seleção do produto.
+
+A amostra corrigida por posição usa 180 + 500 ms e MultiPV 3. Seus tempos de busca são próximos do limite por construção; os totais de continuous e warm também ficaram próximos. Cold acrescentou principalmente custo de inicialização. Isso não demonstra ganho de qualidade ou throughput por continuidade. Os dados individuais ficam em `app/benchmarks/results/continuity-fast-medium.json` (diretório ignorado pelo Git), com interpretação e reprodução em `CONTINUITY.md`.
+
+A janela de abertura não promoveu posições. Um segundo corpus legal, após `1. f3 e5` e `2. g4`, produziu duas promoções no Stockfish real, zero reinícios e preservou os dois IDs de `go`. Isso demonstra viabilidade da transição no mesmo trabalho de busca, não melhoria de análise. O corpus e comandos estão em `continuity-tactical.json` e `WINDOW.md`. Falta comparar corpus representativo, qualidade de resultados, CPU/memória agregadas, diferentes divisões de recursos e a seleção completa antes de integrar ao produto. Nenhum parâmetro de produção foi alterado por esses ensaios.
+
+Próxima hipótese prioritária: comparar uma janela deslizante com reconciliação dos mesmos alvos Rust contra a fila atual, mantendo custos e cobertura auditáveis. Avaliar MultiPV fixo versus o ganho atual de reduzir linhas no refinamento; continuidade com mais linhas pode consumir a vantagem de preservar estado. A evidência atual não justifica substituir o pool nem manter um fork de Stockfish.
