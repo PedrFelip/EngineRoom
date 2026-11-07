@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "screening_depth": 8,
+  "verification_depth": 10,
+  "critical_cp": 100,
+  "max_attempts": 1,
+  "multipv": 2,
+  "threads": 1,
+  "hash_mb": 16,
+  "timeout_ms": 30000,
+  "cancel_after_ms": null
+}
