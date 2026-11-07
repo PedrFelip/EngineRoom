@@ -1,0 +1,203 @@
+//! Store de partidas revisadas: CRUD sobre a tabela `games`.
+
+use crate::db::mode::Mode;
+use rusqlite::Connection;
+
+/// Partida revisada a gravar (payload do frontend, sem id/created_at).
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NewGame {
+    pub pgn: String,
+    pub white: String,
+    pub black: String,
+    pub result: String,
+    pub plies: u32,
+    pub engine_tier: String,
+    pub mode: Mode,
+    pub analysis_kind: String,
+    pub depth: u32,
+    pub multipv: u32,
+    pub accuracy_white: f64,
+    pub accuracy_black: f64,
+    pub review_json: String,
+}
+
+/// Linha da lista da home: metadados sem o peso do pgn/review_json.
+#[derive(Debug, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GameSummary {
+    pub id: i64,
+    pub white: String,
+    pub black: String,
+    pub result: String,
+    pub plies: u32,
+    pub engine_tier: String,
+    pub mode: Mode,
+    pub analysis_kind: String,
+    pub depth: u32,
+    pub multipv: u32,
+    pub accuracy_white: f64,
+    pub accuracy_black: f64,
+    pub created_at: String,
+}
+
+/// Cursor composto para a ordem `(created_at DESC, id DESC)` do histórico.
+#[derive(Debug, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GameCursor {
+    pub created_at: String,
+    pub id: i64,
+}
+
+/// Página leve do histórico, sem PGN ou revisão completa.
+#[derive(Debug, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GamePage {
+    pub games: Vec<GameSummary>,
+    pub total: i64,
+    pub next_cursor: Option<GameCursor>,
+}
+
+/// Partida completa, para reabertura instantânea da revisão.
+#[derive(Debug, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StoredGame {
+    #[serde(flatten)]
+    pub summary: GameSummary,
+    pub pgn: String,
+    pub review_json: String,
+}
+
+/// Vista sobre uma [`Connection`] para operações sobre o store de partidas.
+pub struct Store<'a> {
+    conn: &'a Connection,
+}
+
+const SUMMARY_COLS: &str =
+    "id, white, black, result, plies, engine_tier, mode, analysis_kind, depth, multipv,
+        accuracy_white, accuracy_black, created_at";
+
+impl<'a> Store<'a> {
+    pub fn new(conn: &'a Connection) -> Self {
+        Self { conn }
+    }
+
+    pub fn save(&self, game: &NewGame) -> rusqlite::Result<i64> {
+        self.conn.execute(
+            "INSERT OR REPLACE INTO games
+                (pgn, white, black, result, plies, engine_tier, mode, analysis_kind,
+                 depth, multipv, accuracy_white, accuracy_black, review_json)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+            (
+                &game.pgn,
+                &game.white,
+                &game.black,
+                &game.result,
+                game.plies,
+                &game.engine_tier,
+                game.mode,
+                &game.analysis_kind,
+                game.depth,
+                game.multipv,
+                game.accuracy_white,
+                game.accuracy_black,
+                &game.review_json,
+            ),
+        )?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    pub fn list_page(
+        &self,
+        limit: usize,
+        cursor: Option<&GameCursor>,
+    ) -> rusqlite::Result<GamePage> {
+        let limit = limit.clamp(1, 100);
+        let total = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM games", [], |row| row.get(0))?;
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT {SUMMARY_COLS} FROM games
+                 WHERE ?1 IS NULL OR created_at < ?1 OR (created_at = ?1 AND id < ?2)
+                 ORDER BY created_at DESC, id DESC LIMIT ?3"
+        ))?;
+        let cursor_created_at = cursor.map(|value| value.created_at.as_str());
+        let cursor_id = cursor.map(|value| value.id);
+        let mut rows = stmt.query(rusqlite::params![
+            cursor_created_at,
+            cursor_id,
+            (limit + 1) as i64,
+        ])?;
+        let mut out = Vec::new();
+        while let Some(row) = rows.next()? {
+            out.push(summary_from_row(row)?);
+        }
+        let has_more = out.len() > limit;
+        out.truncate(limit);
+        let next_cursor = if has_more {
+            out.last().map(|game| GameCursor {
+                created_at: game.created_at.clone(),
+                id: game.id,
+            })
+        } else {
+            None
+        };
+        Ok(GamePage {
+            games: out,
+            total,
+            next_cursor,
+        })
+    }
+
+    pub fn get(&self, id: i64) -> rusqlite::Result<Option<StoredGame>> {
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT {SUMMARY_COLS}, pgn, review_json FROM games WHERE id = ?1"
+        ))?;
+        let mut rows = stmt.query((id,))?;
+        match rows.next()? {
+            Some(row) => Ok(Some(stored_from_row(row)?)),
+            None => Ok(None),
+        }
+    }
+
+    pub fn remove(&self, id: i64) -> rusqlite::Result<()> {
+        self.conn
+            .execute("DELETE FROM games WHERE id = ?1", (id,))?;
+        Ok(())
+    }
+
+    pub fn clear(&self) -> rusqlite::Result<()> {
+        self.conn.execute("DELETE FROM games", [])?;
+        Ok(())
+    }
+}
+
+/// Mapeia as colunas (ordem de `SUMMARY_COLS`) para [`GameSummary`].
+fn summary_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<GameSummary> {
+    Ok(GameSummary {
+        id: row.get(0)?,
+        white: row.get(1)?,
+        black: row.get(2)?,
+        result: row.get(3)?,
+        plies: row.get(4)?,
+        engine_tier: row.get(5)?,
+        mode: row.get(6)?,
+        analysis_kind: row.get(7)?,
+        depth: row.get(8)?,
+        multipv: row.get(9)?,
+        accuracy_white: row.get(10)?,
+        accuracy_black: row.get(11)?,
+        created_at: row.get(12)?,
+    })
+}
+
+fn stored_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoredGame> {
+    Ok(StoredGame {
+        summary: summary_from_row(row)?,
+        pgn: row.get(13)?,
+        review_json: row.get(14)?,
+    })
+}
+
+#[cfg(test)]
+mod tests;
