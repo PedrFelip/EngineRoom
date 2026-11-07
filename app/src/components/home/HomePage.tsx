@@ -79,6 +79,9 @@ export default function HomePage({ onStart, active = true }: Props) {
   const [mode, setMode] = useState<EngineMode>('depth')
   const [movetimeMs, setMovetimeMs] = useState<number>(DEFAULT_TIME_MS)
   const [lines, setLines] = useState(1)
+  const [pipeline, setPipeline] = useState<'legacy' | 'experimental-b'>(
+    'legacy',
+  )
   const [analysisKind, setAnalysisKind] = useState<AnalysisKind>('auto-fast')
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [games, setGames] = useState<GameSummary[]>([])
@@ -288,6 +291,7 @@ export default function HomePage({ onStart, active = true }: Props) {
     if (!canStart || !parse.ok) return
     onStart({
       pgn,
+      ...(pipeline === 'experimental-b' ? { pipeline } : {}),
       meta: parse.meta,
       engine,
       mode: adaptiveProfile ? 'time' : mode,
@@ -496,78 +500,100 @@ export default function HomePage({ onStart, active = true }: Props) {
 
                   <SegmentedControl
                     className='mb-3'
-                    label='Modo de análise'
-                    value={analysisKind === 'manual' ? 'manual' : 'auto'}
+                    label='Pipeline de análise'
+                    value={pipeline}
                     options={[
-                      { id: 'auto', label: 'Automático' },
-                      { id: 'manual', label: 'Manual' },
+                      { id: 'legacy', label: 'Padrão' },
+                      { id: 'experimental-b', label: 'Experimental B' },
                     ]}
-                    onChange={(value) =>
-                      setAnalysisKind((current) => {
-                        if (value === 'manual') return 'manual'
-                        return current === 'manual' ? 'auto-fast' : current
-                      })
-                    }
+                    onChange={setPipeline}
                   />
+                  {pipeline === 'experimental-b' && (
+                    <p className='mb-3 text-sm text-ink-dim'>
+                      Experimental B é temporário: esta revisão não será salva
+                      no histórico.
+                    </p>
+                  )}
+                  {pipeline === 'legacy' && (
+                    <>
+                      <SegmentedControl
+                        className='mb-3'
+                        label='Modo de análise'
+                        value={analysisKind === 'manual' ? 'manual' : 'auto'}
+                        options={[
+                          { id: 'auto', label: 'Automático' },
+                          { id: 'manual', label: 'Manual' },
+                        ]}
+                        onChange={(value) =>
+                          setAnalysisKind((current) => {
+                            if (value === 'manual') return 'manual'
+                            return current === 'manual' ? 'auto-fast' : current
+                          })
+                        }
+                      />
 
-                  {analysisKind === 'manual' ? (
-                    <EngineTierSelector
-                      mode={mode}
-                      depth={depth}
-                      movetimeMs={movetimeMs}
-                      lines={lines}
-                      plies={plies}
-                      onModeChange={setMode}
-                      onDepthChange={setDepth}
-                      onMovetimeChange={setMovetimeMs}
-                      onLinesChange={setLines}
-                    />
-                  ) : (
-                    <div className='rounded-xl bg-panel-2/50 p-3'>
-                      <div className='mb-3'>
-                        <h3 className='text-sm font-medium text-ink'>
-                          Perfil automático
-                        </h3>
-                        <p className='mt-0.5 text-xs text-ink-faint'>
-                          Mais atenção aos momentos que decidem a partida.
-                        </p>
-                      </div>
-                      <div className='grid grid-cols-2 gap-2'>
-                        {(['auto-fast', 'auto-deep'] as const).map((kind) => {
-                          const isFast = kind === 'auto-fast'
-                          const active = analysisKind === kind
-                          return (
-                            <button
-                              key={kind}
-                              type='button'
-                              aria-pressed={active}
-                              onClick={() => setAnalysisKind(kind)}
-                              className={`rounded-lg px-3 py-2.5 text-left transition ${
-                                active
-                                  ? 'bg-brand/15 ring-1 ring-brand/50'
-                                  : 'bg-panel-3/40 hover:bg-panel-3'
-                              }`}
-                            >
-                              <span
-                                className={`block text-sm font-semibold ${
-                                  active ? 'text-brand' : 'text-ink'
-                                }`}
-                              >
-                                {isFast ? 'Rápido' : 'Profundo'}
-                              </span>
-                              <span className='mt-1 block text-[11px] text-ink-faint'>
-                                {isFast
-                                  ? 'Uma visão geral, em menos tempo'
-                                  : 'Mais detalhe em posições críticas'}
-                              </span>
-                            </button>
-                          )
-                        })}
-                      </div>
-                      <p className='mt-3 text-center text-xs text-ink-dim'>
-                        A análise se adapta à complexidade da sua partida.
-                      </p>
-                    </div>
+                      {analysisKind === 'manual' ? (
+                        <EngineTierSelector
+                          mode={mode}
+                          depth={depth}
+                          movetimeMs={movetimeMs}
+                          lines={lines}
+                          plies={plies}
+                          onModeChange={setMode}
+                          onDepthChange={setDepth}
+                          onMovetimeChange={setMovetimeMs}
+                          onLinesChange={setLines}
+                        />
+                      ) : (
+                        <div className='rounded-xl bg-panel-2/50 p-3'>
+                          <div className='mb-3'>
+                            <h3 className='text-sm font-medium text-ink'>
+                              Perfil automático
+                            </h3>
+                            <p className='mt-0.5 text-xs text-ink-faint'>
+                              Mais atenção aos momentos que decidem a partida.
+                            </p>
+                          </div>
+                          <div className='grid grid-cols-2 gap-2'>
+                            {(['auto-fast', 'auto-deep'] as const).map(
+                              (kind) => {
+                                const isFast = kind === 'auto-fast'
+                                const active = analysisKind === kind
+                                return (
+                                  <button
+                                    key={kind}
+                                    type='button'
+                                    aria-pressed={active}
+                                    onClick={() => setAnalysisKind(kind)}
+                                    className={`rounded-lg px-3 py-2.5 text-left transition ${
+                                      active
+                                        ? 'bg-brand/15 ring-1 ring-brand/50'
+                                        : 'bg-panel-3/40 hover:bg-panel-3'
+                                    }`}
+                                  >
+                                    <span
+                                      className={`block text-sm font-semibold ${
+                                        active ? 'text-brand' : 'text-ink'
+                                      }`}
+                                    >
+                                      {isFast ? 'Rápido' : 'Profundo'}
+                                    </span>
+                                    <span className='mt-1 block text-[11px] text-ink-faint'>
+                                      {isFast
+                                        ? 'Uma visão geral, em menos tempo'
+                                        : 'Mais detalhe em posições críticas'}
+                                    </span>
+                                  </button>
+                                )
+                              },
+                            )}
+                          </div>
+                          <p className='mt-3 text-center text-xs text-ink-dim'>
+                            A análise se adapta à complexidade da sua partida.
+                          </p>
+                        </div>
+                      )}
+                    </>
                   )}
                 </div>
               )}

@@ -132,14 +132,16 @@ const Board = memo(function Board({
       coordinates: false,
       viewOnly: false,
       turnColor: turnColor(fen),
-      movable: onMove
+      ...(onMove
         ? {
-            free: false,
-            color: turnColor(fen),
-            dests: legalDests(fen),
-            events: { after: (from, to) => onMove(from, to) },
+            movable: {
+              free: false,
+              color: turnColor(fen),
+              dests: legalDests(fen),
+              events: { after: (from, to) => onMove(from, to) },
+            },
           }
-        : undefined,
+        : {}),
       highlight: { lastMove: true, check: true },
       animation: { enabled: true, duration: 200 },
       drawable: {

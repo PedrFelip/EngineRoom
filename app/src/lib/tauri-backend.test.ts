@@ -128,16 +128,28 @@ describe('session IPC acquisition and validation', () => {
           channel.onmessage({ ...event, sessionId: 'other' })
           channel.onmessage(event)
           channel.onmessage(event)
-          expect(events).toHaveBeenCalledOnce()
+          const bProgress = {
+            sessionId: id,
+            sequence: 2,
+            type: 'bProgress',
+            stage: 'coverage',
+            completed: 1,
+            total: 2,
+          }
+          channel.onmessage({ ...bProgress, sessionId: 'other' })
+          channel.onmessage(bProgress)
+          channel.onmessage(bProgress)
+          channel.onmessage({ ...bProgress, sequence: 1 })
+          expect(events).toHaveBeenCalledTimes(2)
           channel.onmessage({
             ...event,
-            sequence: 2,
+            sequence: 3,
             result: { invalid: true },
           })
           expect(errors).toHaveBeenCalledOnce()
           yield* Effect.yieldNow
-          channel.onmessage({ ...event, sequence: 3 })
-          expect(events).toHaveBeenCalledOnce()
+          channel.onmessage({ ...event, sequence: 4 })
+          expect(events).toHaveBeenCalledTimes(2)
         }),
       ).pipe(Effect.provide(TauriBackend)),
     )

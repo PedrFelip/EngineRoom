@@ -45,6 +45,9 @@ describe('IPC schema compatibility', () => {
     }
     expect(decode(old).mode).toBe('depth')
     expect(decode({ ...old, mode: 'time' }).mode).toBe('time')
+    expect(
+      decode({ ...old, analysisKind: 'experimental-b' }).analysisKind,
+    ).toBe('experimental-b')
     expect(() => decode({ ...old, mode: null })).toThrow()
   })
 

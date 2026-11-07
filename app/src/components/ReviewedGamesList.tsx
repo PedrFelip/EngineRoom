@@ -162,11 +162,15 @@ const ReviewedGamesList = memo(function ReviewedGamesList({
 
                 <div className='flex items-center justify-between gap-2'>
                   <div className='flex min-w-0 flex-wrap items-center gap-x-1.5 text-[11px] text-muted-foreground'>
-                    <span className='whitespace-nowrap'>
-                      precisão {Math.round(g.accuracyWhite)}% /{' '}
-                      {Math.round(g.accuracyBlack)}%
-                    </span>
-                    <span className='text-border'>·</span>
+                    {g.analysisKind !== 'experimental-b' && (
+                      <>
+                        <span className='whitespace-nowrap'>
+                          precisão {Math.round(g.accuracyWhite)}% /{' '}
+                          {Math.round(g.accuracyBlack)}%
+                        </span>
+                        <span className='text-border'>·</span>
+                      </>
+                    )}
                     <span className='whitespace-nowrap'>
                       {Math.ceil(g.plies / 2)} lances
                     </span>

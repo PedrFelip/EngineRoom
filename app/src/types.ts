@@ -46,6 +46,7 @@ export interface PgnMeta {
 
 export interface ReviewConfig {
   pgn: string
+  pipeline?: 'legacy' | 'experimental-b'
   meta: PgnMeta
   engine: EngineTier
   /** Modo da análise: 'depth' usa `engine.depth`, 'time' usa `movetimeMs`. */
@@ -57,6 +58,7 @@ export interface ReviewConfig {
   lines: number
   /** Revisão já concluída (partida vinda do store) — pula a análise. */
   initialResult?: ReviewResult
+  initialBResult?: BResult
 }
 
 /** Linha da lista de partidas analisadas (sem o peso do pgn/review). */
@@ -69,7 +71,7 @@ export interface GameSummary {
   engineTier: string
   mode: EngineMode
   /** Estratégia persistida; ausente em dados antigos equivale a `manual`. */
-  analysisKind?: AnalysisKind
+  analysisKind?: AnalysisKind | 'experimental-b'
   /** Profundidade (mode='depth') ou milissegundos por lance (mode='time'). */
   depth: number
   multipv: number
@@ -159,3 +161,5 @@ export interface ReviewResult {
   accuracy: AccuracyByColor
   accuracyByPhase: Record<Phase, AccuracyByColor>
 }
+
+import type { BResult } from './lib/review-protocol'

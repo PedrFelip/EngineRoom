@@ -70,8 +70,39 @@ export const ReviewResultSchema = S.Struct({
     endgame: Accuracy,
   }),
 })
+export const BValueSchema = S.Union([
+  S.Struct({ kind: S.Literal('cp'), value: Num }),
+  S.Struct({ kind: S.Literal('mate'), moves: Num }),
+  S.Struct({ kind: S.Literal('terminal'), outcome: S.String }),
+])
+export const BResultSchema = S.Struct({
+  version: S.Literal(1),
+  pipeline: S.Literal('experimental-b'),
+  persistence: S.Literal('temporary'),
+  status: S.Literals(['protocolCompleted', 'unresolved']),
+  positions: S.mutable(S.Array(S.Struct({ ply: Count, fen: S.String }))),
+  decisions: S.mutable(
+    S.Array(
+      S.Struct({
+        ply: Count,
+        version: Positive,
+        status: S.Literals(['preliminary', 'verified', 'unresolved']),
+        best: S.NullOr(BValueSchema),
+        played: S.NullOr(BValueSchema),
+        bestUci: S.NullOr(S.String),
+        lines: S.mutable(
+          S.Array(S.Struct({ pv: Strings, depth: Count, value: BValueSchema })),
+        ),
+        reason: S.NullOr(S.String),
+      }),
+    ),
+  ),
+})
+export type BResult = typeof BResultSchema.Type
+export type BValue = typeof BValueSchema.Type
 export const ReviewConfigSchema = S.Struct({
   pgn: S.String,
+  pipeline: S.optional(S.Literals(['legacy', 'experimental-b'])),
   meta: S.Struct({
     white: S.String,
     black: S.String,
@@ -92,6 +123,7 @@ export const ReviewConfigSchema = S.Struct({
   movetimeMs: S.optional(Positive),
   lines: Positive,
   initialResult: S.optional(ReviewResultSchema),
+  initialBResult: S.optional(BResultSchema),
 })
 export const SessionErrorSchema = S.Struct({
   code: S.String,
@@ -122,6 +154,23 @@ const Envelope = {
 }
 export const SessionEventSchema = S.Union([
   S.Struct({ ...Envelope, type: S.Literal('progress'), progress: Progress }),
+  S.Struct({
+    ...Envelope,
+    type: S.Literal('bProgress'),
+    stage: S.Literals(['coverage', 'verification']),
+    completed: Count,
+    total: Count,
+  }),
+  S.Struct({
+    ...Envelope,
+    type: S.Literal('bCompleted'),
+    result: BResultSchema,
+  }),
+  S.Struct({
+    ...Envelope,
+    type: S.Literal('bUpdated'),
+    result: BResultSchema,
+  }),
   S.Struct({
     ...Envelope,
     type: S.Literal('completed'),

@@ -25,6 +25,7 @@ import Board from '../Board'
 import CandidateLines from '../CandidateLines'
 import EvalBar from '../EvalBar'
 import EvalGraph from '../EvalGraph'
+import BReviewScreen from './BReviewScreen'
 import ReviewAnalysisModal from './ReviewAnalysisModal'
 import ReviewHeader from './ReviewHeader'
 import ReviewLiveStatus from './ReviewLiveStatus'
@@ -49,7 +50,15 @@ function uciToSquares(uci: string): [string, string] | null {
   return [uci.slice(0, 2), uci.slice(2, 4)]
 }
 
-export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
+export default function ReviewScreen(props: ReviewScreenProps) {
+  return props.config.pipeline === 'experimental-b' ? (
+    <BReviewScreen {...props} />
+  ) : (
+    <LegacyReviewScreen {...props} />
+  )
+}
+
+function LegacyReviewScreen({ config, onExit }: ReviewScreenProps) {
   const review = useReview(config)
   const settings = useSettings(({ settings }) => ({
     reviewEngineEnabled: settings.reviewEngineEnabled,

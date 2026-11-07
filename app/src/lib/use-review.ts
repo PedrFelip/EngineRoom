@@ -29,6 +29,12 @@ import { selectReviewEngineSettings } from './settings-store'
 import { TauriBackend } from './tauri-backend'
 
 export interface UseReview {
+  bResult: import('./review-protocol').BResult | null
+  bProgress: {
+    stage: 'coverage' | 'verification'
+    completed: number
+    total: number
+  } | null
   result: ReviewResult | null
   status: ReviewSessionState['status']
   error: string | null
@@ -58,6 +64,8 @@ export interface UseReview {
 export function useReview(config: ReviewConfig): UseReview {
   const settings = useSettings(selectReviewEngineSettings)
   const [store] = useState(createReviewStore)
+  const bResult = useStore(store, (state) => state.bResult)
+  const [bProgress, setBProgress] = useState<UseReview['bProgress']>(null)
   const result = useStore(store, (state) => state.result)
   const currentPly = useStore(store, (state) => state.currentPly)
   const variation = useStore(store, (state) => state.variation)
@@ -93,6 +101,7 @@ export function useReview(config: ReviewConfig): UseReview {
         onStateChange: (s) => {
           setSessionState(s)
         },
+        onBProgress: setBProgress,
         onProgress: (nextProgress) => {
           pendingProgressRef.current = nextProgress
           if (rafRef.current == null) {
@@ -128,7 +137,8 @@ export function useReview(config: ReviewConfig): UseReview {
 
   useEffect(() => {
     const session = sessionRef.current
-    if (!session || !result || sessionState.status !== 'done') return
+    if (!session || (!result && !bResult) || sessionState.status !== 'done')
+      return
     if (!settings.reviewEngineEnabled || !displayedFen) {
       session.cancelLiveAnalysis()
       return
@@ -153,6 +163,7 @@ export function useReview(config: ReviewConfig): UseReview {
   }, [
     displayedFen,
     result,
+    bResult,
     sessionState.status,
     settings.reviewEngineEnabled,
     settings.reviewThreadsAuto,
@@ -178,6 +189,8 @@ export function useReview(config: ReviewConfig): UseReview {
   const endPlaybackAnalysis = useCallback(() => setPlaybackFastPass(false), [])
 
   return {
+    bResult,
+    bProgress,
     result,
     status: sessionState.status,
     error: sessionState.error,

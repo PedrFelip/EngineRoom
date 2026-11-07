@@ -23,6 +23,11 @@ export interface ReviewSessionOpts {
   store: import('./review-store').ReviewStore
   onStateChange(state: ReviewSessionState): void
   onProgress(progress: ReviewProgress): void
+  onBProgress?(progress: {
+    stage: 'coverage' | 'verification'
+    completed: number
+    total: number
+  }): void
 }
 export interface LiveAnalysisSettings {
   searchSeconds: number
@@ -79,6 +84,21 @@ export function createReviewSession(opts: ReviewSessionOpts) {
           if (event.requestId !== undefined && event.requestId !== requestId)
             return
           switch (event.type) {
+            case 'bProgress':
+              opts.onBProgress?.({
+                stage: event.stage,
+                completed: event.completed,
+                total: event.total,
+              })
+              break
+            case 'bCompleted':
+              opts.store.setBResult(event.result)
+              opts.onStateChange({ status: 'done', error: null })
+              Deferred.doneUnsafe(ready, Effect.void)
+              break
+            case 'bUpdated':
+              opts.store.setBResult(event.result)
+              break
             case 'progress': {
               const { update, ...progress } = event.progress
               if (update) winPcts[update.index] = update.winPct

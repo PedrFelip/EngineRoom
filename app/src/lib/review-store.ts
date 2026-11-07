@@ -9,6 +9,7 @@ import { Chess } from 'chess.js'
 import { createStore } from 'zustand/vanilla'
 import type { Classification, PositionAnalysis, ReviewResult } from '../types'
 import { preferredAnalysis } from './analysis-quality'
+import type { BResult } from './review-protocol'
 
 import {
   appendAtPath,
@@ -37,6 +38,7 @@ export interface ReviewVariation {
 
 export interface ReviewStoreSnapshot {
   result: ReviewResult | null
+  bResult: BResult | null
   currentPly: number
   variation: ReviewVariation | null
   variations: ReviewVariation[]
@@ -54,6 +56,7 @@ export interface ReviewStore {
     ) => void,
   ): () => void
   /** Instala o resultado (análise nova ou reabertura) e salta ao último lance. */
+  setBResult(result: BResult): void
   setResult(result: ReviewResult): void
   goTo(ply: number): void
   next(): void
@@ -79,6 +82,7 @@ export function createReviewStore(): ReviewStore {
   let nextVariationId = 1
   const state = createStore<ReviewStoreSnapshot>(() => ({
     result: null,
+    bResult: null,
     currentPly: 0,
     variation: null,
     variations: [],
@@ -141,9 +145,20 @@ export function createReviewStore(): ReviewStore {
     getInitialState: state.getInitialState,
     getSnapshot: state.getState,
     subscribe: state.subscribe,
+    setBResult(bResult: BResult) {
+      const previous = state.getState()
+      commit({
+        bResult,
+        result: null,
+        currentPly: previous.bResult ? previous.currentPly : 0,
+        variation: previous.bResult ? previous.variation : null,
+        variations: previous.bResult ? previous.variations : [],
+      })
+    },
     setResult(result: ReviewResult) {
       commit({
         result,
+        bResult: null,
         currentPly: result.moves.length,
         variation: null,
         variations: [],
@@ -151,7 +166,9 @@ export function createReviewStore(): ReviewStore {
     },
     goTo(ply: number) {
       const snapshot = state.getState()
-      const total = snapshot.result?.moves.length ?? 0
+      const total =
+        snapshot.result?.moves.length ??
+        Math.max(0, (snapshot.bResult?.positions.length ?? 1) - 1)
       commit({
         currentPly: Math.max(0, Math.min(total, ply)),
         variation: null,
@@ -170,7 +187,9 @@ export function createReviewStore(): ReviewStore {
         commitVariation(nextVariation)
         return
       }
-      const total = snapshot.result?.moves.length ?? 0
+      const total =
+        snapshot.result?.moves.length ??
+        Math.max(0, (snapshot.bResult?.positions.length ?? 1) - 1)
       commit({ currentPly: Math.min(total, snapshot.currentPly + 1) })
     },
     prev() {
@@ -221,7 +240,9 @@ export function createReviewStore(): ReviewStore {
     last() {
       const snapshot = state.getState()
       commit({
-        currentPly: snapshot.result?.moves.length ?? 0,
+        currentPly:
+          snapshot.result?.moves.length ??
+          Math.max(0, (snapshot.bResult?.positions.length ?? 1) - 1),
         variation: null,
       })
     },

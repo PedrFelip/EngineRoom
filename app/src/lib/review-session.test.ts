@@ -5,7 +5,11 @@ import reviewFixture from './__tests__/fixtures/review.json'
 import { AnalysisSessions, type SessionPort } from './backend'
 import { SessionError } from './effect/errors'
 import { mountReviewSession, runUi } from './effect/ui-runtime'
-import { ReviewResultSchema, type SessionEvent } from './review-protocol'
+import {
+  BResultSchema,
+  ReviewResultSchema,
+  type SessionEvent,
+} from './review-protocol'
 import type { LiveAnalysisSettings } from './review-session'
 import { createReviewStore } from './review-store'
 
@@ -77,6 +81,88 @@ function fixture(initial = false, cleanup: Effect.Effect<void> = Effect.void) {
 }
 
 describe('Rust session UI glue', () => {
+  it('preserves B navigation across revisions and rejects replaced live results', async () => {
+    const bResult = Schema.decodeUnknownSync(BResultSchema)({
+      version: 1,
+      pipeline: 'experimental-b',
+      persistence: 'temporary',
+      status: 'unresolved',
+      positions: result.positions
+        .slice(0, 2)
+        .map(({ fen }, ply) => ({ ply, fen })),
+      decisions: [
+        {
+          ply: 1,
+          version: 1,
+          status: 'preliminary',
+          best: null,
+          played: null,
+          bestUci: null,
+          lines: [],
+          reason: null,
+        },
+      ],
+    })
+    let emit: ((event: SessionEvent) => void) | undefined
+    const analyze = vi.fn<SessionPort['analyzePosition']>(() => Effect.void)
+    const states = vi.fn()
+    const store = createReviewStore()
+    const layer = Layer.succeed(AnalysisSessions, {
+      open: (_config, onEvent) =>
+        Effect.sync(() => {
+          emit = onEvent
+          return { analyzePosition: analyze, cancelLive: () => Effect.void }
+        }),
+    })
+    const mounted = mountReviewSession(
+      {
+        config: { ...config, pipeline: 'experimental-b' },
+        store,
+        onStateChange: states,
+        onProgress: vi.fn(),
+      },
+      layer,
+    )
+    const starting = mounted.start()
+    await vi.waitFor(() => expect(emit).toBeDefined())
+    const send = (event: SessionEvent) => emit?.(event)
+    send({ sessionId: 'b', sequence: 1, type: 'bUpdated', result: bResult })
+    store.goTo(1)
+    const revised = {
+      ...bResult,
+      decisions: [
+        {
+          ...bResult.decisions[0],
+          version: 2,
+          status: 'unresolved' as const,
+          reason: 'missing evidence',
+        },
+      ],
+    }
+    send({ sessionId: 'b', sequence: 2, type: 'bUpdated', result: revised })
+    expect(store.getState().currentPly).toBe(1)
+    expect(store.getState().bResult?.decisions[0].version).toBe(2)
+    send({ sessionId: 'b', sequence: 3, type: 'bCompleted', result: revised })
+    await starting
+    expect(store.getState().currentPly).toBe(1)
+    expect(states).toHaveBeenCalledWith({ status: 'done', error: null })
+    mounted.analyzePosition({ fen: result.positions[0].fen }, settings)
+    await vi.waitFor(() => expect(analyze).toHaveBeenCalledOnce())
+    mounted.analyzePosition({ fen: result.positions[1].fen }, settings)
+    await vi.waitFor(() => expect(analyze).toHaveBeenCalledTimes(2))
+    send({
+      sessionId: 'b',
+      sequence: 4,
+      type: 'liveCompleted',
+      requestId: analyze.mock.calls[0][0],
+      fen: result.positions[0].fen,
+      analysis: result.positions[0],
+    })
+    expect(
+      store.getState().liveAnalysis.positions[result.positions[0].fen],
+    ).toBeUndefined()
+    await mounted.dispose()
+  })
   it('applies the completed review and releases the session once', async () => {
     const f = fixture()
     await f.mounted.start()

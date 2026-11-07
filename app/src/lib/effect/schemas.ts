@@ -60,7 +60,9 @@ const SummaryFields = {
   mode: S.Literals(['depth', 'time']).pipe(
     S.withDecodingDefaultType(Effect.succeed('depth')),
   ),
-  analysisKind: S.optional(S.Literals(['manual', 'auto-fast', 'auto-deep'])),
+  analysisKind: S.optional(
+    S.Literals(['manual', 'auto-fast', 'auto-deep', 'experimental-b']),
+  ),
   depth: Count,
   multipv: Positive,
   accuracyWhite: Num,

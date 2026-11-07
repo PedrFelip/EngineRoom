@@ -17,6 +17,9 @@ export function selectDisplayedFen(state: ReviewStoreSnapshot) {
   return (
     selectVariationMove(state)?.fen ??
     state.result?.positions[state.currentPly]?.fen ??
+    state.bResult?.positions.find(
+      (position) => position.ply === state.currentPly,
+    )?.fen ??
     null
   )
 }
@@ -46,4 +49,13 @@ export function selectSourcePosition(state: ReviewStoreSnapshot) {
   const original = base?.fen === fen ? base : undefined
   if (live?.fen === fen) return preferredAnalysis(original, live)
   return original
+}
+
+/** Candidate lines evaluate the position before the selected decision. */
+export function selectBDecisionPosition(state: ReviewStoreSnapshot) {
+  return (
+    state.bResult?.positions.find(
+      (position) => position.ply === state.currentPly - 1,
+    ) ?? null
+  )
 }

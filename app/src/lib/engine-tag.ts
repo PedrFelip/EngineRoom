@@ -5,7 +5,7 @@ export interface EngineTagInput {
   /** Profundidade (mode='depth') ou milissegundos (mode='time'). */
   depth: number
   engineTier: string
-  analysisKind?: AnalysisKind
+  analysisKind?: AnalysisKind | 'experimental-b'
 }
 
 /**
@@ -21,6 +21,8 @@ export function formatEngineTag({
   analysisKind = 'manual',
 }: EngineTagInput): string {
   switch (analysisKind) {
+    case 'experimental-b':
+      return 'Experimental B'
     case 'auto-fast':
       return 'Automático · Rápido'
     case 'auto-deep':
