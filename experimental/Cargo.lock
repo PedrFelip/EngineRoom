@@ -785,9 +785,11 @@ dependencies = [
 name = "engineroom-rune"
 version = "0.1.0"
 dependencies = [
+ "blake3",
  "directories",
  "engineroom-backend",
  "pgn-reader",
+ "reqwest",
  "rfd",
  "rune",
  "rune-kit",

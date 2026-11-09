@@ -414,6 +414,96 @@ fn dropping_bridge_drains_owned_session() {
     );
 }
 #[test]
+#[ignore = "requires ENGINE_ROOM_STOCKFISH; tests the real review state and variation feedback"]
+fn real_stockfish_state_displays_live_lines_and_variation_feedback() {
+    let engine = PathBuf::from(
+        std::env::var_os("ENGINE_ROOM_STOCKFISH").expect("set ENGINE_ROOM_STOCKFISH"),
+    );
+    let dir = temp_dir("state-live");
+    let repo = Arc::new(SqliteRepository::new(dir.join("test.db")));
+    let (bridge, wake) = bridge(Arc::new(NativeEngineFactory::new(engine)), repo);
+    let mut state = crate::state::State::default();
+    state.bridge = Some(bridge);
+    state.pgn.replace_text("1. e4 e5 *");
+    state.prepare();
+    state.profile = crate::state::Profile::Manual;
+    state.depth = 3;
+    state.preferences.search_seconds = 1;
+    state.preferences.lines = 2;
+    state.preferences.threads_auto = false;
+    state.preferences.threads = 1;
+    state.preferences.hash_mb = 16;
+    state.start_review();
+    let deadline = Instant::now() + Duration::from_secs(40);
+    while state.real_result.is_none() {
+        state.poll_bridge();
+        assert!(
+            state.bridge_error.is_none(),
+            "review failed: {:?}",
+            state.bridge_error
+        );
+        assert!(Instant::now() < deadline, "review timed out");
+        let _ = wake.recv_timeout(Duration::from_millis(100));
+    }
+    assert!(
+        !state.candidates().is_empty(),
+        "game review should supply candidate lines"
+    );
+    state.click_square(52); // e2
+    state.click_square(36); // e4
+    assert!(state.active_variation.is_some());
+    while state.displayed_classification().is_none() || state.live_positions.is_empty() {
+        state.poll_bridge();
+        assert!(
+            state.bridge_error.is_none(),
+            "review failed: {:?}",
+            state.bridge_error
+        );
+        assert!(
+            state.live_error.is_none(),
+            "live analysis failed: {:?}",
+            state.live_error
+        );
+        assert!(
+            Instant::now() < deadline,
+            "live lines or variation feedback timed out"
+        );
+        let _ = wake.recv_timeout(Duration::from_millis(100));
+    }
+    assert!(
+        !state.candidates().is_empty(),
+        "variation must show legal candidate lines"
+    );
+    assert!(state.displayed_classification().is_some());
+    state.preferences.live_engine = false;
+    state.poll_bridge();
+    assert!(!state.live_running);
+    state.go_to(1);
+    state.preferences.live_engine = true;
+    state.poll_bridge();
+    state.go_to(2);
+    state.poll_bridge();
+    let latest_fen = core::fen(state.position());
+    while !state.live_positions.contains_key(&latest_fen) {
+        state.poll_bridge();
+        assert!(
+            state.live_error.is_none(),
+            "latest search failed: {:?}",
+            state.live_error
+        );
+        assert!(
+            Instant::now() < deadline,
+            "latest position search timed out"
+        );
+        let _ = wake.recv_timeout(Duration::from_millis(100));
+    }
+    assert_eq!(state.position_analysis().unwrap().fen, latest_fen);
+    state.cancel_review();
+    drop(state);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
 #[ignore = "requires ENGINE_ROOM_STOCKFISH; runs native bridge with temporary SQLite"]
 fn real_stockfish_bridge_completion_live_cancel_and_reopen() {
     let engine = PathBuf::from(
@@ -595,7 +685,13 @@ fn chess_selection_uses_the_result_pgn() {
     });
     state.select_chesscom(0);
     assert_eq!(state.pgn.text, "1. e4 e5 *");
+    assert_eq!(
+        state.game.avatar_key,
+        Some(crate::avatar::game_key("1. e4 e5 *"))
+    );
     assert_eq!(state.page, crate::state::Page::Configure);
+    state.prepare();
+    assert!(state.game.avatar_key.is_none());
 }
 
 struct PagedImports;

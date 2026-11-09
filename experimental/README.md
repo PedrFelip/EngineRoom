@@ -65,6 +65,7 @@ orienta layout, escopos de eventos, acessibilidade e testes headless.
   disponível, o campo de caminho continua funcionando como fallback.
 - Buscar partidas no Chess.com por usuário com HTTP nativo, paginação e limites de
   arquivos, candidatos, resposta, PGN e tempo.
+- Na importação Chess.com, tentar carregar em segundo plano as fotos públicas dos jogadores para a revisão. Quando indisponíveis, mostrar iniciais; as fotos obtidas são guardadas localmente e restauradas ao abrir o histórico, mesmo offline; fotos idênticas são compartilhadas entre partidas.
 - Configurar um perfil na interface e abrir a prévia, preservando o rascunho ao voltar.
 - Navegar por clique, setas, Home/End e Shift+setas entre momentos críticos.
 - Alternar Lances, Análise e Resumo; filtrar erros por cor; clicar no gráfico para navegar.

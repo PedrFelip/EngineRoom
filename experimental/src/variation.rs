@@ -6,6 +6,7 @@ pub struct Variation {
     pub positions: Vec<Chess>,
     pub moves: Vec<Move>,
     pub san: Vec<String>,
+    pub classifications: Vec<Option<engineroom_backend::review::types::Classification>>,
     pub cursor: usize,
 }
 impl Variation {
@@ -15,6 +16,7 @@ impl Variation {
             positions: vec![position],
             moves: Vec::new(),
             san: Vec::new(),
+            classifications: Vec::new(),
             cursor: 0,
         }
     }
@@ -22,10 +24,12 @@ impl Variation {
         self.positions.truncate(self.cursor + 1);
         self.moves.truncate(self.cursor);
         self.san.truncate(self.cursor);
+        self.classifications.truncate(self.cursor);
         let mut position = self.positions[self.cursor].clone();
         self.san
             .push(SanPlus::from_move_and_play_unchecked(&mut position, m).to_string());
         self.moves.push(m);
+        self.classifications.push(None);
         self.positions.push(position);
         self.cursor += 1;
     }

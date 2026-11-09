@@ -1,4 +1,5 @@
 //! EngineRoom's experimental native frontend, composed with Rune and OpenCode's kit.
+mod avatar;
 mod bridge;
 mod components;
 mod desktop_paths;
@@ -69,6 +70,7 @@ fn review_shortcut(s: &mut State, key: &rune::KeyEvent, tx: &mut rune::Tx) -> bo
         || key.mods.ctrl
         || key.mods.alt
         || key.mods.logo
+        || matches!(tx.focused(), Some("review-sidebar-grip" | "sidebar-grip"))
     {
         return false;
     }
@@ -150,6 +152,22 @@ fn spec() -> AppSpec<State> {
             ("review", |s| {
                 *s = State::fixture();
                 s.page = Page::Review
+            }),
+            ("review-variation-feedback", |s| {
+                *s = State::fixture();
+                s.page = Page::Review;
+                s.click_square(52);
+                s.click_square(36);
+                if let Some(i) = s.active_variation {
+                    s.variations[i].classifications[0] =
+                        Some(engineroom_backend::review::types::Classification::Bom);
+                }
+            }),
+            ("review-avatars", |s| {
+                *s = State::fixture();
+                s.fixture_avatars();
+                s.game.white = "Jogador de brancas com nome muito longo".into();
+                s.page = Page::Review;
             }),
             ("review-light", |s| {
                 *s = State::fixture();
@@ -246,13 +264,14 @@ fn spec() -> AppSpec<State> {
                     )
                 })
             {
+                s.setup_avatars(wake.clone());
                 s.setup_bridge(wake.clone());
                 s.setup_preferences(wake.clone());
                 s.setup_file_dialog(wake);
             }
         }),
         poll: Some(|s, now, tx| {
-            let changed = s.poll_bridge() | s.tick(now);
+            let changed = s.tick(now) | s.poll_bridge();
             if s.playing {
                 tx.wake_after(std::time::Duration::from_millis(50));
             }

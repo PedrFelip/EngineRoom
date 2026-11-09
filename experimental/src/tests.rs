@@ -154,6 +154,41 @@ fn resizing_reflows_the_board_without_resetting_navigation() {
 }
 
 #[test]
+fn board_lines_follow_toggle_and_variation_feedback_is_visible() {
+    let mut rt = runtime();
+    rt.state.page = Page::Review;
+    rt.state.review_tab = state::ReviewTab::Moves;
+    rt.invalidate();
+    rt.frame(0.0);
+    assert!(
+        rt.find("candidate-arrow-0").is_some(),
+        "lines must be visible on the board outside the analysis tab"
+    );
+    tap(&mut rt, "review-engine-toggle");
+    assert!(!rt.state.preferences.live_engine);
+    assert!(
+        rt.find("candidate-arrow-0").is_none(),
+        "turning lines off must hide arrows"
+    );
+    rt.state.preferences.live_engine = true;
+    rt.state.click_square(52);
+    rt.state.click_square(36);
+    let i = rt.state.active_variation.unwrap();
+    rt.state.variations[i].classifications[0] =
+        Some(engineroom_backend::review::types::Classification::Bom);
+    rt.invalidate();
+    rt.frame(0.0);
+    assert!(
+        rt.find("move-feedback").is_some(),
+        "variation feedback should appear in the inspector"
+    );
+    assert_eq!(
+        rt.state.displayed_classification(),
+        Some(review_data::Classification::Good)
+    );
+}
+
+#[test]
 fn analyzed_feedback_graph_and_critical_navigation_are_interactive() {
     let mut rt = runtime();
     tap(&mut rt, "session-1");
@@ -223,6 +258,26 @@ fn board_moves_create_a_legal_branch_and_reject_illegal_destinations() {
     assert_eq!(rt.state.game.board(0)[62], 'N', "mainline unchanged");
     tap(&mut rt, "previous");
     assert_eq!(crate::variation::board(rt.state.position())[62], 'N');
+}
+#[test]
+fn variation_moves_navigate_directly_and_restore_their_origin() {
+    let mut rt = runtime();
+    tap(&mut rt, "session-1");
+    tap(&mut rt, "move-8");
+    tap(&mut rt, "review-tabs/segment1");
+    tap(&mut rt, "explore-line");
+    let index = rt.state.active_variation.expect("candidate variation");
+    assert!(!rt.state.variations[index].moves.is_empty());
+    tap(&mut rt, "review-tabs/segment0");
+    tap(&mut rt, "move-2");
+    tap(&mut rt, "variation-0-move-1");
+    assert_eq!(rt.state.active_variation, Some(index));
+    assert_eq!(rt.state.variations[index].cursor, 1);
+    assert_eq!(rt.state.ply, 8);
+    assert!(!rt.state.playing);
+    tap(&mut rt, "return-mainline");
+    assert_eq!(rt.state.ply, 8);
+    assert_eq!(rt.state.active_variation, None);
 }
 #[test]
 fn review_settings_and_analysis_states_work() {
@@ -388,6 +443,21 @@ fn right_sidebar_width_survives_visibility_and_navigation() {
     assert_eq!(rt.state.review_sidebar.width(), 392.0);
     rt.state.review_sidebar.reset_width();
     assert_eq!(rt.state.review_sidebar.width(), 352.0);
+    rt.state.review_sidebar.set_width(392.0);
+    rt.invalidate();
+    rt.frame(0.0);
+    tap(&mut rt, "review-sidebar-grip");
+    let ply = rt.state.ply;
+    rt.key(rune::KeyEvent {
+        key: rune::Key::Left,
+        mods: Default::default(),
+    });
+    rt.frame(1.0 / 60.0);
+    assert_eq!(rt.state.review_sidebar.width(), 384.0);
+    assert_eq!(
+        rt.state.ply, ply,
+        "resizing the sidebar must not navigate the game"
+    );
 }
 
 #[test]

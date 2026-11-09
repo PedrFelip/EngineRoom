@@ -9,6 +9,8 @@ pub struct Game {
     pub white: String,
     pub black: String,
     pub event: String,
+    pub avatar_key: Option<String>,
+    pub ratings: [Option<String>; 2],
     pub positions: Vec<Chess>,
     pub moves: Vec<String>,
 }
@@ -18,6 +20,8 @@ impl Game {
             white: "Brancas".into(),
             black: "Pretas".into(),
             event: "Nova partida".into(),
+            avatar_key: None,
+            ratings: [None, None],
             positions: vec![Chess::default()],
             moves: Vec::new(),
         }
@@ -78,6 +82,8 @@ impl Visitor for Preview {
                 .get("Event")
                 .cloned()
                 .unwrap_or_else(|| "Partida importada".into()),
+            avatar_key: None,
+            ratings: [tags.get("WhiteElo").cloned(), tags.get("BlackElo").cloned()],
             positions: vec![position],
             moves: Vec::new(),
         })
