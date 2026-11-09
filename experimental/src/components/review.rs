@@ -240,7 +240,15 @@ fn workspace(s: &State, k: &Kit, size: f32, compact: bool) -> El {
         .items_center()
         .gap(if compact { 6.0 } else { 8.0 })
         .py(if compact { 8.0 } else { 12.0 })
-        .child(board::player(top.0, top.1, k, size + 36.0).h(if compact { 28.0 } else { 32.0 }))
+        .child(board::player(
+            top.0,
+            top.1,
+            s.avatar(if s.flipped { 0 } else { 1 }),
+            &s.game.ratings[if s.flipped { 0 } else { 1 }],
+            k,
+            size + 36.0,
+            compact,
+        ))
         .child(
             row()
                 .gap(10.0)
@@ -248,9 +256,15 @@ fn workspace(s: &State, k: &Kit, size: f32, compact: bool) -> El {
                 .child(review_graph::meter(s, k, size))
                 .child(board::view(s, k, size)),
         )
-        .child(
-            board::player(bottom.0, bottom.1, k, size + 36.0).h(if compact { 28.0 } else { 32.0 }),
-        )
+        .child(board::player(
+            bottom.0,
+            bottom.1,
+            s.avatar(if s.flipped { 1 } else { 0 }),
+            &s.game.ratings[if s.flipped { 1 } else { 0 }],
+            k,
+            size + 36.0,
+            compact,
+        ))
         .child(playback(s, k));
     if let Some(i) = s.active_variation {
         content = content
