@@ -1,7 +1,0 @@
-# Native Chess.com imports
-
-`engineroom_backend::imports` provides the native import boundary. Construct `ChessComHttp::new()` for production, or implement `Http` for a fake transport. A transport must enforce the supplied byte limit while reading. `ImportTasks::new` accepts a shared transport and requires a Tokio runtime when starting work.
-
-Use `ImportTasks::replace(SearchRequest { owner, request_id, username, cursor }, callback).await` for UI searches. Replacement cancels and waits for the owner's previous task before starting the new one. Callbacks receive typed `Event` values containing the request ID and `EventBody`; UI consumers must discard events for old IDs because an earlier callback may already be queued. IDs are unique among active owners. `cancel(owner, id).await` acknowledges cleanup and is idempotent; `close_window` signals cancellation for one owner, and `begin_shutdown` returns a future that drains all tasks. No callback is delivered after cancellation is observed.
-
-`search` is also exposed for direct use with an injected transport, limits and cancellation receiver. Defaults bound archive count, candidates, response and PGN sizes and total time. The production adapter restricts destinations to the Chess.com HTTPS API, disables redirects, applies timeouts and rate-limit cooldown, and bounds streamed bodies. Pagination cursors and returned archive URLs are validated before use. Parsing jobs are awaited during cancellation. The shared task gate limits concurrent searches to one; up to eight owner tasks can be queued.
