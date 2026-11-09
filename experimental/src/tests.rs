@@ -641,6 +641,33 @@ fn summary(id: i64) -> engineroom_backend::db::games::GameSummary {
 }
 
 #[test]
+fn history_actions_remain_available_at_desktop_and_small_sizes() {
+    for size in [(1920.0, 1080.0), (1024.0, 768.0), (720.0, 560.0)] {
+        let mut rt = rune::App::new(spec()).headless_runtime(
+            size,
+            Env {
+                system_dark: true,
+                scale: 1.0,
+            },
+        );
+        rt.state.page = Page::History;
+        rt.state.history.push(summary(1));
+        rt.state.history_total = 1;
+        rt.invalidate();
+        rt.frame(0.0);
+        for key in ["open-1", "reanalyze-1", "delete-1"] {
+            let at = rt
+                .find(key)
+                .unwrap_or_else(|| panic!("{key} missing at {size:?}"));
+            assert!(
+                at.0 >= 0.0 && at.0 < size.0 && at.1 >= 0.0 && at.1 < size.1,
+                "{key} outside viewport at {size:?}: {at:?}"
+            );
+        }
+    }
+}
+
+#[test]
 fn history_pages_append_without_duplicates_and_track_total() {
     use engineroom_backend::db::games::{GameCursor, GamePage};
     let mut state = State::default();
@@ -681,7 +708,65 @@ fn history_pages_append_without_duplicates_and_track_total() {
 }
 
 #[test]
-fn missing_file_picker_and_empty_path_are_reported_without_io() {
+fn file_drop_zone_works_at_desktop_and_small_sizes() {
+    for size in [(1920.0, 1080.0), (1024.0, 768.0), (720.0, 560.0)] {
+        let mut rt = rune::App::new(spec()).headless_runtime(
+            size,
+            Env {
+                system_dark: true,
+                scale: 1.0,
+            },
+        );
+        rt.state.import_source = state::ImportSource::File;
+        rt.invalidate();
+        rt.frame(0.0);
+        let at = rt
+            .find("pgn-drop-zone")
+            .expect("drop zone must be available");
+        assert!(
+            at.0 >= 0.0 && at.0 < size.0 && at.1 >= 0.0 && at.1 < size.1,
+            "drop zone outside viewport at {size:?}: {at:?}"
+        );
+        rt.drag_files(vec!["game.txt".into()], Some(at));
+        rt.frame(0.02);
+        assert!(
+            rt.state.file_drag_over,
+            "drag must highlight zone at {size:?}"
+        );
+        rt.drop_files(vec!["game.txt".into()], Some(at));
+        rt.frame(0.02);
+        assert!(!rt.state.file_drag_over);
+        assert!(rt.state.import_error.as_deref().unwrap().contains(".pgn"));
+    }
+}
+
+#[test]
+fn file_drop_without_pointer_position_reaches_import_screen() {
+    let mut rt = runtime();
+    rt.state.import_source = state::ImportSource::File;
+    rt.invalidate();
+    rt.frame(0.0);
+    rt.drop_files(vec!["game.txt".into()], None);
+    rt.frame(0.02);
+    assert!(
+        rt.state
+            .import_error
+            .as_deref()
+            .is_some_and(|e| e.contains(".pgn"))
+    );
+}
+
+#[test]
+fn dropped_files_require_one_pgn() {
+    let mut state = State::default();
+    state.drop_pgn_files(&["game.txt".into()]);
+    assert!(state.import_error.as_deref().unwrap().contains(".pgn"));
+    state.drop_pgn_files(&["one.pgn".into(), "two.pgn".into()]);
+    assert!(state.import_error.as_deref().unwrap().contains("apenas um"));
+}
+
+#[test]
+fn missing_file_picker_is_reported_without_io() {
     let mut state = State::default();
     state.pick_pgn_file();
     assert!(
@@ -690,16 +775,6 @@ fn missing_file_picker_and_empty_path_are_reported_without_io() {
             .as_deref()
             .is_some_and(|error| error.contains("Seletor de arquivos")),
         "headless scenes have no native picker"
-    );
-    state.import_error = None;
-    state.import_path.replace_text("   ");
-    state.import_file();
-    assert!(
-        state
-            .import_error
-            .as_deref()
-            .is_some_and(|error| error.contains("caminho do arquivo")),
-        "an empty path must not reach the file bridge"
     );
 }
 

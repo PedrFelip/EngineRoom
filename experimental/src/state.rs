@@ -124,8 +124,8 @@ pub struct State {
     pub pgn: TextEdit,
     pub import_source: ImportSource,
     pub import_error: Option<String>,
-    pub import_path: TextEdit,
     pub file_loading: bool,
+    pub file_drag_over: bool,
     pub pending_picks: usize,
     pub file_dialog: Option<crate::file_dialog::FileDialog>,
     pub chess_username: TextEdit,
@@ -198,8 +198,8 @@ impl Default for State {
             pgn: TextEdit::new(""),
             import_source: ImportSource::Paste,
             import_error: None,
-            import_path: TextEdit::new(""),
             file_loading: false,
+            file_drag_over: false,
             pending_picks: 0,
             file_dialog: None,
             chess_username: TextEdit::new(""),
@@ -551,7 +551,6 @@ impl State {
             self.pending_picks = self.pending_picks.saturating_sub(1);
             match result {
                 Ok(Some(path)) => {
-                    self.import_path.replace_text(path.display().to_string());
                     self.read_pgn_path(path);
                 }
                 Ok(None) => {}
@@ -1037,15 +1036,24 @@ impl State {
             Err(error) => self.import_error = Some(format!("Seletor de arquivos: {error}")),
         }
     }
-    pub fn import_file(&mut self) {
-        let path = self.import_path.text.trim();
-        if path.is_empty() {
-            self.import_error = Some("Informe o caminho do arquivo PGN.".into());
+    pub fn drop_pgn_files(&mut self, files: &[std::path::PathBuf]) {
+        if self.file_loading || self.pending_picks > 0 {
             return;
         }
-        self.read_pgn_path(path.into());
+        if let [path] = files {
+            self.read_pgn_path(path.clone());
+        } else {
+            self.import_error = Some("Escolha apenas um arquivo PGN.".into());
+        }
     }
     fn read_pgn_path(&mut self, path: std::path::PathBuf) {
+        if !path
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("pgn"))
+        {
+            self.import_error = Some("Escolha um arquivo com extensão .pgn.".into());
+            return;
+        }
         match self
             .bridge
             .as_ref()

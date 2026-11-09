@@ -320,9 +320,8 @@ impl Bridge {
                     }
                     Intent::ReadFile(path) => {
                         let result = tokio::task::spawn_blocking(move || {
-                            std::fs::read_to_string(&path).map_err(|e| {
-                                format!("Não foi possível ler {}: {e}", path.display())
-                            })
+                            std::fs::read_to_string(&path)
+                                .map_err(|e| format!("Não foi possível ler o arquivo: {e}"))
                         })
                         .await
                         .unwrap_or_else(|e| Err(format!("Falha ao ler arquivo: {e}")));

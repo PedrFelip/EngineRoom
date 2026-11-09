@@ -63,6 +63,12 @@ fn view(s: &State, cx: &mut Cx<State>) -> El {
             .on_key(review_shortcut),
         layers,
     )
+    .on_drop_files(|s: &mut State, files, _| {
+        if s.page == Page::Home && s.import_source == ImportSource::File {
+            s.file_drag_over = false;
+            s.drop_pgn_files(files);
+        }
+    })
 }
 fn review_shortcut(s: &mut State, key: &rune::KeyEvent, tx: &mut rune::Tx) -> bool {
     if s.page != Page::Review

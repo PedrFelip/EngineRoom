@@ -53,7 +53,7 @@ impl FileDialog {
         Self::with_picker(wake, || {
             Box::pin(async {
                 Ok(rfd::AsyncFileDialog::new()
-                    .add_filter("Chess games", &["pgn", "txt"])
+                    .add_filter("Chess games", &["pgn"])
                     .pick_file()
                     .await
                     .map(|file| file.path().to_owned()))

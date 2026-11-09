@@ -71,7 +71,7 @@ fn preferences(s: &State, k: &Kit) -> El {
             "Aparência",
             col().child(ui::setting(
                 "Tema",
-                "A paleta do OpenCode, em claro ou escuro.",
+                "Escolha entre os temas claro e escuro.",
                 theme,
                 k,
             )),

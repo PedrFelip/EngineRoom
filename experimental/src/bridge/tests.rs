@@ -590,6 +590,32 @@ fn real_stockfish_bridge_completion_live_cancel_and_reopen() {
 }
 
 #[test]
+fn dropped_pgn_without_pointer_is_read_and_opens_configuration() {
+    let (bridge, wake) = bridge(Arc::new(NoEngine), Arc::new(MemoryRepo::default()));
+    let path = std::env::temp_dir().join(format!("engineroom-drop-{}.pgn", std::process::id()));
+    std::fs::write(&path, "1. e4 e5 *").expect("write PGN");
+    let mut rt = rune::App::new(crate::spec()).headless_runtime(
+        (720.0, 560.0),
+        rune::Env {
+            system_dark: true,
+            scale: 1.0,
+        },
+    );
+    rt.state.bridge = Some(bridge);
+    rt.state.import_source = crate::state::ImportSource::File;
+    rt.invalidate();
+    rt.frame(0.0);
+    rt.drop_files(vec![path.clone()], None);
+    rt.frame(0.02);
+    wake.recv_timeout(Duration::from_secs(5))
+        .expect("file read wake");
+    rt.state.poll_bridge();
+    assert_eq!(rt.state.page, crate::state::Page::Configure);
+    assert_eq!(rt.state.pgn.text, "1. e4 e5 *");
+    std::fs::remove_file(path).expect("remove PGN");
+}
+
+#[test]
 fn file_import_runs_through_bridge_and_reports_errors() {
     let (bridge, wake) = bridge(Arc::new(NoEngine), Arc::new(MemoryRepo::default()));
     let path = std::env::temp_dir().join(format!("engineroom-import-{}.pgn", std::process::id()));

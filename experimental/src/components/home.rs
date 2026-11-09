@@ -75,6 +75,7 @@ pub fn view(s: &State, k: &Kit, layout: Layout) -> El {
                 _ => ImportSource::ChessCom,
             };
             s.import_error = None;
+            s.file_drag_over = false;
             if s.import_source == ImportSource::ChessCom
                 && !s.preferences.chess_username.is_empty()
                 && s.chess_games.is_empty()
@@ -159,24 +160,44 @@ pub fn view(s: &State, k: &Kit, layout: Layout) -> El {
             .gap(12.0)
             .child(ui::label("Importar arquivo PGN", 16.0, k.c.text_base))
             .child(
-                TextArea::new(&s.import_path)
-                    .label("Caminho do arquivo PGN")
-                    .placeholder("/caminho/para/partida.pgn")
-                    .rows(1)
-                    .width(None)
-                    .on_edit(|s: &mut State| &mut s.import_path)
-                    .on_change(|s: &mut State, _| s.import_error = None)
-                    .build(k)
-                    .key("import-path"),
-            )
-            .child(
-                row()
-                    .flex_wrap()
+                col()
+                    .w_full()
+                    .padding(28.0)
                     .gap(12.0)
-                    .center_y()
+                    .radius(12.0)
+                    .border(
+                        1.0,
+                        if s.file_drag_over {
+                            k.c.text_base
+                        } else {
+                            k.c.border_strong
+                        },
+                    )
+                    .fill(k.c.bg_base)
+                    .child(
+                        ui::label("Solte seu arquivo .pgn nesta área", 16.0, k.c.text_base)
+                            .wrap()
+                            .w_full(),
+                    )
+                    .child(
+                        ui::label(
+                            "Arraste um arquivo para dentro desta caixa ou use o botão abaixo.",
+                            12.0,
+                            k.c.text_muted,
+                        )
+                        .wrap()
+                        .w_full(),
+                    )
+                    .on_drop_hover(|s: &mut State, over, _| s.file_drag_over = over)
+                    .on_drop_files(|s: &mut State, files, _| {
+                        s.file_drag_over = false;
+                        s.drop_pgn_files(files);
+                    })
                     .child(
                         Button::new(if s.pending_picks > 0 {
                             "Escolhendo arquivo…"
+                        } else if s.file_loading {
+                            "Lendo arquivo…"
                         } else {
                             "Escolher arquivo…"
                         })
@@ -187,18 +208,7 @@ pub fn view(s: &State, k: &Kit, layout: Layout) -> El {
                         .build(k)
                         .key("choose-file"),
                     )
-                    .child(
-                        Button::new(if s.file_loading {
-                            "Lendo arquivo…"
-                        } else {
-                            "Abrir caminho"
-                        })
-                        .control_size(ControlSize::ExtraLarge)
-                        .disabled(s.file_loading)
-                        .on_press(State::import_file)
-                        .build(k)
-                        .key("open-file"),
-                    ),
+                    .key("pgn-drop-zone"),
             )
             .child(s.import_error.as_ref().map_or_else(el, |error| {
                 ui::label(error, 12.0, k.c.danger.fg)
