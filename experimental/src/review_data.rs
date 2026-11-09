@@ -45,13 +45,13 @@ impl Classification {
     }
     pub fn color(self) -> Color {
         match self {
-            Self::Book => oklch(0.70, 0.075, 295.0),
-            Self::Best => oklch(0.70, 0.08, 225.0),
-            Self::Excellent => oklch(0.70, 0.10, 160.0),
-            Self::Good => oklch(0.70, 0.075, 145.0),
-            Self::Inaccuracy => oklch(0.80, 0.105, 85.0),
-            Self::Mistake => oklch(0.74, 0.115, 55.0),
-            Self::Blunder => oklch(0.70, 0.13, 28.0),
+            Self::Book => oklch(0.66, 0.12, 295.0),
+            Self::Best => oklch(0.7, 0.11, 225.0),
+            Self::Excellent => oklch(0.7, 0.13, 160.0),
+            Self::Good => oklch(0.7, 0.1, 145.0),
+            Self::Inaccuracy => oklch(0.8, 0.12, 85.0),
+            Self::Mistake => oklch(0.74, 0.15, 55.0),
+            Self::Blunder => oklch(0.68, 0.18, 28.0),
         }
     }
     pub fn critical(self) -> bool {
