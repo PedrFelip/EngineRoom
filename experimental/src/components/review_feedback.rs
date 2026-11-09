@@ -20,20 +20,21 @@ pub fn badge(class: Classification) -> El {
 }
 pub fn current(s: &State, k: &Kit) -> El {
     let ply = s.displayed_ply();
-    if !s.preferences.feedback
-        || ply == 0
-        || s.active_variation.is_some()
-        || s.classification(ply).is_none()
-    {
-        return ui::label(
-            "Mova uma peça para explorar uma variação legal.",
-            12.0,
-            k.c.text_muted,
-        )
-        .wrap()
-        .w_full();
+    if !s.preferences.feedback || ply == 0 || s.displayed_classification().is_none() {
+        let message = if !s.preferences.feedback {
+            "Feedback desativado."
+        } else if ply == 0 {
+            "Selecione um lance para ver o feedback."
+        } else if s.live_error.is_some() {
+            "Feedback indisponível para esta posição."
+        } else if s.active_variation.is_some() && s.live_running {
+            "Analisando o lance…"
+        } else {
+            "Feedback ainda não disponível."
+        };
+        return ui::label(message, 12.0, k.c.text_muted).wrap().w_full();
     }
-    let Some(class) = s.classification(ply) else {
+    let Some(class) = s.displayed_classification() else {
         return ui::label("Feedback indisponível", 12.0, k.c.text_muted);
     };
     let move_name = match s.active_variation {
@@ -68,19 +69,21 @@ pub fn current(s: &State, k: &Kit) -> El {
                     14.0,
                     k.c.text_base,
                 ))
-                .child(ui::label(
-                    format!(
-                        "Δ {:.2}{}",
-                        {
-                            s.real_result
-                                .as_ref()
-                                .and_then(|r| r.moves.iter().find(|m| m.played.ply == ply))
-                                .map_or(0.0, |m| m.cp_loss / 100.0)
-                        },
-                        { "" }
-                    ),
-                    12.0,
-                    k.c.text_muted,
-                )),
+                .children(s.active_variation.is_none().then(|| {
+                    ui::label(
+                        format!(
+                            "Δ {:.2}{}",
+                            {
+                                s.real_result
+                                    .as_ref()
+                                    .and_then(|r| r.moves.iter().find(|m| m.played.ply == ply))
+                                    .map_or(0.0, |m| m.cp_loss / 100.0)
+                            },
+                            { "" }
+                        ),
+                        12.0,
+                        k.c.text_muted,
+                    )
+                })),
         )
 }
