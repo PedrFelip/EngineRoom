@@ -1,0 +1,20 @@
+[package]
+name = "engineroom-backend"
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+publish = false
+
+[dependencies]
+engineroom-application = { path = "../engineroom-application" }
+engineroom-sqlite = { path = "../engineroom-sqlite" }
+engineroom-uci = { path = "../engineroom-uci" }
+engineroom-domain = { path = "../engineroom-domain" }
+tokio = { version = "1", features = ["process", "io-util", "sync", "macros", "time", "rt"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["float_roundtrip"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
+pgn-reader = "0.29"
+shakmaty = "0.30"
+
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "gzip"] }
