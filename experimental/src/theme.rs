@@ -11,7 +11,6 @@ pub const FONTS: &[&[u8]] = &[
     include_bytes!("../assets/IBMPlexSans-SemiBold.otf"),
     include_bytes!("../assets/IBMPlexMono-Regular.otf"),
     include_bytes!("../assets/IBMPlexMono-Medium.otf"),
-    include_bytes!("../assets/NotoSansSymbols2-Regular.ttf"),
 ];
 pub fn kit(appearance: Appearance) -> &'static Kit {
     static DARK: OnceLock<Kit> = OnceLock::new();

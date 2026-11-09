@@ -1,12 +1,14 @@
-//! Classification badges and the current move's fictional review feedback.
+//! Classification badges and feedback from the analyzed game.
 use super::ui;
-use crate::{
-    review_data::{self, Classification},
-    state::State,
-};
-use rune::{Color, El, col, row};
-use rune_kit::Kit;
+use crate::{review_data::Classification, state::State};
+use rune::{Color, El, col, icon, row};
+use rune_kit::{Kit, glyphs};
 pub fn badge(class: Classification) -> El {
+    let glyph = match class {
+        Classification::Best => icon(&glyphs::STAR_FILLED, 14.0).color(Color::BLACK),
+        Classification::Good => icon(&glyphs::CHECK_SMALL, 14.0).color(Color::BLACK),
+        _ => ui::mono(class.glyph(), 12.0, Color::BLACK),
+    };
     row()
         .role("img")
         .label(class.label())
@@ -14,24 +16,26 @@ pub fn badge(class: Classification) -> El {
         .radius(5.0)
         .center()
         .fill(class.color())
-        .child(ui::mono(class.glyph(), 12.0, Color::BLACK).a11y_hidden())
+        .child(glyph.a11y_hidden())
 }
 pub fn current(s: &State, k: &Kit) -> El {
     let ply = s.displayed_ply();
-    if !s.is_mock() || !s.preferences.feedback || ply == 0 {
+    if !s.preferences.feedback
+        || ply == 0
+        || s.active_variation.is_some()
+        || s.classification(ply).is_none()
+    {
         return ui::label(
-            if s.is_mock() {
-                "Selecione um lance para ver seu feedback de demonstração."
-            } else {
-                "Mova uma peça para explorar uma variação legal."
-            },
+            "Mova uma peça para explorar uma variação legal.",
             12.0,
             k.c.text_muted,
         )
         .wrap()
         .w_full();
     }
-    let class = review_data::classification(ply);
+    let Some(class) = s.classification(ply) else {
+        return ui::label("Feedback indisponível", 12.0, k.c.text_muted);
+    };
     let move_name = match s.active_variation {
         Some(i) => s.variations[i]
             .cursor
@@ -66,10 +70,14 @@ pub fn current(s: &State, k: &Kit) -> El {
                 ))
                 .child(ui::label(
                     format!(
-                        "Δ {:.2} · feedback fictício",
-                        (review_data::cp(ply) - review_data::cp(ply.saturating_sub(1))).abs()
-                            as f32
-                            / 100.0
+                        "Δ {:.2}{}",
+                        {
+                            s.real_result
+                                .as_ref()
+                                .and_then(|r| r.moves.iter().find(|m| m.played.ply == ply))
+                                .map_or(0.0, |m| m.cp_loss / 100.0)
+                        },
+                        { "" }
                     ),
                     12.0,
                     k.c.text_muted,

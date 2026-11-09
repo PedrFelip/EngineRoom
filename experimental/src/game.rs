@@ -13,6 +13,16 @@ pub struct Game {
     pub moves: Vec<String>,
 }
 impl Game {
+    pub fn empty() -> Self {
+        Self {
+            white: "Brancas".into(),
+            black: "Pretas".into(),
+            event: "Nova partida".into(),
+            positions: vec![Chess::default()],
+            moves: Vec::new(),
+        }
+    }
+
     pub fn board(&self, ply: usize) -> [char; 64] {
         let position = &self.positions[ply.min(self.moves.len())];
         std::array::from_fn(|index| {

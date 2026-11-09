@@ -1,22 +1,53 @@
-//! Mock candidate lines, preliminary triage and legal variation exploration.
+//! Candidate lines, preliminary triage and legal variation exploration.
 use super::ui;
-use crate::{
-    review_data,
-    state::{ReviewMode, ReviewTab, State},
+use crate::{review_data, state::State};
+use rune::{Color, El, Icon, ScrollSpec, col};
+use rune_kit::{Button, ButtonVariant, ControlSize, Dialog, Kit, SegmentedControl, Switch};
+
+// Primer Octicons, MIT; see assets/OCTICONS-LICENSE.txt.
+static PLAY: Icon = Icon {
+    name: "play",
+    view: 16.0,
+    body: concat!(
+        "<g fill=\"currentColor\" stroke=\"none\">",
+        include_str!("../../assets/triangle-right-16.svg"),
+        "</g>"
+    ),
 };
-use rune::{El, ScrollSpec, col};
-use rune_kit::{Dialog, Kit, SegmentedControl, Switch};
+static CHECK: Icon = Icon {
+    name: "check",
+    view: 16.0,
+    body: concat!(
+        "<g fill=\"currentColor\" stroke=\"none\">",
+        include_str!("../../assets/check-16.svg"),
+        "</g>"
+    ),
+};
 pub fn view(s: &State, k: &Kit) -> El {
-    if !s.is_mock() || !s.preferences.live_engine {
-        return col().gap(14.0).child(ui::label("Linhas candidatas indisponíveis",16.0,k.c.text_base))
-            .child(ui::label("Ative Demonstração e Análise para explorar alternativas legais com avaliações fictícias.",13.0,k.c.text_muted).wrap().w_full());
+    if s.real_result.is_none() || !s.preferences.live_engine {
+        return col()
+            .gap(14.0)
+            .child(ui::label(
+                "Linhas candidatas indisponíveis",
+                16.0,
+                k.c.text_base,
+            ))
+            .child(
+                ui::label(
+                    "As linhas aparecem após a análise. Ative Linhas para explorar alternativas.",
+                    13.0,
+                    k.c.text_muted,
+                )
+                .wrap()
+                .w_full(),
+            );
     }
     let lines = s.candidates();
     let mut content =
         col()
             .gap(12.0)
-            .child(ui::label("Linhas candidatas · mock", 16.0, k.c.text_base));
-    for (i, line) in lines.iter().take(s.preferences.lines.min(3)).enumerate() {
+            .child(ui::label("Alternativas da posição", 16.0, k.c.text_base));
+    for (i, line) in lines.iter().take(s.preferences.lines).enumerate() {
         let title = format!(
             "{}  {}   {}  d{}",
             i + 1,
@@ -24,13 +55,33 @@ pub fn view(s: &State, k: &Kit) -> El {
             review_data::eval(line.cp),
             line.depth
         );
+        let selected = i == s.selected_candidate;
+        let button = Button::new(title)
+            .variant(ButtonVariant::Ghost)
+            .control_size(ControlSize::ExtraLarge);
+        let button = if selected {
+            button.icon(&CHECK)
+        } else {
+            button
+        };
         content = content.child(
-            ui::button(&format!("candidate-{i}"), &title, k)
+            button
+                .build(k)
+                .key(format!("candidate-{i}"))
+                .checked(selected)
                 .w_full()
-                .fill(if i == s.selected_candidate {
-                    k.c.layer_01
+                .border(
+                    1.0,
+                    if selected {
+                        k.c.border_focus
+                    } else {
+                        Color::TRANSPARENT
+                    },
+                )
+                .fill(if selected {
+                    k.c.bg_accent.alpha(0.1)
                 } else {
-                    k.c.bg_base
+                    Color::TRANSPARENT
                 })
                 .on_press(move |s: &mut State| {
                     s.selected_candidate = i;
@@ -47,10 +98,19 @@ pub fn view(s: &State, k: &Kit) -> El {
             )
             .child(
                 ui::label(
-                    format!(
-                        "Chance das brancas: {:.1}% · dados fictícios",
-                        50.0 + (line.cp as f32 / 5.0).clamp(-45.0, 45.0)
-                    ),
+                    format!("Chance das brancas: {:.1}%", {
+                        s.live_result
+                            .as_ref()
+                            .or_else(|| {
+                                if s.active_variation.is_none() {
+                                    s.real_result.as_ref().and_then(|r| r.positions.get(s.ply))
+                                } else {
+                                    None
+                                }
+                            })
+                            .and_then(|p| p.lines.get(s.selected_candidate))
+                            .map_or(50.0, |l| l.win_pct as f32)
+                    }),
                     12.0,
                     k.c.text_muted,
                 )
@@ -58,7 +118,7 @@ pub fn view(s: &State, k: &Kit) -> El {
                 .w_full(),
             )
             .child(
-                ui::primary("explore-line", "▶ Explorar esta linha", k).on_press_tx(
+                ui::button_icon("explore-line", "Explorar esta linha", &PLAY, k).on_press_tx(
                     |s: &mut State, tx| {
                         s.explore_candidate();
                         tx.wake_after(std::time::Duration::from_millis(50));
@@ -72,51 +132,15 @@ pub fn view(s: &State, k: &Kit) -> El {
             k.c.text_muted,
         ));
     }
-    content = content.child(
-        ui::button(
-            "triage-toggle",
-            if s.triage_open {
-                "▾ Linhas da triagem"
-            } else {
-                "▸ Linhas da triagem"
-            },
-            k,
-        )
-        .on_press(|s: &mut State| s.triage_open = !s.triage_open),
-    );
-    if s.triage_open {
-        content = content.child(ui::label(
-            "Avaliação preliminar · mock",
-            12.0,
-            k.c.text_muted,
-        ));
-        for (i, line) in lines.iter().take(3).enumerate() {
-            content = content.child(
-                ui::button(
-                    &format!("triage-{i}"),
-                    &format!(
-                        "{} · {} · d12",
-                        line.san.first().map_or("—", String::as_str),
-                        review_data::eval(line.cp - 12)
-                    ),
-                    k,
-                )
-                .on_press_tx(move |s: &mut State, tx| {
-                    s.selected_candidate = i;
-                    s.explore_candidate();
-                    tx.wake_after(std::time::Duration::from_millis(50));
-                }),
-            );
-        }
-    }
     content
 }
+
 pub fn dialog(s: &State, k: &Kit, layers: &mut Vec<El>) {
     let switches = col()
         .gap(16.0)
         .child(ui::setting(
             "Análise durante a revisão",
-            "Alternativas e setas no modo demonstração.",
+            "Alternativas e setas da posição analisada.",
             Switch::new(s.preferences.live_engine)
                 .label("Ativar análise na revisão")
                 .hide_label()
@@ -139,8 +163,8 @@ pub fn dialog(s: &State, k: &Kit, layers: &mut Vec<El>) {
         .child(ui::label("Linhas candidatas", 13.0, k.c.text_base))
         .child(
             SegmentedControl::new(
-                &["1", "2", "3"],
-                Some(s.preferences.lines.saturating_sub(1).min(2)),
+                &["1", "2", "3", "4", "5"],
+                Some(s.preferences.lines.saturating_sub(1).min(4)),
             )
             .width(None)
             .label("Quantidade de linhas candidatas")
@@ -153,7 +177,7 @@ pub fn dialog(s: &State, k: &Kit, layers: &mut Vec<El>) {
         )
         .child(
             ui::label(
-                "As opções alteram somente esta demonstração. Nenhuma análise real é executada.",
+                "As opções são aplicadas à próxima busca ao vivo.",
                 12.0,
                 k.c.text_muted,
             )
@@ -164,11 +188,12 @@ pub fn dialog(s: &State, k: &Kit, layers: &mut Vec<El>) {
         .child(ui::rule(k))
         .child(ui::setting(
             "Tempo de busca",
-            &format!("{} s · preferência do mock", s.preferences.search_seconds),
-            ui::slider(
+            &format!("{} s", s.preferences.search_seconds),
+            ui::integer_slider(
                 "dialog-time",
                 "Tempo de busca",
-                (s.preferences.search_seconds as f32 - 1.0) / 29.0,
+                s.preferences.search_seconds,
+                (1, 30, "segundos"),
                 |s| (s.preferences.search_seconds as f32 - 1.0) / 29.0,
                 |s, v| {
                     if s.preferences.live_engine {
@@ -176,16 +201,18 @@ pub fn dialog(s: &State, k: &Kit, layers: &mut Vec<El>) {
                     }
                 },
                 k,
-            ),
+            )
+            .disabled(!s.preferences.live_engine),
             k,
         ))
         .child(ui::setting(
             "Threads",
-            &format!("{} threads · perfil fictício", s.preferences.threads),
-            ui::slider(
+            &format!("{} threads", s.preferences.threads),
+            ui::integer_slider(
                 "dialog-threads",
-                "Threads do mock",
-                (s.preferences.threads as f32 - 1.0) / 7.0,
+                "Threads",
+                s.preferences.threads,
+                (1, 8, "threads"),
                 |s| (s.preferences.threads as f32 - 1.0) / 7.0,
                 |s, v| {
                     if s.preferences.live_engine && !s.preferences.threads_auto {
@@ -200,7 +227,7 @@ pub fn dialog(s: &State, k: &Kit, layers: &mut Vec<El>) {
         ))
         .child(
             Switch::new(s.preferences.threads_auto)
-                .label("Adaptar ao computador · mock")
+                .label("Adaptar ao computador")
                 .on_toggle(|s: &mut State| s.preferences.threads_auto = !s.preferences.threads_auto)
                 .build(k)
                 .key("dialog-threads-auto"),
@@ -210,7 +237,7 @@ pub fn dialog(s: &State, k: &Kit, layers: &mut Vec<El>) {
             &format!("{} MB", s.preferences.hash_mb),
             ui::slider(
                 "dialog-memory",
-                "Memória do mock",
+                "Memória",
                 (s.preferences.hash_mb as f32 - 16.0) / 1008.0,
                 |s| (s.preferences.hash_mb as f32 - 16.0) / 1008.0,
                 |s, v| {
@@ -219,7 +246,22 @@ pub fn dialog(s: &State, k: &Kit, layers: &mut Vec<El>) {
                     }
                 },
                 k,
-            ),
+            )
+            .range_value(s.preferences.hash_mb as f64, 16.0, 1024.0)
+            .range_step(16.0)
+            .a11y_value(format!("{} MB", s.preferences.hash_mb))
+            .on_step(|s: &mut State, steps, _| {
+                if s.preferences.live_engine {
+                    s.preferences.hash_mb = (s.preferences.hash_mb as i64 + i64::from(steps) * 16)
+                        .clamp(16, 1024) as usize;
+                }
+            })
+            .on_step_limit(|s: &mut State, max, _| {
+                if s.preferences.live_engine {
+                    s.preferences.hash_mb = if max { 1024 } else { 16 };
+                }
+            })
+            .disabled(!s.preferences.live_engine),
             k,
         ));
     Dialog::new("review-settings", "Análise na revisão")
@@ -238,15 +280,4 @@ pub fn dialog(s: &State, k: &Kit, layers: &mut Vec<El>) {
                 .child(switches.padding(16.0)),
         )
         .build(k, layers);
-}
-pub fn toggle_mode(s: &mut State) {
-    s.review_mode = if s.is_mock() {
-        ReviewMode::Preview
-    } else {
-        ReviewMode::Mock
-    };
-    s.mock_status = crate::state::MockStatus::Ready;
-    if !s.is_mock() && s.review_tab == ReviewTab::Summary {
-        s.review_tab = ReviewTab::Moves;
-    }
 }

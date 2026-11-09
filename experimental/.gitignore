@@ -1,3 +1,3 @@
 /target/
-/artifacts/*.png
-/artifacts/*.json
+/artifacts/
+/scripts/__pycache__/

@@ -5,7 +5,7 @@ use crate::{
     state::{Appearance, SettingsSection, State},
 };
 use rune::{El, col, row};
-use rune_kit::{Button, ControlSize, Kit, SegmentedControl, Select, Switch};
+use rune_kit::{Button, ButtonVariant, ControlSize, Kit, SegmentedControl, Select, Switch};
 
 fn toggle(key: &str, title: &str, value: bool, change: fn(&mut State), k: &Kit) -> El {
     Switch::new(value)
@@ -138,14 +138,151 @@ fn analysis(s: &State, k: &Kit, layers: &mut Vec<El>) -> El {
                 ui::slider("threads","Threads do motor",(s.preferences.threads as f32-1.0)/7.0,|s|(s.preferences.threads as f32-1.0)/7.0,|s,v|s.preferences.threads=(1.0+v*7.0).round() as usize,k),k))
             .child(ui::rule(k)).child(ui::setting("Memória Hash",&format!("{} MB selecionados",s.preferences.hash_mb),
                 ui::slider("hash","Memória Hash",(s.preferences.hash_mb as f32-64.0)/960.0,|s|(s.preferences.hash_mb as f32-64.0)/960.0,|s,v|s.preferences.hash_mb=64+(v*15.0).round() as usize*64,k),k)),k))
-        .child(ui::label("Preferências mantidas nesta sessão. O backend ainda não recebe nem aplica esses valores.",11.0,k.c.text_muted).wrap().w_full())
+        .child(ui::label("As preferências de análise ao vivo são enviadas ao backend. As demais preferências são salvas em um arquivo local.",11.0,k.c.text_muted).wrap().w_full())
 }
-fn storage(k: &Kit) -> El {
-    ui::section("Dados locais",col().gap(18.0)
-        .child(ui::label("Armazenamento ainda não conectado",16.0,k.c.text_base))
-        .child(ui::label("O app Tauri guarda cache de posições e histórico em SQLite. Este frontend ainda não acessa esse banco.",13.0,k.c.text_muted).wrap().w_full())
-        .child(row().gap(12.0).child(Button::new("Limpar cache").disabled(true).build(k).key("clear-cache"))
-        .child(Button::new("Limpar histórico").disabled(true).build(k).key("clear-history"))),k)
+fn readable_bytes(value: u64) -> String {
+    const KB: f64 = 1024.0;
+    const MB: f64 = KB * 1024.0;
+    let value = value as f64;
+    if value >= MB {
+        format!("{:.1} MB", value / MB)
+    } else if value >= KB {
+        format!("{:.1} KB", value / KB)
+    } else {
+        format!("{value:.1} B")
+    }
+}
+fn storage_action(key: &str, title: &str, disabled: bool, k: &Kit) -> El {
+    Button::new(title)
+        .control_size(ControlSize::ExtraLarge)
+        .disabled(disabled)
+        .build(k)
+        .key(key)
+}
+fn storage_destructive(key: &str, title: &str, disabled: bool, k: &Kit) -> El {
+    Button::new(title)
+        .icon(&rune_theme_opencode::icons::TRASH)
+        .control_size(ControlSize::ExtraLarge)
+        .disabled(disabled)
+        .build(k)
+        .key(key)
+}
+fn storage(s: &State, k: &Kit) -> El {
+    let disabled = s.storage_loading || s.bridge.is_none();
+    let mut details = col().w_full().gap(8.0);
+    if s.storage_loading {
+        details = details.child(ui::label("Carregando dados locais…", 12.0, k.c.text_muted));
+    }
+    if let Some(error) = &s.storage_error {
+        details = details.child(
+            ui::label(error, 12.0, k.c.danger.fg)
+                .role("alert")
+                .wrap()
+                .w_full(),
+        );
+    }
+    if let Some(message) = &s.storage_message {
+        details = details.child(ui::label(message, 12.0, k.c.success.fg).wrap().w_full());
+    }
+    if let Some(stats) = &s.storage_stats {
+        details = details
+            .child(
+                ui::setting(
+                    "Cache de posições",
+                    "Avaliações do Stockfish reutilizadas entre revisões.",
+                    ui::label(readable_bytes(stats.cache_bytes), 13.0, k.c.text_base),
+                    k,
+                )
+                .key("storage-cache"),
+            )
+            .child(ui::rule(k))
+            .child(
+                ui::setting(
+                    "Histórico de revisões",
+                    "Partidas revisadas guardadas no banco local.",
+                    ui::label(readable_bytes(stats.games_bytes), 13.0, k.c.text_base),
+                    k,
+                )
+                .key("storage-history"),
+            )
+            .child(ui::rule(k))
+            .child(
+                ui::setting(
+                    "Arquivo do banco",
+                    "Tamanho total do arquivo SQLite no disco.",
+                    ui::label(readable_bytes(stats.db_bytes), 13.0, k.c.text_base),
+                    k,
+                )
+                .key("storage-database"),
+            );
+    } else if !s.storage_loading && s.storage_error.is_none() {
+        details = details.child(ui::label(
+            "Nenhum dado local encontrado.",
+            12.0,
+            k.c.text_muted,
+        ));
+    }
+    let actions = row()
+        .flex_wrap()
+        .gap(8.0)
+        .child(
+            storage_action("refresh-storage", "Atualizar", disabled, k)
+                .on_press(|s: &mut State| s.refresh_storage()),
+        )
+        .child(
+            storage_destructive("clear-cache", "Limpar cache", disabled, k)
+                .on_press(|s: &mut State| s.clear_storage(false)),
+        )
+        .child(
+            storage_destructive("clear-history", "Limpar histórico", disabled, k)
+                .on_press(|s: &mut State| s.request_clear_history()),
+        );
+    let mut maintenance = col().w_full().gap(8.0).child(actions);
+    if s.confirm_clear_history {
+        maintenance = maintenance.child(ui::rule(k)).child(ui::group(
+            col()
+                .gap(10.0)
+                .child(ui::label(
+                    "Apagar todo o histórico de revisões?",
+                    14.0,
+                    k.c.text_base,
+                ))
+                .child(
+                    ui::label(
+                        "As partidas salvas e suas análises serão removidas deste computador. O cache de posições é mantido. Esta ação não pode ser desfeita.",
+                        12.0,
+                        k.c.text_muted,
+                    )
+                    .wrap()
+                    .w_full(),
+                )
+                .child(
+                    row()
+                        .flex_wrap()
+                        .gap(8.0)
+                        .child(
+                            storage_action("cancel-clear-history", "Cancelar", disabled, k)
+                                .on_press(|s: &mut State| s.cancel_clear_history()),
+                        )
+                        .child(
+                            Button::new("Apagar histórico")
+                                .icon(&rune_theme_opencode::icons::TRASH)
+                                .variant(ButtonVariant::Danger)
+                                .control_size(ControlSize::ExtraLarge)
+                                .disabled(disabled)
+                                .build(k)
+                                .key("confirm-clear-history")
+                                .on_press(|s: &mut State| s.clear_storage(true)),
+                        ),
+                ),
+            k,
+        ));
+    }
+    col()
+        .w_full()
+        .gap(26.0)
+        .child(ui::section("Dados locais", details, k))
+        .child(ui::section("Manutenção", maintenance, k))
 }
 pub fn view(s: &State, k: &Kit, layout: Layout, layers: &mut Vec<El>) -> El {
     let selected = match s.section {
@@ -166,6 +303,9 @@ pub fn view(s: &State, k: &Kit, layout: Layout, layers: &mut Vec<El>) -> El {
             _ => SettingsSection::Storage,
         };
         s.select_open = false;
+        if index == 2 {
+            s.refresh_storage();
+        }
     })
     .build(k)
     .key("settings-tabs")
@@ -173,7 +313,7 @@ pub fn view(s: &State, k: &Kit, layout: Layout, layers: &mut Vec<El>) -> El {
     let content = match s.section {
         SettingsSection::Preferences => preferences(s, k),
         SettingsSection::Analysis => analysis(s, k, layers),
-        SettingsSection::Storage => storage(k),
+        SettingsSection::Storage => storage(s, k),
     };
     let header = row()
         .gap(16.0)
@@ -184,7 +324,17 @@ pub fn view(s: &State, k: &Kit, layout: Layout, layers: &mut Vec<El>) -> El {
                 .on_press(|s: &mut State| s.navigate(s.previous_page)),
         );
     ui::page(
-        col().gap(24.0).child(header).child(tabs).child(content),
+        col()
+            .gap(24.0)
+            .child(header)
+            .child(tabs)
+            .child(s.preference_error.as_ref().map_or_else(rune::el, |error| {
+                ui::label(error, 12.0, k.c.danger.fg)
+                    .role("alert")
+                    .wrap()
+                    .w_full()
+            }))
+            .child(content),
         layout,
     )
 }

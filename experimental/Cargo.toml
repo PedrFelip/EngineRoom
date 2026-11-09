@@ -1,3 +1,7 @@
+[workspace]
+members = ["crates/engineroom-backend", "crates/engineroom-domain", "crates/engineroom-application", "crates/engineroom-sqlite", "crates/engineroom-uci"]
+resolver = "2"
+
 [package]
 name = "engineroom-rune"
 version = "0.1.0"
@@ -6,6 +10,12 @@ license = "GPL-3.0-or-later"
 publish = false
 
 [dependencies]
+rfd = "0.15"
+directories = "6"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+engineroom-backend = { path = "crates/engineroom-backend" }
+tokio = { version = "1", features = ["rt-multi-thread", "sync"] }
 rune = { git = "https://github.com/anomalyco/rune", rev = "d03349e25189ce1edc8c26ada6bf6d4aac72c826", default-features = false }
 
 rune-kit = { git = "https://github.com/anomalyco/rune", rev = "d03349e25189ce1edc8c26ada6bf6d4aac72c826", default-features = false }

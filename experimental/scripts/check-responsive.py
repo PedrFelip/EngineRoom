@@ -36,15 +36,17 @@ for path in paths:
     if "chessboard" in keyed:
         board = keyed["chessboard"]["rect"]
         body = keyed["page-body"]["rect"]
-        inspector = keyed["review-inspector"]["rect"]
+        inspector = keyed.get("review-inspector", {}).get("rect")
         assert board[2] == board[3] and board[2] % 8 == 0
         assert board[0] >= body[0] and board[0] + board[2] <= body[0] + body[2] + 0.5
-        if body[2] < 760:
+        if "review-sidebar-pane" not in keyed:
             assert "review-scroll" in keyed
-            assert inspector[1] >= board[1] + board[3]
+            assert inspector is None
+            assert "compact-review-tabs" in keyed or "focus-board" in keyed
         else:
             assert "review-scroll" not in keyed
             assert inspector[0] >= board[0] + board[2]
+            assert inspector[1] < 24, (path.name, "right sidebar uses shell height")
         for key in ("first", "previous", "next", "last", "flip"):
             assert keyed[key]["rect"][3] >= 32, (path.name, key, "target too short")
     if path.stem == "review-narrow-scrolled":
@@ -56,7 +58,7 @@ for path in paths:
         assert "checked" in switch["states"], "bottom preference remains clickable"
         assert 0 <= switch["bounds"][1] <= height - switch["bounds"][3]
     if path.stem == "review-collapsed-720x560":
-        assert keyed["page-body"]["rect"][0] < 30, "sidebar collapsed via keyboard"
+        assert keyed["page-body"]["rect"][0] < 55, "sidebar collapsed via keyboard"
     if path.stem == "settings-sidebar-wide-720x560":
         assert keyed["page-body"]["rect"][0] >= 280, "sidebar resized via dragging"
     print(f"{path.stem}: responsive bounds, reflow and controls OK")

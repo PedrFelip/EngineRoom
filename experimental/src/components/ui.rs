@@ -1,6 +1,6 @@
 //! EngineRoom composition helpers over rune-kit, shared by every screen.
 use crate::{layout::Layout, state::State};
-use rune::{Color, Drag, El, Phase, ScrollSpec, TextStyle, col, el, row, text};
+use rune::{Color, Drag, El, Icon, Phase, ScrollSpec, TextStyle, col, el, icon, row, text};
 use rune_kit::{Button, ButtonVariant, ControlSize, Kit};
 
 pub fn label(value: impl Into<String>, size: f32, color: Color) -> El {
@@ -24,10 +24,25 @@ pub fn button(key: &str, title: &str, k: &Kit) -> El {
         .build(k)
         .key(key)
 }
-pub fn primary(key: &str, title: &str, k: &Kit) -> El {
+pub fn button_icon(key: &str, title: &str, icon: &'static Icon, k: &Kit) -> El {
     Button::new(title)
-        .variant(ButtonVariant::Contrast)
+        .icon(icon)
         .control_size(ControlSize::ExtraLarge)
+        .build(k)
+        .key(key)
+}
+pub fn button_trailing(key: &str, title: &str, variant: ButtonVariant, k: &Kit) -> El {
+    let label = title.to_owned();
+    Button::new(title)
+        .variant(variant)
+        .control_size(ControlSize::ExtraLarge)
+        .label_with(move |font, ink| {
+            row()
+                .gap(6.0)
+                .center_y()
+                .child(text(label).font(font).color(ink))
+                .child(icon(&rune_theme_opencode::icons::CHEVRON_RIGHT, 16.0).color(ink))
+        })
         .build(k)
         .key(key)
 }
@@ -134,6 +149,29 @@ pub fn slider(
                 .shadow(1.0, 3.0, Color::BLACK.alpha(0.25))
                 .a11y_hidden(),
         )
+}
+
+pub fn integer_slider(
+    key: &str,
+    title: &str,
+    value: usize,
+    range: (usize, usize, &str),
+    access: fn(&State) -> f32,
+    change: fn(&mut State, f32),
+    k: &Kit,
+) -> El {
+    let (min, max, unit) = range;
+    let span = (max - min) as f32;
+    let value = value.clamp(min, max);
+    let normalized = (value - min) as f32 / span;
+    slider(key, title, normalized, access, change, k)
+        .range_value(value as f64, min as f64, max as f64)
+        .range_step(1.0)
+        .a11y_value(format!("{value} {unit}"))
+        .on_step(move |s: &mut State, steps, _| {
+            change(s, (access(s) + steps as f32 / span).clamp(0.0, 1.0))
+        })
+        .on_step_limit(move |s: &mut State, max, _| change(s, if max { 1.0 } else { 0.0 }))
 }
 
 /// A bounded form viewport. Only its content grows, so short windows scroll naturally.

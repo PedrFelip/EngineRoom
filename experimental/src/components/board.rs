@@ -1,11 +1,11 @@
 //! Board and player tags. Position data comes from the validated PGN preview.
-use super::{review_feedback, ui::label};
+use super::{pieces, review_feedback, ui::label};
 use crate::{
     review_data,
     state::{ReviewTab, State},
     variation,
 };
-use rune::{El, Family, LineCap, Phase, Shape, TextStyle, col, el, oklch, row, text};
+use rune::{El, LineCap, Phase, Shape, col, el, icon, oklch, row};
 use rune_kit::Kit;
 use shakmaty::Position;
 pub fn view(s: &State, k: &Kit, size: f32) -> El {
@@ -40,19 +40,61 @@ pub fn view(s: &State, k: &Kit, size: f32) -> El {
                 rank * 8 + file
             };
             let piece = pieces[index];
-            let glyph = match piece.to_ascii_lowercase() {
-                'k' => "♚",
-                'q' => "♛",
-                'r' => "♜",
-                'b' => "♝",
-                'n' => "♞",
-                'p' => "♟",
-                _ => "",
+            let (piece_icon, piece_name) = match piece {
+                'K' => (
+                    Some((&pieces::KING_BODY, &pieces::KING_LINES, true)),
+                    "Rei branco",
+                ),
+                'Q' => (
+                    Some((&pieces::QUEEN_BODY, &pieces::QUEEN_LINES, true)),
+                    "Dama branca",
+                ),
+                'R' => (
+                    Some((&pieces::ROOK_BODY, &pieces::ROOK_LINES, true)),
+                    "Torre branca",
+                ),
+                'B' => (
+                    Some((&pieces::BISHOP_BODY, &pieces::BISHOP_LINES, true)),
+                    "Bispo branco",
+                ),
+                'N' => (
+                    Some((&pieces::KNIGHT_BODY, &pieces::KNIGHT_LINES, true)),
+                    "Cavalo branco",
+                ),
+                'P' => (
+                    Some((&pieces::PAWN_BODY, &pieces::PAWN_LINES, true)),
+                    "Peão branco",
+                ),
+                'k' => (
+                    Some((&pieces::KING_BODY, &pieces::KING_LINES, false)),
+                    "Rei preto",
+                ),
+                'q' => (
+                    Some((&pieces::QUEEN_BODY, &pieces::QUEEN_LINES, false)),
+                    "Dama preta",
+                ),
+                'r' => (
+                    Some((&pieces::ROOK_BODY, &pieces::ROOK_LINES, false)),
+                    "Torre preta",
+                ),
+                'b' => (
+                    Some((&pieces::BISHOP_BODY, &pieces::BISHOP_LINES, false)),
+                    "Bispo preto",
+                ),
+                'n' => (
+                    Some((&pieces::KNIGHT_BODY, &pieces::KNIGHT_LINES, false)),
+                    "Cavalo preto",
+                ),
+                'p' => (
+                    Some((&pieces::PAWN_BODY, &pieces::PAWN_LINES, false)),
+                    "Peão preto",
+                ),
+                _ => (None, "vazia"),
             };
             let square = format!("{}{}", (b'a' + (index % 8) as u8) as char, 8 - index / 8);
             let mut tile = el()
                 .key(format!("square-{square}"))
-                .label(format!("{square} {piece}"))
+                .label(format!("{square} {piece_name}"))
                 .size(square_size, square_size)
                 .center()
                 .fill(if (rank + file) % 2 == 0 {
@@ -81,18 +123,25 @@ pub fn view(s: &State, k: &Kit, size: f32) -> El {
             if s.selected_square == Some(index) {
                 tile = tile.border(3.0, k.c.bg_accent);
             }
-            if !glyph.is_empty() {
+            if let Some((body, lines, white)) = piece_icon {
+                let sz = (square_size * 0.78).round();
+                let (fill, stroke) = if white {
+                    (
+                        rune::color::hex("#f5f1e8").unwrap(),
+                        rune::color::hex("#292722").unwrap(),
+                    )
+                } else {
+                    (
+                        rune::color::hex("#302e2a").unwrap(),
+                        rune::color::hex("#d3c9b7").unwrap(),
+                    )
+                };
                 tile = tile.child(
-                    text(glyph)
-                        .font(
-                            TextStyle::new((square_size * 0.71).round(), 400.0)
-                                .family(Family::Named("Noto Sans Symbols 2")),
-                        )
-                        .color(if piece.is_uppercase() {
-                            oklch(0.986, 0.002, 67.8)
-                        } else {
-                            oklch(0.147, 0.004, 49.3)
-                        }),
+                    el().size(sz, sz)
+                        .child(icon(body, sz).color(fill).absolute(0.0, 0.0))
+                        .child(icon(lines, sz).color(stroke).absolute(0.0, 0.0))
+                        .inert()
+                        .a11y_hidden(),
                 );
             }
             if targets.contains(&index) {
@@ -105,9 +154,13 @@ pub fn view(s: &State, k: &Kit, size: f32) -> El {
                         .a11y_hidden(),
                 );
             }
-            if s.is_mock() && s.preferences.feedback && last.is_some_and(|(_, to)| to == index) {
+            if s.preferences.feedback
+                && s.active_variation.is_none()
+                && last.is_some_and(|(_, to)| to == index)
+                && let Some(class) = s.classification(s.displayed_ply())
+            {
                 tile = tile.child(
-                    review_feedback::badge(review_data::classification(s.displayed_ply()))
+                    review_feedback::badge(class)
                         .absolute(square_size - 22.0, 0.0)
                         .inert(),
                 );
@@ -116,8 +169,7 @@ pub fn view(s: &State, k: &Kit, size: f32) -> El {
         }
         board = board.child(line);
     }
-    if s.is_mock()
-        && s.preferences.live_engine
+    if s.preferences.live_engine
         && s.review_tab == ReviewTab::Analysis
         && let Some(m) = s
             .candidates()

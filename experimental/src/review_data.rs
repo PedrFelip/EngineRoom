@@ -1,6 +1,6 @@
-//! Deterministic presentation fixtures. Scores are fictional; candidate moves are legal.
+//! Display formatting for backend classifications, evaluations, and legal candidate moves.
 use rune::{Color, oklch};
-use shakmaty::{CastlingMode, Chess, Move, Position, san::SanPlus};
+use shakmaty::{CastlingMode, Move};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Classification {
     Book,
@@ -35,9 +35,9 @@ impl Classification {
     pub fn glyph(self) -> &'static str {
         match self {
             Self::Book => "B",
-            Self::Best => "★",
+            Self::Best => "",
             Self::Excellent => "!!",
-            Self::Good => "✓",
+            Self::Good => "",
             Self::Inaccuracy => "?!",
             Self::Mistake => "?",
             Self::Blunder => "??",
@@ -58,55 +58,8 @@ impl Classification {
         matches!(self, Self::Mistake | Self::Blunder)
     }
 }
-pub fn classification(ply: usize) -> Classification {
-    const PATTERN: [Classification; 16] = [
-        Classification::Book,
-        Classification::Book,
-        Classification::Best,
-        Classification::Good,
-        Classification::Excellent,
-        Classification::Inaccuracy,
-        Classification::Best,
-        Classification::Mistake,
-        Classification::Good,
-        Classification::Best,
-        Classification::Blunder,
-        Classification::Good,
-        Classification::Best,
-        Classification::Inaccuracy,
-        Classification::Excellent,
-        Classification::Mistake,
-    ];
-    PATTERN[ply.saturating_sub(1) % PATTERN.len()]
-}
-pub fn cp(ply: usize) -> i32 {
-    const SCORES: [i32; 17] = [
-        18, 24, 12, 38, 20, 64, 48, 82, 164, 126, 102, -142, -88, -64, 34, 76, 152,
-    ];
-    SCORES[ply % SCORES.len()]
-}
-pub fn win_pct(ply: usize) -> f32 {
-    50.0 + (cp(ply) as f32 / 5.0).clamp(-45.0, 45.0)
-}
 pub fn eval(cp: i32) -> String {
     format!("{:+.2}", cp as f32 / 100.0)
-}
-pub fn accuracy(plies: impl Iterator<Item = usize>) -> Option<f32> {
-    let scores: Vec<f32> = plies
-        .map(|ply| match classification(ply) {
-            Classification::Book | Classification::Best => 100.0,
-            Classification::Excellent => 98.0,
-            Classification::Good => 92.0,
-            Classification::Inaccuracy => 75.0,
-            Classification::Mistake => 48.0,
-            Classification::Blunder => 18.0,
-        })
-        .collect();
-    if scores.is_empty() {
-        None
-    } else {
-        Some(scores.iter().sum::<f32>() / scores.len() as f32)
-    }
 }
 #[derive(Clone)]
 pub struct Candidate {
@@ -114,38 +67,6 @@ pub struct Candidate {
     pub san: Vec<String>,
     pub cp: i32,
     pub depth: usize,
-}
-pub fn candidates(position: &Chess, ply: usize) -> Vec<Candidate> {
-    let mut legal: Vec<Move> = position.legal_moves().into_iter().collect();
-    legal.sort_by_key(|m| m.to_uci(CastlingMode::Standard).to_string());
-    legal
-        .into_iter()
-        .take(3)
-        .enumerate()
-        .map(|(index, first)| {
-            let mut p = position.clone();
-            let mut moves = Vec::new();
-            let mut san = Vec::new();
-            let mut next = Some(first);
-            for step in 0..5 {
-                let Some(m) = next else {
-                    break;
-                };
-                san.push(SanPlus::from_move_and_play_unchecked(&mut p, m).to_string());
-                moves.push(m);
-                let choices = p.legal_moves();
-                next = choices
-                    .get((ply + index + step) % choices.len().max(1))
-                    .copied();
-            }
-            Candidate {
-                moves,
-                san,
-                cp: cp(ply) - index as i32 * 36,
-                depth: 22 - index * 2,
-            }
-        })
-        .collect()
 }
 pub fn squares(m: Move) -> (usize, usize) {
     let uci = m.to_uci(CastlingMode::Standard).to_string();

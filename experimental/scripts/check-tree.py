@@ -8,6 +8,11 @@ SCENES = (
     "settings", "settings-light", "settings-analysis", "settings-storage",
     "interaction", "settings-interaction", "import", "compact",
 )
+def walk(node):
+    yield node
+    for child in node.get("children", []):
+        yield from walk(child)
+
 BOARD_SCENES = {"review", "opening", "summary", "interaction", "import", "compact"}
 for scene in SCENES:
     tree = json.loads((ARTIFACTS / f"{scene}.json").read_text())
@@ -31,8 +36,15 @@ for scene in SCENES:
         )
     if scene in BOARD_SCENES:
         assert sum(key.startswith("square-") for key in keyed) == 64
+        accessible = {n.get("key"): n for n in walk(tree["accessibility"]) if n.get("key")}
         for key in ("first", "previous", "next", "last", "flip"):
-            assert keyed[key]["role"] == "button" and keyed[key]["focusable"]
+            node = accessible[key]
+            disabled = "disabled" in node.get("states", [])
+            assert keyed[key]["role"] == "button" and node.get("name"), (scene, key)
+            if disabled:
+                assert key != "flip" and not keyed[key]["focusable"] and "click" not in node.get("actions", []), (scene, key)
+            else:
+                assert keyed[key]["focusable"] and {"click", "focus"}.issubset(node.get("actions", [])), (scene, key)
             assert all(size > 0 for size in keyed[key]["rect"][2:]), (scene, key)
     else:
         assert "chessboard" not in keyed, scene
@@ -41,7 +53,7 @@ for scene in SCENES:
     if scene == "manual":
         assert keyed["depth"]["role"] == "slider"
     if scene == "history":
-        assert "open-demo" in keyed
+        assert "open-demo" not in keyed
     if scene.startswith("settings"):
         assert "settings-tabs" in keyed and "settings-close" in keyed
     if scene in {"settings", "settings-light"}:

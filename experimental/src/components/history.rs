@@ -1,40 +1,97 @@
-//! Session-local imported game, presented like the Tauri history entry point.
+//! Persisted reviews from the experimental database.
 use super::ui;
-use crate::{
-    layout::Layout,
-    state::{Page, State},
-};
+use crate::{layout::Layout, state::State};
 use rune::{El, col, row};
-use rune_kit::Kit;
+use rune_kit::{ButtonVariant, Kit};
+
 pub fn view(s: &State, k: &Kit, layout: Layout) -> El {
-    let game = col()
-        .grow(1.0)
-        .min_w(220.0)
-        .gap(8.0)
-        .child(
+    let mut content = col().gap(24.0).child(ui::heading("Volte ao seu jogo", k));
+    if s.history_loading {
+        content = content.child(ui::label("Carregando histórico…", 12.0, k.c.text_muted));
+    }
+    if let Some(error) = &s.history_error {
+        content = content.child(
+            ui::label(error, 12.0, k.c.danger.fg)
+                .role("alert")
+                .wrap()
+                .w_full(),
+        );
+    }
+    if s.bridge.is_some() && s.history.is_empty() && !s.history_loading {
+        content = content.child(ui::label("Nenhuma revisão salva.", 12.0, k.c.text_muted));
+    }
+    if s.history_total > 0 {
+        content = content.child(
             ui::label(
-                format!("{} × {}", s.game.white, s.game.black),
-                18.0,
-                k.c.text_base,
-            )
-            .wrap()
-            .w_full(),
-        )
-        .child(
-            ui::label(
-                format!("{} · {} meios-lances", s.game.event, s.game.moves.len()),
+                format!(
+                    "Mostrando {} de {} revisões",
+                    s.history.len(),
+                    s.history_total
+                ),
                 12.0,
                 k.c.text_muted,
             )
-            .wrap()
-            .w_full(),
+            .key("history-count"),
         );
-    let entry = row().flex_wrap().gap(20.0).center_y().child(game).child(
-        ui::button("open-demo", "Abrir revisão →", k)
-            .on_press(|s: &mut State| s.navigate(Page::Review)),
-    );
-    ui::page(col().gap(24.0).child(ui::heading("Volte ao seu jogo",k))
-        .child(ui::label("Partida disponível nesta sessão",12.0,k.c.text_muted))
-        .child(ui::group(entry,k))
-        .child(ui::label("O histórico persistente será fornecido pelo backend do EngineRoom. Esta lista mostra somente a prévia aberta na sessão atual.",12.0,k.c.text_muted).wrap().w_full()),layout)
+    }
+    for game in &s.history {
+        let id = game.id;
+        let entry = row()
+            .flex_wrap()
+            .gap(12.0)
+            .center_y()
+            .child(
+                col()
+                    .grow(1.0)
+                    .min_w(220.0)
+                    .gap(8.0)
+                    .child(
+                        ui::label(
+                            format!("{} × {}", game.white, game.black),
+                            18.0,
+                            k.c.text_base,
+                        )
+                        .wrap()
+                        .w_full(),
+                    )
+                    .child(
+                        ui::label(
+                            format!(
+                                "{} · {} meios-lances · {}",
+                                game.result, game.plies, game.created_at
+                            ),
+                            12.0,
+                            k.c.text_muted,
+                        )
+                        .wrap()
+                        .w_full(),
+                    ),
+            )
+            .child(
+                ui::button_trailing(
+                    &format!("open-{id}"),
+                    "Abrir revisão",
+                    ButtonVariant::Neutral,
+                    k,
+                )
+                .on_press(move |s: &mut State| s.history_open(id, false)),
+            )
+            .child(
+                ui::button(&format!("reanalyze-{id}"), "Reanalisar", k)
+                    .on_press(move |s: &mut State| s.history_open(id, true)),
+            )
+            .child(
+                ui::button(&format!("delete-{id}"), "Excluir", k)
+                    .on_press(move |s: &mut State| s.history_delete(id)),
+            );
+        content = content.child(ui::group(entry, k));
+    }
+    if s.history_cursor.is_some() {
+        content = content.child(
+            ui::button("history-more", "Carregar mais", k)
+                .disabled(s.history_loading)
+                .on_press(State::next_history),
+        );
+    }
+    ui::page(content, layout)
 }
