@@ -292,7 +292,7 @@ fn workspace(s: &State, k: &Kit, size: f32, compact: bool) -> El {
             )
             .child(ui::label(
                 format!(
-                    "Variação {} · a partir do meio-lance {}",
+                    "Variação {} · a partir da posição {}",
                     i + 1,
                     s.variations[i].root_ply
                 ),
@@ -396,19 +396,40 @@ fn moves_panel(s: &State, k: &Kit) -> El {
     }
     content = content.child(move_list(s, k));
     if !s.variations.is_empty() {
-        let mut branches = col().gap(8.0);
+        let mut branches = col().gap(12.0);
         for (i, v) in s.variations.iter().enumerate() {
+            let mut moves = row().gap(4.0).flex_wrap();
+            for (offset, san) in v.san.iter().enumerate() {
+                let ply = v.root_ply + offset + 1;
+                let caption = format!(
+                    "{}{} {}",
+                    ply.div_ceil(2),
+                    if ply % 2 == 0 { "…" } else { "." },
+                    san
+                );
+                moves = moves.child(
+                    Button::new(&caption)
+                        .variant(ButtonVariant::Ghost)
+                        .control_size(ControlSize::ExtraLarge)
+                        .build(k)
+                        .key(format!("variation-{i}-move-{}", offset + 1))
+                        .fill(if s.active_variation == Some(i) && v.cursor == offset + 1 {
+                            k.c.layer_01
+                        } else {
+                            Color::TRANSPARENT
+                        })
+                        .on_press(move |s: &mut State| s.go_to_variation(i, offset + 1)),
+                );
+            }
             branches = branches.child(
-                ui::button(
-                    &format!("variation-{i}"),
-                    &format!("V{} · {}: {}", i + 1, v.root_ply, v.san.join(" ")),
-                    k,
-                )
-                .w_full()
-                .on_press(move |s: &mut State| {
-                    s.active_variation = Some(i);
-                    s.playing = false;
-                }),
+                col()
+                    .gap(4.0)
+                    .child(ui::label(
+                        format!("Variação {} · posição {}", i + 1, v.root_ply),
+                        12.0,
+                        k.c.text_muted,
+                    ))
+                    .child(moves),
             );
         }
         content = content.child(ui::section("Variações locais", branches, k));

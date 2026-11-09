@@ -47,6 +47,15 @@ pub fn view(s: &State, k: &Kit) -> El {
         col()
             .gap(12.0)
             .child(ui::label("Alternativas da posição", 16.0, k.c.text_base));
+    if let Some(error) = &s.live_error {
+        content = content.child(
+            ui::label(format!("Análise ao vivo: {error}"), 12.0, k.c.danger.fg)
+                .wrap()
+                .w_full(),
+        );
+    } else if s.live_running {
+        content = content.child(ui::label("Analisando posição…", 12.0, k.c.text_muted));
+    }
     for (i, line) in lines.iter().take(s.preferences.lines).enumerate() {
         let title = format!(
             "{}  {}   {}  d{}",
@@ -99,15 +108,7 @@ pub fn view(s: &State, k: &Kit) -> El {
             .child(
                 ui::label(
                     format!("Chance das brancas: {:.1}%", {
-                        s.live_result
-                            .as_ref()
-                            .or_else(|| {
-                                if s.active_variation.is_none() {
-                                    s.real_result.as_ref().and_then(|r| r.positions.get(s.ply))
-                                } else {
-                                    None
-                                }
-                            })
+                        s.position_analysis()
                             .and_then(|p| p.lines.get(s.selected_candidate))
                             .map_or(50.0, |l| l.win_pct as f32)
                     }),
@@ -127,7 +128,13 @@ pub fn view(s: &State, k: &Kit) -> El {
             );
     } else {
         content = content.child(ui::label(
-            "Posição final: sem lances legais.",
+            if s.live_running {
+                "Analisando posição…"
+            } else if s.live_error.is_some() {
+                "Não foi possível analisar esta posição."
+            } else {
+                "Nenhuma linha disponível para esta posição."
+            },
             13.0,
             k.c.text_muted,
         ));
