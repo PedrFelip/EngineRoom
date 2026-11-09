@@ -337,6 +337,7 @@ async fn live_retry_playback_and_source_classification() {
             .any(|e| matches!(e, Event::Classification { .. }))
     );
     settings.fast_pass = false;
+    events.clear();
     pipeline
         .live(&request, &settings, &cancel, &mut |e| events.push(e))
         .await
@@ -345,6 +346,18 @@ async fn live_retry_playback_and_source_classification() {
         events
             .iter()
             .any(|e| matches!(e,Event::Classification {node_id,..} if node_id=="node"))
+    );
+    let classification = events
+        .iter()
+        .position(|event| matches!(event, Event::Classification { .. }))
+        .unwrap();
+    let completed = events
+        .iter()
+        .position(|event| matches!(event, Event::LiveCompleted { .. }))
+        .unwrap();
+    assert!(
+        classification < completed,
+        "completion must follow feedback classification"
     );
     pipeline.discard().await;
 }

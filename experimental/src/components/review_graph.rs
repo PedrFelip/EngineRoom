@@ -106,10 +106,11 @@ pub fn meter(s: &State, _k: &Kit, size: f32) -> El {
     let label = s
         .position_analysis()
         .map_or_else(|| "—".into(), |p| review_data::eval(p.cp));
+    let label_size = if label.len() > 6 { 9.0 } else { 12.0 };
     // Port of the Tauri EvalBar: padded gradient shell with border and shadow, a clipped
     // gradient track, boundary marker and a label riding the dominant side.
     const PAD: f32 = 3.0;
-    const W: f32 = 32.0;
+    const W: f32 = 48.0;
     let track_w = W - PAD * 2.0;
     let track_h = size - PAD * 2.0;
     let white_h = track_h * value / 100.0;
@@ -127,8 +128,14 @@ pub fn meter(s: &State, _k: &Kit, size: f32) -> El {
     let shell_top = if dark { "#303033" } else { "#eeeeef" };
     let shell_bottom = if dark { "#202022" } else { "#fafafa" };
     let shell_border = if dark { "#414145" } else { "#d4d4d8" };
-    let meter = el().key("evaluation-meter");
-    let meter = { meter.label("Avaliação indisponível") };
+    let meter =
+        el().key("evaluation-meter")
+            .role("meter")
+            .label(if s.position_analysis().is_some() {
+                format!("Avaliação {label}")
+            } else {
+                "Avaliação indisponível".to_string()
+            });
     meter
         .size(W, size)
         .radius(14.0)
@@ -187,12 +194,10 @@ pub fn meter(s: &State, _k: &Kit, size: f32) -> El {
                 ),
         )
         .child(
-            // `ui::mono` clamps to 12pt, which is too wide for a 32pt bar; this label
-            // mirrors the Tauri CSS size of 0.625rem with tabular-style metrics.
             rune::text(label)
                 .font(rune::TextStyle {
-                    line_height: 12.0,
-                    ..rune::TextStyle::new(8.0, 600.0).mono()
+                    line_height: 14.0,
+                    ..rune::TextStyle::new(label_size, 600.0).mono()
                 })
                 .color(if white_advances {
                     rune::color::hex("#18181b").unwrap()
@@ -348,12 +353,13 @@ pub fn chart(s: &State, k: &Kit) -> El {
                 .clip_rounded(8.0)
                 .border(1.0, k.c.border_base)
                 .shape(shape)
-                .on_step(|s: &mut State, steps, _| {
+                .on_step(|s: &mut State, steps, tx| {
                     s.go_to(
                         (s.ply as i64 + steps as i64).clamp(0, s.game.moves.len() as i64) as usize,
-                    )
+                    );
+                    crate::reveal_move(s, tx);
                 })
-                .on_drag(|s: &mut State, d, _| {
+                .on_drag(|s: &mut State, d, tx| {
                     if matches!(d.phase, Phase::Down | Phase::Move) {
                         s.go_to(
                             (d.x / d.w.max(1.0) * s.game.moves.len() as f32)
@@ -361,6 +367,7 @@ pub fn chart(s: &State, k: &Kit) -> El {
                                 .clamp(0.0, s.game.moves.len() as f32)
                                 as usize,
                         );
+                        crate::reveal_move(s, tx);
                     }
                 }),
         )

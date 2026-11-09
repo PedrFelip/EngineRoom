@@ -136,6 +136,7 @@ pub fn candidates(position: &Chess, ply: usize) -> Vec<Candidate> {
                 moves,
                 san,
                 cp: cp(ply) - index as i32 * 36,
+                win_pct: engineroom_backend::review::scoring::win_pct(cp(ply) - index as i32 * 36),
                 depth: 22 - index * 2,
             }
         })

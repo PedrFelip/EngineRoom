@@ -280,6 +280,144 @@ fn variation_moves_navigate_directly_and_restore_their_origin() {
     assert_eq!(rt.state.active_variation, None);
 }
 #[test]
+fn branching_from_variation_preserves_the_original_continuation() {
+    let mut state = State::fixture();
+    state.click_square(52); // e2
+    state.click_square(36); // e4
+    state.click_square(12); // e7
+    state.click_square(28); // e5
+    state.previous();
+    state.click_square(10); // c7
+    state.click_square(26); // c5
+    assert_eq!(state.variations.len(), 2);
+    assert_eq!(state.variations[0].san, ["e4", "e5"]);
+    assert_eq!(state.variations[1].san, ["e4", "c5"]);
+    assert_eq!(state.variations[1].branch_from, Some((0, 1)));
+    assert_eq!(state.active_variation, Some(1));
+    state.selected_square = Some(0);
+    state.first();
+    assert_eq!(state.selected_square, None);
+    assert_eq!(state.variations[1].cursor, 1);
+    assert_eq!(state.visible_variation_cursor(), Some((0, 1)));
+    state.variations[0].classifications[0] =
+        Some(engineroom_backend::review::types::Classification::Bom);
+    assert_eq!(
+        state.displayed_classification(),
+        Some(crate::review_data::Classification::Good)
+    );
+    state.previous();
+    assert_eq!(state.active_variation, Some(0));
+    assert_eq!(state.variations[0].cursor, 0);
+    state.go_to_variation(1, 0);
+    state.selected_square = Some(0);
+    state.last();
+    assert_eq!(state.selected_square, None);
+}
+#[test]
+fn playback_waits_for_feedback_but_manual_navigation_remains_available() {
+    let mut state = State::fixture();
+    state.click_square(52);
+    state.click_square(36);
+    let i = state.active_variation.unwrap();
+    state.first();
+    state.playing = true;
+    state.next_step = 0.0;
+    state.live_running = true;
+    state.preferences.live_engine = true;
+    assert!(!state.tick(1.0));
+    assert_eq!(state.variations[i].cursor, 0);
+    state.next();
+    assert_eq!(state.variations[i].cursor, 1);
+    assert!(!state.playing);
+}
+#[test]
+fn board_squares_accept_keyboard_activation() {
+    let mut rt = runtime();
+    tap(&mut rt, "session-1");
+    rt.set_tab_visits_controls(true);
+    for target in ["square-e2", "square-e4"] {
+        let mut found = false;
+        for _ in 0..150 {
+            if rt
+                .elements()
+                .iter()
+                .any(|e| e.focused && e.key.as_deref() == Some(target))
+            {
+                found = true;
+                break;
+            }
+            rt.key(rune::KeyEvent {
+                key: rune::Key::Tab,
+                mods: Default::default(),
+            });
+            rt.frame(1.0 / 60.0);
+        }
+        assert!(found, "{target} should be reachable by keyboard");
+        rt.key(rune::KeyEvent {
+            key: rune::Key::Text(" ".into()),
+            mods: Default::default(),
+        });
+        rt.frame(1.0 / 60.0);
+    }
+    assert_eq!(rt.state.variations[0].san, ["e4"]);
+}
+#[test]
+fn board_drag_still_creates_a_variation() {
+    let mut rt = runtime();
+    tap(&mut rt, "session-1");
+    let from = rt.find("square-e2").unwrap();
+    let to = rt.find("square-e4").unwrap();
+    rt.pointer_down(from.0, from.1);
+    rt.pointer_move(to.0, to.1);
+    rt.pointer_up(to.0, to.1);
+    rt.frame(1.0 / 60.0);
+    assert_eq!(rt.state.variations[0].san, ["e4"]);
+}
+#[test]
+fn promotion_choice_preserves_all_legal_options_and_cancel_is_safe() {
+    for (role, notation) in [
+        (shakmaty::Role::Queen, "a8=Q+"),
+        (shakmaty::Role::Rook, "a8=R+"),
+        (shakmaty::Role::Bishop, "a8=B"),
+        (shakmaty::Role::Knight, "a8=N"),
+    ] {
+        let mut state = State::fixture();
+        state.game =
+            game::parse("[SetUp \"1\"]\n[FEN \"7k/P7/8/8/8/8/4K3/8 w - - 0 1\"]\n\n1. a8=Q+ *")
+                .unwrap();
+        state.go_to(0);
+        state.variations.clear();
+        state.click_square(8);
+        state.click_square(0);
+        assert_eq!(state.promotion_pending, Some((8, 0)));
+        assert!(state.variations.is_empty());
+        state.promote(role);
+        assert_eq!(state.variations[0].san, [notation]);
+        assert_eq!(state.promotion_pending, None);
+    }
+    let mut state = State::fixture();
+    state.promotion_pending = Some((8, 0));
+    state.go_to(0);
+    assert_eq!(state.promotion_pending, None);
+}
+#[test]
+fn promotion_dialog_applies_selected_piece() {
+    let mut rt = runtime();
+    tap(&mut rt, "session-1");
+    rt.state.game =
+        game::parse("[SetUp \"1\"]\n[FEN \"7k/P7/8/8/8/8/4K3/8 w - - 0 1\"]\n\n1. a8=Q+ *")
+            .unwrap();
+    rt.state.go_to(0);
+    rt.state.variations.clear();
+    rt.state.click_square(8);
+    rt.state.click_square(0);
+    rt.invalidate();
+    rt.frame(0.0);
+    tap(&mut rt, "promote-Cavalo");
+    assert_eq!(rt.state.variations[0].san, ["a8=N"]);
+    assert_eq!(rt.state.promotion_pending, None);
+}
+#[test]
 fn review_settings_and_analysis_states_work() {
     let mut rt = runtime();
     tap(&mut rt, "session-1");

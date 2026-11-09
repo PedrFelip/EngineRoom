@@ -27,7 +27,7 @@ impl Layout {
         }
     }
     pub fn stacked_review(self) -> bool {
-        self.width < self.inspector_width() + 320.0 + 78.0
+        self.width < self.inspector_width() + 320.0 + 94.0
     }
     pub fn compact_height(self) -> bool {
         self.height < 640.0
@@ -40,7 +40,7 @@ impl Layout {
     }
     fn board_for(self, lateral: bool, toolbar: bool) -> f32 {
         let width = self.width
-            - 68.0
+            - 84.0
             - if lateral {
                 self.inspector_width() + 10.0
             } else {

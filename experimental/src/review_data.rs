@@ -66,6 +66,7 @@ pub struct Candidate {
     pub moves: Vec<Move>,
     pub san: Vec<String>,
     pub cp: i32,
+    pub win_pct: f64,
     pub depth: usize,
 }
 pub fn squares(m: Move) -> (usize, usize) {

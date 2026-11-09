@@ -3,6 +3,7 @@ use shakmaty::{Chess, Move, Position, san::SanPlus};
 #[derive(Clone)]
 pub struct Variation {
     pub root_ply: usize,
+    pub branch_from: Option<(usize, usize)>,
     pub positions: Vec<Chess>,
     pub moves: Vec<Move>,
     pub san: Vec<String>,
@@ -13,6 +14,7 @@ impl Variation {
     pub fn new(root_ply: usize, position: Chess) -> Self {
         Self {
             root_ply,
+            branch_from: None,
             positions: vec![position],
             moves: Vec::new(),
             san: Vec::new(),

@@ -37,10 +37,10 @@ class DiagnosticsTests(unittest.TestCase):
                 self.assertEqual(matrix.main(), 1)
             self.assertFalse(stale.with_suffix(".json").exists())
             self.assertFalse(stale.with_suffix(".png").exists())
-            self.assertEqual(json.loads((output / "report.json").read_text())["failed"], 80)
+            self.assertEqual(json.loads((output / "report.json").read_text())["failed"], 90)
 
     def test_scene_specific_content_is_required(self):
-        for scene in ("review", "review-light", "demo-analysis", "demo-summary", "review-light-variation", "demo-progress", "demo-error", "preview"):
+        for scene in ("review", "review-light", "demo-analysis", "demo-summary", "review-light-variation", "review-white-variation", "demo-progress", "demo-error", "preview"):
             self.assertTrue(matrix.scene_errors(tree(), scene, True), scene)
             self.assertEqual(matrix.scene_errors(tree(), scene, False), [])
 
@@ -51,11 +51,11 @@ class DiagnosticsTests(unittest.TestCase):
             with patch.object(matrix, "OUT", output), patch("sys.argv", ["matrix", "--quick"]), patch.object(matrix.subprocess, "run", side_effect=error), contextlib.redirect_stdout(io.StringIO()):
                 self.assertEqual(matrix.main(), 1)
             report = json.loads((output / "report.json").read_text())
-            self.assertEqual(report["failed"], 80)
-            self.assertEqual(report["cases"], 80)
+            self.assertEqual(report["failed"], 90)
+            self.assertEqual(report["cases"], 90)
             self.assertIn("partial outputpartial error", next(output.glob("*.log")).read_text())
             markdown = (output / "report.md").read_text()
-            self.assertEqual(markdown.split("## Failures")[0].count("| FAIL |"), 80)
+            self.assertEqual(markdown.split("## Failures")[0].count("| FAIL |"), 90)
 
     def test_malformed_trees_do_not_abort_collection(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -66,7 +66,7 @@ class DiagnosticsTests(unittest.TestCase):
                 return subprocess.CompletedProcess(command, 0, "", "")
             with patch.object(matrix, "OUT", output), patch("sys.argv", ["matrix", "--quick"]), patch.object(matrix.subprocess, "run", side_effect=render), contextlib.redirect_stdout(io.StringIO()):
                 self.assertEqual(matrix.main(), 1)
-            self.assertEqual(json.loads((output / "report.json").read_text())["failed"], 80)
+            self.assertEqual(json.loads((output / "report.json").read_text())["failed"], 90)
 
     def test_missing_page_body_fails_both_sidebar_states(self):
         sample = tree()

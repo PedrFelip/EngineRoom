@@ -22,7 +22,8 @@ def scene_errors(tree, scene, panel_open):
         "review": ["move-list"], "review-light": ["move-list"],
         "demo-analysis": ["candidate-0", "move-feedback"],
         "demo-summary": ["review-summary"],
-        "review-light-variation": ["variation-0"],
+        "review-light-variation": ["variation-0-move-1"],
+        "review-white-variation": ["variation-0-move-1"],
         "demo-progress": ["analysis-progress", "cancel-analysis"],
         "demo-error": ["analysis-error", "retry-analysis"],
         "preview": ["move-list"],
@@ -30,6 +31,15 @@ def scene_errors(tree, scene, panel_open):
     errors = []
     if panel_open and ("compact-review-tabs" not in keys or "compact-panel" in keys):
         errors += [f"Scene {scene}: missing {key}" for key in required[scene] if key not in keys]
+        if scene in ("review-light-variation", "review-white-variation"):
+            by_key = {e.get("key"): e for e in tree["elements"]}
+            adjacent = ("move-8", "branches-8", "move-9") if scene == "review-light-variation" else ("move-7", "branches-7", "move-8")
+            if all(key in by_key for key in adjacent):
+                before, branch, after = (by_key[key]["rect"] for key in adjacent)
+                if not before[1] < branch[1] < after[1]:
+                    errors.append("Variation is not between its origin and the next mainline move")
+            else:
+                errors.append("Variation origin or adjacent move is missing")
         if scene == "preview" and "Nenhuma análise concluída nesta sessão." not in texts:
             errors.append("Scene preview: missing preview explanation")
     return errors
@@ -104,7 +114,7 @@ def main():
     OUT.mkdir(parents=True, exist_ok=True)
     sizes = ("720x560", "1440x1080") if args.quick else ("720x560", "900x700", "1024x768", "1440x1080")
     results = []
-    for scene in ("review", "review-light", "demo-analysis", "demo-summary", "review-light-variation", "demo-progress", "demo-error", "preview"):
+    for scene in ("review", "review-light", "demo-analysis", "demo-summary", "review-light-variation", "review-white-variation", "demo-progress", "demo-error", "preview"):
         for size in sizes:
             for state in ("open", "left-closed", "panel-closed", "both-closed", "panel-reopened"):
                 name = f"{scene}-{size}-{state}"

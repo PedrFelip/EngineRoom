@@ -107,11 +107,7 @@ pub fn view(s: &State, k: &Kit) -> El {
             )
             .child(
                 ui::label(
-                    format!("Chance das brancas: {:.1}%", {
-                        s.position_analysis()
-                            .and_then(|p| p.lines.get(s.selected_candidate))
-                            .map_or(50.0, |l| l.win_pct as f32)
-                    }),
+                    format!("Chance das brancas: {:.1}%", line.win_pct),
                     12.0,
                     k.c.text_muted,
                 )

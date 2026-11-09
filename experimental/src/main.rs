@@ -67,6 +67,7 @@ fn view(s: &State, cx: &mut Cx<State>) -> El {
 fn review_shortcut(s: &mut State, key: &rune::KeyEvent, tx: &mut rune::Tx) -> bool {
     if s.page != Page::Review
         || s.analysis_settings_open
+        || s.promotion_pending.is_some()
         || key.mods.ctrl
         || key.mods.alt
         || key.mods.logo
@@ -88,7 +89,20 @@ fn review_shortcut(s: &mut State, key: &rune::KeyEvent, tx: &mut rune::Tx) -> bo
         }
         _ => return false,
     }
+    reveal_move(s, tx);
     true
+}
+
+fn reveal_move(s: &State, tx: &mut rune::Tx) {
+    let key = match s.visible_variation_cursor() {
+        Some((i, cursor)) if cursor > 0 => {
+            format!("variation-{i}-move-{cursor}")
+        }
+        Some((i, _)) => format!("branches-{}", s.variations[i].root_ply),
+        None if s.ply > 0 => format!("move-{}", s.ply),
+        None => "move-list".to_string(),
+    };
+    tx.scroll_into_view(key);
 }
 
 fn initial_state() -> State {
@@ -181,6 +195,34 @@ fn spec() -> AppSpec<State> {
                 s.go_to(8);
                 s.explore_candidate();
             }),
+            ("review-white-variation", |s| {
+                *s = State::fixture();
+                s.page = Page::Review;
+                s.go_to(7);
+                s.explore_candidate();
+            }),
+            ("review-branches", |s| {
+                *s = State::fixture();
+                s.page = Page::Review;
+                for square in [52, 36, 12, 28] {
+                    s.click_square(square);
+                }
+                s.previous();
+                for square in [10, 26] {
+                    s.click_square(square);
+                }
+            }),
+            ("review-promotion", |s| {
+                *s = State::fixture();
+                s.game = game::parse(
+                    "[SetUp \"1\"]\n[FEN \"7k/P7/8/8/8/8/4K3/8 w - - 0 1\"]\n\n1. a8=Q+ *",
+                )
+                .expect("promotion fixture");
+                s.go_to(0);
+                s.page = Page::Review;
+                s.click_square(8);
+                s.click_square(0);
+            }),
             ("opening", |s| {
                 *s = State::fixture();
                 s.page = Page::Review;
@@ -271,7 +313,18 @@ fn spec() -> AppSpec<State> {
             }
         }),
         poll: Some(|s, now, tx| {
+            let before = (
+                s.active_variation,
+                s.active_variation.map(|i| s.variations[i].cursor),
+            );
             let changed = s.tick(now) | s.poll_bridge();
+            let after = (
+                s.active_variation,
+                s.active_variation.map(|i| s.variations[i].cursor),
+            );
+            if before != after {
+                reveal_move(s, tx);
+            }
             if s.playing {
                 tx.wake_after(std::time::Duration::from_millis(50));
             }

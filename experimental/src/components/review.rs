@@ -6,9 +6,10 @@ use crate::{
 };
 use rune::{Color, Cursor, Drag, El, Icon, Phase, ScrollSpec, col, el, row};
 use rune_kit::{
-    Button, ButtonVariant, ControlSize, IconButton, IconButtonVariant, Kit, Progress,
+    Button, ButtonVariant, ControlSize, Dialog, IconButton, IconButtonVariant, Kit, Progress,
     SegmentedControl, Switch,
 };
+use shakmaty::Position;
 
 // Primer Octicons, MIT; attribution is bundled in assets/OCTICONS-LICENSE.txt.
 static SIDEBAR_EXPAND: Icon = Icon {
@@ -128,10 +129,25 @@ octicon!(PREVIOUS, "../../assets/chevron-left-16.svg", "chevron-left");
 octicon!(NEXT, "../../assets/chevron-right-16.svg", "chevron-right");
 octicon!(LAST, "../../assets/move-to-end-16.svg", "move-to-end");
 octicon!(FLIP, "../../assets/arrow-switch-16.svg", "arrow-switch");
+static PLAY: Icon = Icon {
+    name: "play-variation",
+    view: 16.0,
+    body: "<path fill=\"currentColor\" d=\"M4 2v12l10-6z\"/>",
+};
+static PAUSE: Icon = Icon {
+    name: "pause-variation",
+    view: 16.0,
+    body: "<path fill=\"currentColor\" d=\"M4 2h3v12H4zM9 2h3v12H9z\"/>",
+};
 
 fn playback(s: &State, k: &Kit) -> El {
     let (position, total) = s.active_variation.map_or((s.ply, s.game.moves.len()), |i| {
-        (s.variations[i].cursor, s.variations[i].moves.len())
+        let variation = &s.variations[i];
+        let start = variation.branch_from.map_or(0, |(_, cursor)| cursor);
+        (
+            variation.cursor.saturating_sub(start),
+            variation.moves.len().saturating_sub(start),
+        )
     });
     let counter = s.active_variation.map_or_else(
         || format!("{position:02} / {total}"),
@@ -150,7 +166,10 @@ fn playback(s: &State, k: &Kit) -> El {
             .help(label)
             .shortcut(shortcut)
             .disabled(disabled)
-            .on_press(action)
+            .on_press_tx(move |s: &mut State, tx| {
+                action(s);
+                crate::reveal_move(s, tx);
+            })
             .build(k)
             .key(key)
             .size(32.0, 32.0)
@@ -186,14 +205,17 @@ fn playback(s: &State, k: &Kit) -> El {
                     "Lance anterior",
                     "←",
                     &PREVIOUS,
-                    position == 0,
+                    position == 0 && s.active_variation.is_none(),
                     State::previous,
                 ))
                 .child(
                     ui::mono(counter, 12.0, k.c.text_muted)
                         .key("move-counter")
                         .role("status")
-                        .label(format!("Meio-lance {position} de {total}"))
+                        .label(s.active_variation.map_or_else(
+                            || format!("Meio-lance {position} de {total}"),
+                            |i| format!("Variação {}, meio-lance {position} de {total}", i + 1),
+                        ))
                         .w(72.0)
                         .center(),
                 )
@@ -227,6 +249,44 @@ fn playback(s: &State, k: &Kit) -> El {
                 .checked(s.flipped)
                 .size(32.0, 32.0),
         )
+        .children(s.active_variation.map(|_| {
+            IconButton::new(&RETURN)
+                .variant(IconButtonVariant::GhostMuted)
+                .control_size(ControlSize::Large)
+                .label("Voltar à partida")
+                .help("Voltar à partida")
+                .on_press_tx(|s: &mut State, tx| {
+                    s.selected_square = None;
+                    s.go_to(s.ply);
+                    crate::reveal_move(s, tx);
+                })
+                .build(k)
+                .key("return-mainline")
+                .size(32.0, 32.0)
+        }))
+        .children(s.active_variation.map(|_| {
+            IconButton::new(if s.playing { &PAUSE } else { &PLAY })
+                .variant(IconButtonVariant::GhostMuted)
+                .control_size(ControlSize::Large)
+                .label(if s.playing { "Pausar" } else { "Reproduzir" })
+                .on_press_tx(|s: &mut State, tx| {
+                    s.selected_square = None;
+                    s.selected_candidate = 0;
+                    if !s.playing
+                        && let Some(i) = s.active_variation
+                        && s.variations[i].cursor == s.variations[i].moves.len()
+                    {
+                        s.variations[i].cursor =
+                            s.variations[i].branch_from.map_or(0, |(_, cursor)| cursor);
+                    }
+                    s.playing = !s.playing;
+                    s.next_step = s.clock + 0.65;
+                    tx.wake_after(std::time::Duration::from_millis(50));
+                })
+                .build(k)
+                .key("pause-variation")
+                .size(32.0, 32.0)
+        }))
 }
 fn workspace(s: &State, k: &Kit, size: f32, compact: bool) -> El {
     let (top, bottom) = if s.flipped {
@@ -234,7 +294,7 @@ fn workspace(s: &State, k: &Kit, size: f32, compact: bool) -> El {
     } else {
         ((&s.game.black, "Pretas"), (&s.game.white, "Brancas"))
     };
-    let mut content = col()
+    col()
         .key("board-workspace")
         .w_full()
         .items_center()
@@ -246,7 +306,7 @@ fn workspace(s: &State, k: &Kit, size: f32, compact: bool) -> El {
             s.avatar(if s.flipped { 0 } else { 1 }),
             &s.game.ratings[if s.flipped { 0 } else { 1 }],
             k,
-            size + 36.0,
+            size + 52.0,
             compact,
         ))
         .child(
@@ -262,45 +322,10 @@ fn workspace(s: &State, k: &Kit, size: f32, compact: bool) -> El {
             s.avatar(if s.flipped { 1 } else { 0 }),
             &s.game.ratings[if s.flipped { 1 } else { 0 }],
             k,
-            size + 36.0,
+            size + 52.0,
             compact,
         ))
-        .child(playback(s, k));
-    if let Some(i) = s.active_variation {
-        content = content
-            .child(
-                row()
-                    .gap(8.0)
-                    .flex_wrap()
-                    .center_y()
-                    .child(
-                        ui::button_icon("return-mainline", "Voltar à partida", &RETURN, k)
-                            .on_press(|s: &mut State| s.go_to(s.ply)),
-                    )
-                    .child(
-                        ui::button(
-                            "pause-variation",
-                            if s.playing { "Pausar" } else { "Reproduzir" },
-                            k,
-                        )
-                        .on_press_tx(|s: &mut State, tx| {
-                            s.playing = !s.playing;
-                            s.next_step = s.clock + 0.65;
-                            tx.wake_after(std::time::Duration::from_millis(50));
-                        }),
-                    ),
-            )
-            .child(ui::label(
-                format!(
-                    "Variação {} · a partir da posição {}",
-                    i + 1,
-                    s.variations[i].root_ply
-                ),
-                12.0,
-                k.c.text_muted,
-            ));
-    }
-    content
+        .child(playback(s, k))
 }
 fn learning(s: &State, k: &Kit) -> El {
     let selected = match s.learning_side {
@@ -342,50 +367,228 @@ fn learning(s: &State, k: &Kit) -> El {
         let notation = &s.game.moves[ply - 1];
         let label = format!(
             "{}{} {}",
-            ply.div_ceil(2),
-            if ply % 2 == 0 { "…" } else { "." },
+            s.game.positions[ply - 1].fullmoves(),
+            if s.game.positions[ply - 1].turn().is_black() {
+                "…"
+            } else {
+                "."
+            },
             notation
         );
         moves = moves.child(
-            ui::button(&format!("critical-{ply}"), &label, k)
-                .on_press(move |s: &mut State| s.go_to(ply)),
+            ui::button(&format!("critical-{ply}"), &label, k).on_press_tx(
+                move |s: &mut State, tx| {
+                    s.go_to(ply);
+                    crate::reveal_move(s, tx);
+                },
+            ),
         );
     }
     items = items.child(moves);
     ui::section("Momentos para aprender", items, k)
 }
+fn branches_at(s: &State, k: &Kit, root_ply: usize) -> Option<El> {
+    if !s.variations.iter().any(|v| v.root_ply == root_ply) {
+        return None;
+    }
+    let mut branches = col()
+        .key(format!("branches-{root_ply}"))
+        .gap(8.0)
+        .padding(10.0)
+        .radius(k.radius.md)
+        .border(1.0, k.c.border_base)
+        .fill(k.c.layer_01);
+    for (i, v) in s
+        .variations
+        .iter()
+        .enumerate()
+        .filter(|(_, v)| v.root_ply == root_ply)
+    {
+        let mut moves = row().gap(8.0).flex_wrap();
+        let branch_start = v.branch_from.map_or(0, |(_, cursor)| cursor);
+        for (offset, san) in v.san.iter().enumerate().skip(branch_start) {
+            let position = &v.positions[offset];
+            let caption = format!(
+                "{}{} {}",
+                position.fullmoves(),
+                if position.turn().is_black() {
+                    "…"
+                } else {
+                    "."
+                },
+                san
+            );
+            let selected = s.visible_variation_cursor() == Some((i, offset + 1));
+            let mut move_cell = row()
+                .key(format!("variation-{i}-cell-{}", offset + 1))
+                .gap(4.0)
+                .center_y()
+                .radius(k.radius.md)
+                .motion(rune::Spring::new(0.18, 0.0))
+                .fill(if selected {
+                    k.c.bg_accent.alpha(0.25)
+                } else {
+                    Color::TRANSPARENT
+                });
+            move_cell = move_cell.child(
+                Button::new(&caption)
+                    .variant(ButtonVariant::Ghost)
+                    .control_size(ControlSize::Large)
+                    .build(k)
+                    .key(format!("variation-{i}-move-{}", offset + 1))
+                    .label(format!(
+                        "Variação {}, {caption}{}",
+                        i + 1,
+                        if selected { ", lance atual" } else { "" }
+                    ))
+                    .fill(Color::TRANSPARENT)
+                    .on_press_tx(move |s: &mut State, tx| {
+                        s.go_to_variation(i, offset + 1);
+                        crate::reveal_move(s, tx);
+                    }),
+            );
+            if s.preferences.feedback
+                && let Some(Some(class)) = v.classifications.get(offset)
+            {
+                move_cell = move_cell.child(review_feedback::badge(
+                    crate::state::display_classification(*class),
+                ));
+            }
+            moves = moves.child(move_cell);
+        }
+        let origin = if let Some((parent, cursor)) = v.branch_from {
+            if let Some(previous) = cursor.checked_sub(1) {
+                let position = &v.positions[previous];
+                format!(
+                    "ramo de V{} após {}{} {}",
+                    parent + 1,
+                    position.fullmoves(),
+                    if position.turn().is_black() {
+                        "…"
+                    } else {
+                        "."
+                    },
+                    v.san[previous]
+                )
+            } else {
+                format!("ramo de V{} na origem", parent + 1)
+            }
+        } else if v.root_ply == 0 {
+            "posição inicial".to_string()
+        } else {
+            let before = &s.game.positions[v.root_ply - 1];
+            format!(
+                "após {}{} {}",
+                before.fullmoves(),
+                if before.turn().is_black() { "…" } else { "." },
+                s.game.moves[v.root_ply - 1]
+            )
+        };
+        branches = branches.child(
+            col()
+                .gap(4.0)
+                .child(ui::label(
+                    format!("Variação {} · {origin}", i + 1),
+                    12.0,
+                    k.c.text_muted,
+                ))
+                .child(moves),
+        );
+    }
+    Some(branches)
+}
 fn move_list(s: &State, k: &Kit) -> El {
     let mut list = col().key("move-list").w_full().gap(4.0);
-    for (index, pair) in s.game.moves.chunks(2).enumerate() {
-        let mut line = row()
-            .gap(6.0)
-            .center_y()
-            .child(ui::mono(format!("{}.", index + 1), 12.0, k.c.text_muted).w(24.0));
-        for (side, notation) in pair.iter().enumerate() {
-            let ply = index * 2 + side + 1;
-            let mut cell = row().grow(1.0).min_w(0.0).gap(5.0).center_y().child(
-                Button::new(notation)
-                    .variant(ButtonVariant::Ghost)
-                    .control_size(ControlSize::ExtraLarge)
-                    .build(k)
-                    .key(format!("move-{ply}"))
-                    .grow(1.0)
-                    .min_w(0.0)
-                    .fill(if s.ply == ply && s.active_variation.is_none() {
-                        k.c.layer_01
+    if let Some(branches) = branches_at(s, k, 0) {
+        list = list.child(branches);
+    }
+    let mut index = 0;
+    while index < s.game.moves.len() {
+        let position = &s.game.positions[index];
+        let mut line = row().gap(6.0).center_y().child(
+            ui::mono(
+                format!(
+                    "{}{}",
+                    position.fullmoves(),
+                    if position.turn().is_black() {
+                        "…"
                     } else {
-                        Color::TRANSPARENT
-                    })
-                    .on_press(move |s: &mut State| s.go_to(ply)),
-            );
+                        "."
+                    }
+                ),
+                12.0,
+                k.c.text_muted,
+            )
+            .w(32.0),
+        );
+        if position.turn().is_black() {
+            line = line.child(el().grow(1.0));
+        }
+        for _ in 0..if position.turn().is_black() { 1 } else { 2 } {
+            if index >= s.game.moves.len() {
+                break;
+            }
+            let ply = index + 1;
+            let notation = &s.game.moves[index];
+            let selected = s.ply == ply
+                && s.active_variation
+                    .is_none_or(|i| s.variations[i].cursor == 0);
+            let mut cell = row()
+                .key(format!("move-cell-{ply}"))
+                .grow(1.0)
+                .min_w(0.0)
+                .gap(5.0)
+                .center_y()
+                .radius(k.radius.md)
+                .motion(rune::Spring::new(0.18, 0.0))
+                .fill(if selected {
+                    k.c.bg_accent.alpha(0.25)
+                } else {
+                    Color::TRANSPARENT
+                })
+                .child(
+                    Button::new(notation)
+                        .variant(ButtonVariant::Ghost)
+                        .control_size(ControlSize::ExtraLarge)
+                        .build(k)
+                        .key(format!("move-{ply}"))
+                        .label(format!(
+                            "{}{} {}{}",
+                            s.game.positions[index].fullmoves(),
+                            if s.game.positions[index].turn().is_black() {
+                                "…"
+                            } else {
+                                "."
+                            },
+                            notation,
+                            if selected { ", lance atual" } else { "" }
+                        ))
+                        .grow(1.0)
+                        .min_w(0.0)
+                        .fill(Color::TRANSPARENT)
+                        .on_press_tx(move |s: &mut State, tx| {
+                            s.go_to(ply);
+                            crate::reveal_move(s, tx);
+                        }),
+                );
             if s.preferences.feedback
                 && let Some(class) = s.classification(ply)
             {
                 cell = cell.child(review_feedback::badge(class));
             }
             line = line.child(cell);
+            index += 1;
+            if s.variations.iter().any(|v| v.root_ply == index) {
+                if s.game.positions[index - 1].turn().is_white() {
+                    line = line.child(el().grow(1.0));
+                }
+                break;
+            }
         }
         list = list.child(line);
+        if let Some(branches) = branches_at(s, k, index) {
+            list = list.child(branches);
+        }
     }
     list
 }
@@ -395,45 +598,6 @@ fn moves_panel(s: &State, k: &Kit) -> El {
         content = content.child(learning(s, k));
     }
     content = content.child(move_list(s, k));
-    if !s.variations.is_empty() {
-        let mut branches = col().gap(12.0);
-        for (i, v) in s.variations.iter().enumerate() {
-            let mut moves = row().gap(4.0).flex_wrap();
-            for (offset, san) in v.san.iter().enumerate() {
-                let ply = v.root_ply + offset + 1;
-                let caption = format!(
-                    "{}{} {}",
-                    ply.div_ceil(2),
-                    if ply % 2 == 0 { "…" } else { "." },
-                    san
-                );
-                moves = moves.child(
-                    Button::new(&caption)
-                        .variant(ButtonVariant::Ghost)
-                        .control_size(ControlSize::ExtraLarge)
-                        .build(k)
-                        .key(format!("variation-{i}-move-{}", offset + 1))
-                        .fill(if s.active_variation == Some(i) && v.cursor == offset + 1 {
-                            k.c.layer_01
-                        } else {
-                            Color::TRANSPARENT
-                        })
-                        .on_press(move |s: &mut State| s.go_to_variation(i, offset + 1)),
-                );
-            }
-            branches = branches.child(
-                col()
-                    .gap(4.0)
-                    .child(ui::label(
-                        format!("Variação {} · posição {}", i + 1, v.root_ply),
-                        12.0,
-                        k.c.text_muted,
-                    ))
-                    .child(moves),
-            );
-        }
-        content = content.child(ui::section("Variações locais", branches, k));
-    }
     content
 }
 fn status(s: &State, k: &Kit) -> El {
@@ -493,13 +657,16 @@ fn inspector(s: &State, k: &Kit, stacked: bool) -> El {
     let tabs = SegmentedControl::new(&["Lances", "Análise", "Resumo"], Some(selected))
         .label("Painéis da revisão")
         .width(None)
-        .on_pick(|s: &mut State, i, _| {
+        .on_pick(|s: &mut State, i, tx| {
             s.review_tab = match i {
                 0 => ReviewTab::Moves,
                 1 => ReviewTab::Analysis,
                 _ => ReviewTab::Summary,
             };
             s.playing = false;
+            if i == 0 {
+                crate::reveal_move(s, tx);
+            }
         })
         .build(k)
         .key("review-tabs");
@@ -576,7 +743,7 @@ fn toolbar(s: &State, k: &Kit, compact: bool) -> El {
     )
     .label("Área da revisão")
     .width(None)
-    .on_pick(|s: &mut State, i, _| {
+    .on_pick(|s: &mut State, i, tx| {
         s.compact_panel = i != 0;
         if i != 0 {
             s.review_tab = match i {
@@ -586,6 +753,9 @@ fn toolbar(s: &State, k: &Kit, compact: bool) -> El {
             };
         }
         s.playing = false;
+        if i == 1 {
+            crate::reveal_move(s, tx);
+        }
     })
     .build(k)
     .key("compact-review-tabs")
@@ -602,6 +772,45 @@ fn toolbar(s: &State, k: &Kit, compact: bool) -> El {
 }
 pub fn view(s: &State, k: &Kit, layout: Layout, layers: &mut Vec<El>) -> El {
     review_analysis::dialog(s, k, layers);
+    let mut choices = col().gap(8.0);
+    let mut choice_row = row().gap(8.0);
+    for (index, (name, role, icon)) in [
+        ("Dama", shakmaty::Role::Queen, &super::pieces::QUEEN_BODY),
+        ("Torre", shakmaty::Role::Rook, &super::pieces::ROOK_BODY),
+        ("Bispo", shakmaty::Role::Bishop, &super::pieces::BISHOP_BODY),
+        (
+            "Cavalo",
+            shakmaty::Role::Knight,
+            &super::pieces::KNIGHT_BODY,
+        ),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        choice_row = choice_row.child(
+            Button::new(name)
+                .icon(icon)
+                .control_size(ControlSize::ExtraLarge)
+                .build(k)
+                .key(format!("promote-{name}"))
+                .grow(1.0)
+                .on_press_tx(move |s: &mut State, tx| {
+                    s.promote(role);
+                    crate::reveal_move(s, tx);
+                }),
+        );
+        if index % 2 == 1 {
+            choices = choices.child(choice_row);
+            choice_row = row().gap(8.0);
+        }
+    }
+    Dialog::new("promotion", "Escolha a promoção")
+        .open(s.promotion_pending.is_some())
+        .width(440.0)
+        .fit()
+        .on_close(|s: &mut State| s.promotion_pending = None)
+        .child(choices.padding(16.0))
+        .build(k, layers);
     let header = row()
         .min_h(layout.header_height())
         .px(16.0)

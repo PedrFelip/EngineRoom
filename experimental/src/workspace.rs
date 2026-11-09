@@ -114,6 +114,7 @@ impl State {
         self.page = Page::Review;
         self.playing = false;
         self.analysis_settings_open = false;
+        self.promotion_pending = None;
         self.selected_square = None;
         self.resume_review(saved.config);
     }

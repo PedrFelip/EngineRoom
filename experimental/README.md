@@ -71,7 +71,7 @@ orienta layout, escopos de eventos, acessibilidade e testes headless.
 - Alternar Lances, Análise e Resumo; filtrar erros por cor; clicar no gráfico para navegar.
 - Visualizar barra de avaliação, selos no tabuleiro/lista, setas e resumo por fase da análise.
 - Selecionar candidatos legais, reproduzir uma linha, pausar e retornar à partida.
-- Criar variações por clique ou arraste de peças (promoção automática para dama).
+- Criar variações por clique ou arraste de peças, escolhendo a peça de promoção.
 - Configurar linhas, feedback, tempo, threads e memória no modal da revisão.
 - Alternar foco no tabuleiro e painéis, inclusive com a sidebar fechada.
 - Trocar tema em toda a interface; mudar switches, sliders e linhas candidatas.
@@ -131,7 +131,7 @@ cargo test
 Os scripts renderizam as telas e os estados de interação em `artifacts/` e verificam
 as árvores exportadas. Requer Python 3. Abra os PNGs para a inspeção visual.
 
-A suíte headless inclui uma matriz de 160 capturas da revisão: oito cenas
+A suíte headless inclui uma matriz de 180 capturas da revisão: nove cenas
 (temas, abas, variação, progresso, erro e prévia), quatro tamanhos e cinco
 combinações de visibilidade dos painéis. Para cada caso, guarda PNG, árvore,
 script reproduzível e log em `artifacts/review-matrix/`. Os relatórios `report.md`
@@ -144,7 +144,7 @@ Para executar somente a matriz após `cargo build --locked`:
 
 ```sh
 python3 scripts/check-review-matrix.py
-python3 scripts/check-review-matrix.py --quick # 80 casos, janela mínima e ampla
+python3 scripts/check-review-matrix.py --quick # 90 casos, janela mínima e ampla
 python3 scripts/check-review-matrix.py --quick --analyze-only # revalidar árvores existentes
 python3 scripts/test-headless-report.py # testar os diagnósticos sem renderizar
 ```

@@ -90,7 +90,19 @@ pub fn view(s: &State, k: &Kit, size: f32) -> El {
             let square = format!("{}{}", (b'a' + (index % 8) as u8) as char, 8 - index / 8);
             let mut tile = el()
                 .key(format!("square-{square}"))
-                .label(format!("{square} {piece_name}"))
+                .label(format!(
+                    "{square} {piece_name}{}{}",
+                    if s.selected_square == Some(index) {
+                        ", selecionada"
+                    } else {
+                        ""
+                    },
+                    if targets.contains(&index) {
+                        ", destino legal"
+                    } else {
+                        ""
+                    }
+                ))
                 .size(square_size, square_size)
                 .center()
                 .fill(if (rank + file) % 2 == 0 {
@@ -101,14 +113,19 @@ pub fn view(s: &State, k: &Kit, size: f32) -> El {
             tile = tile
                 .role("button")
                 .focusable(true)
-                .on_drag(move |s: &mut State, d, _| match d.phase {
-                    Phase::Down => s.click_square(index),
+                .on_press_tx(move |s: &mut State, tx| {
+                    s.click_square(index);
+                    crate::reveal_move(s, tx);
+                })
+                .on_drag(move |s: &mut State, d, tx| match d.phase {
                     Phase::Up if !d.cancelled() && d.dx.hypot(d.dy) > 6.0 => {
                         let to_file = file as i32 + (d.x / square_size).floor() as i32;
                         let to_rank = rank as i32 + (d.y / square_size).floor() as i32;
                         if (0..8).contains(&to_file) && (0..8).contains(&to_rank) {
                             let target = to_rank as usize * 8 + to_file as usize;
+                            s.click_square(index);
                             s.click_square(if s.flipped { 63 - target } else { target });
+                            crate::reveal_move(s, tx);
                         }
                     }
                     _ => {}
@@ -170,8 +187,8 @@ pub fn view(s: &State, k: &Kit, size: f32) -> El {
             oklch(0.72, 0.15, 155.0),
             oklch(0.78, 0.14, 80.0),
         ];
-        for (i, line) in s
-            .candidates()
+        let candidates = s.candidates();
+        for (i, line) in candidates
             .iter()
             .take(s.preferences.lines.min(colors.len()))
             .enumerate()
@@ -196,6 +213,25 @@ pub fn view(s: &State, k: &Kit, size: f32) -> El {
             let len = dx.hypot(dy).max(1.0);
             let ux = dx / len;
             let uy = dy / len;
+            let shared = candidates
+                .iter()
+                .take(i)
+                .filter(|candidate| {
+                    candidate
+                        .moves
+                        .first()
+                        .is_some_and(|m| review_data::squares(*m).0 == from)
+                })
+                .count();
+            let offset = shared as f32 * square_size * 0.12;
+            let start = [
+                start[0] + ux * square_size * 0.24 - uy * offset,
+                start[1] + uy * square_size * 0.24 + ux * offset,
+            ];
+            let end = [
+                end[0] - ux * square_size * 0.18 - uy * offset,
+                end[1] - uy * square_size * 0.18 + ux * offset,
+            ];
             let tip = square_size * 0.26;
             let arrow = Shape::new()
                 .line(

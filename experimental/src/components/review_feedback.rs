@@ -22,11 +22,15 @@ pub fn current(s: &State, k: &Kit) -> El {
     let ply = s.displayed_ply();
     if !s.preferences.feedback || ply == 0 || s.displayed_classification().is_none() {
         let message = if !s.preferences.feedback {
-            "Feedback desativado."
+            "Feedback desativado nas configurações da revisão."
         } else if ply == 0 {
             "Selecione um lance para ver o feedback."
         } else if s.live_error.is_some() {
             "Feedback indisponível para esta posição."
+        } else if s.active_variation.is_some() && !s.preferences.live_engine {
+            "Ative Linhas para analisar este lance."
+        } else if s.active_variation.is_some() && s.playing {
+            "Feedback disponível ao pausar e selecionar o lance."
         } else if s.active_variation.is_some() && s.live_running {
             "Analisando o lance…"
         } else {
@@ -41,7 +45,13 @@ pub fn current(s: &State, k: &Kit) -> El {
         Some(i) => s.variations[i]
             .cursor
             .checked_sub(1)
-            .map(|j| s.variations[i].san[j].as_str()),
+            .map(|j| s.variations[i].san[j].as_str())
+            .or_else(|| {
+                s.game
+                    .moves
+                    .get(s.variations[i].root_ply.checked_sub(1)?)
+                    .map(String::as_str)
+            }),
         None => s
             .game
             .moves

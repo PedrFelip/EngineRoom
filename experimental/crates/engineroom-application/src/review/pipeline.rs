@@ -273,10 +273,6 @@ impl Pipeline {
             });
             let after = self.analyze_fen(&request.fen, settings, cancel).await?;
             let after_cp = after.cp;
-            emit(Event::LiveCompleted {
-                fen: request.fen.clone(),
-                analysis: after,
-            });
             if settings.move_feedback_enabled
                 && let (Some(id), Some(source_fen)) =
                     (&request.variation_node_id, &request.source_fen)
@@ -306,6 +302,10 @@ impl Pipeline {
                     });
                 }
             }
+            emit(Event::LiveCompleted {
+                fen: request.fen.clone(),
+                analysis: after,
+            });
             Ok(())
         }
         .await;
