@@ -1,10 +1,6 @@
 //! Board and player tags. Position data comes from the validated PGN preview.
 use super::{pieces, review_feedback, ui::label};
-use crate::{
-    review_data,
-    state::{ReviewTab, State},
-    variation,
-};
+use crate::{review_data, state::State, variation};
 use rune::{El, LineCap, Phase, Shape, col, el, icon, oklch, row};
 use rune_kit::Kit;
 use shakmaty::Position;
@@ -155,9 +151,8 @@ pub fn view(s: &State, k: &Kit, size: f32) -> El {
                 );
             }
             if s.preferences.feedback
-                && s.active_variation.is_none()
                 && last.is_some_and(|(_, to)| to == index)
-                && let Some(class) = s.classification(s.displayed_ply())
+                && let Some(class) = s.displayed_classification()
             {
                 tile = tile.child(
                     review_feedback::badge(class)
@@ -169,60 +164,70 @@ pub fn view(s: &State, k: &Kit, size: f32) -> El {
         }
         board = board.child(line);
     }
-    if s.preferences.live_engine
-        && s.review_tab == ReviewTab::Analysis
-        && let Some(m) = s
+    if s.preferences.live_engine {
+        let colors = [
+            k.c.bg_accent,
+            oklch(0.72, 0.15, 155.0),
+            oklch(0.78, 0.14, 80.0),
+        ];
+        for (i, line) in s
             .candidates()
-            .get(s.selected_candidate)
-            .and_then(|line| line.moves.first())
-            .copied()
-    {
-        let (from, to) = review_data::squares(m);
-        let center = |index: usize| {
-            let index = if s.flipped { 63 - index } else { index };
-            [
-                (index % 8) as f32 * square_size + square_size / 2.0,
-                (index / 8) as f32 * square_size + square_size / 2.0,
-            ]
-        };
-        let start = center(from);
-        let end = center(to);
-        let dx = end[0] - start[0];
-        let dy = end[1] - start[1];
-        let len = dx.hypot(dy).max(1.0);
-        let ux = dx / len;
-        let uy = dy / len;
-        let tip = square_size * 0.26;
-        let arrow = Shape::new()
-            .line(
-                start,
-                end,
-                square_size * 0.1,
-                LineCap::Round,
-                k.c.bg_accent.alpha(0.8),
-            )
-            .fill(
-                vec![
+            .iter()
+            .take(s.preferences.lines.min(colors.len()))
+            .enumerate()
+            .rev()
+        {
+            let Some(m) = line.moves.first().copied() else {
+                continue;
+            };
+            let color = colors[i];
+            let (from, to) = review_data::squares(m);
+            let center = |index: usize| {
+                let index = if s.flipped { 63 - index } else { index };
+                [
+                    (index % 8) as f32 * square_size + square_size / 2.0,
+                    (index / 8) as f32 * square_size + square_size / 2.0,
+                ]
+            };
+            let start = center(from);
+            let end = center(to);
+            let dx = end[0] - start[0];
+            let dy = end[1] - start[1];
+            let len = dx.hypot(dy).max(1.0);
+            let ux = dx / len;
+            let uy = dy / len;
+            let tip = square_size * 0.26;
+            let arrow = Shape::new()
+                .line(
+                    start,
                     end,
-                    [
-                        end[0] - ux * tip - uy * tip * 0.6,
-                        end[1] - uy * tip + ux * tip * 0.6,
+                    square_size * 0.1,
+                    LineCap::Round,
+                    color.alpha(0.75),
+                )
+                .fill(
+                    vec![
+                        end,
+                        [
+                            end[0] - ux * tip - uy * tip * 0.6,
+                            end[1] - uy * tip + ux * tip * 0.6,
+                        ],
+                        [
+                            end[0] - ux * tip + uy * tip * 0.6,
+                            end[1] - uy * tip - ux * tip * 0.6,
+                        ],
                     ],
-                    [
-                        end[0] - ux * tip + uy * tip * 0.6,
-                        end[1] - uy * tip - ux * tip * 0.6,
-                    ],
-                ],
-                k.c.bg_accent.alpha(0.9),
+                    color.alpha(0.9),
+                );
+            board = board.child(
+                el().key(format!("candidate-arrow-{i}"))
+                    .shape(arrow)
+                    .size(size, size)
+                    .absolute(0.0, 0.0)
+                    .inert()
+                    .a11y_hidden(),
             );
-        board = board.child(
-            el().key("candidate-arrow")
-                .shape(arrow)
-                .size(size, size)
-                .absolute(0.0, 0.0)
-                .inert()
-                .a11y_hidden(),
-        );
+        }
     }
     col()
         .gap(7.0)
@@ -236,23 +241,48 @@ pub fn view(s: &State, k: &Kit, size: f32) -> El {
             )))
         }))
 }
-pub fn player(name: &str, side: &str, k: &Kit, size: f32) -> El {
+pub fn player(
+    name: &str,
+    side: &str,
+    image: Option<&rune::Image>,
+    rating: &Option<String>,
+    k: &Kit,
+    size: f32,
+    compact: bool,
+) -> El {
+    let avatar_size = if compact { 32.0 } else { 40.0 };
+    let fallback = name
+        .chars()
+        .next()
+        .unwrap_or('?')
+        .to_uppercase()
+        .to_string();
+    let mut avatar = el()
+        .size(avatar_size, avatar_size)
+        .radius(if compact { 6.0 } else { 8.0 })
+        .fill(k.c.layer_01)
+        .center();
+    if let Some(image) = image.filter(|image| image.is_ready() && image.error().is_none()) {
+        avatar = avatar.pixels_fit(image.pixels(), rune::SurfaceFit::Fill);
+    } else {
+        avatar = avatar.child(label(fallback, 11.0, k.c.text_base));
+    }
     row()
         .w(size)
-        .h(32.0)
+        .h(avatar_size)
         .gap(10.0)
         .center_y()
+        .child(avatar.a11y_hidden())
         .child(
-            el().size(28.0, 28.0)
-                .radius(6.0)
-                .fill(k.c.layer_01)
-                .center()
-                .child(label(
-                    if side == "Brancas" { "B" } else { "P" },
-                    11.0,
-                    k.c.text_base,
-                )),
+            label(name, 13.0, k.c.text_base)
+                .truncate()
+                .max_w((size - avatar_size - 132.0).max(40.0)),
         )
-        .child(label(name, 13.0, k.c.text_base).truncate().grow(1.0))
+        .child(
+            rating
+                .as_ref()
+                .map_or_else(el, |rating| label(rating, 12.0, k.c.text_base)),
+        )
+        .child(el().grow(1.0))
         .child(label(side, 10.0, k.c.text_muted))
 }
