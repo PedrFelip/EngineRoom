@@ -1,0 +1,16 @@
+[package]
+name = "engineroom-sqlite"
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+publish = false
+
+[dependencies]
+engineroom-domain = { path = "../engineroom-domain" }
+tokio = { version = "1", features = ["process", "io-util", "sync", "macros", "time", "rt"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["float_roundtrip"] }
+pgn-reader = "0.29"
+shakmaty = "0.30"
+engineroom-application = { path = "../engineroom-application" }
+rusqlite = { version = "0.32", features = ["bundled"] }
