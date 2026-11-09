@@ -99,6 +99,7 @@ mod workspace;
 pub(crate) use workspace::WorkspaceReview;
 
 pub struct State {
+    avatars: Option<crate::avatar::Avatars>,
     pub workspace: Vec<WorkspaceReview>,
     pub active_workspace: Option<u64>,
     next_workspace_key: u64,
@@ -110,7 +111,10 @@ pub struct State {
     pub real_result: Option<engineroom_backend::review::types::ReviewResult>,
     pub real_progress: Option<(usize, usize)>,
     session: crate::review_session::ReviewSession,
-    pub live_result: Option<engineroom_backend::review::types::PositionAnalysis>,
+    pub live_positions:
+        std::collections::HashMap<String, engineroom_backend::review::types::PositionAnalysis>,
+    pub live_running: bool,
+    pub live_error: Option<String>,
     live_key: Option<String>,
     pub page: Page,
     pub previous_page: Page,
@@ -169,6 +173,7 @@ pub struct State {
 impl Default for State {
     fn default() -> Self {
         Self {
+            avatars: None,
             workspace: Vec::new(),
             active_workspace: None,
             next_workspace_key: 0,
@@ -180,7 +185,9 @@ impl Default for State {
             real_result: None,
             real_progress: None,
             session: crate::review_session::ReviewSession::default(),
-            live_result: None,
+            live_positions: std::collections::HashMap::new(),
+            live_running: false,
+            live_error: None,
             live_key: None,
             page: Page::Home,
             previous_page: Page::Home,
@@ -239,6 +246,29 @@ impl Default for State {
     }
 }
 impl State {
+    pub fn fixture_avatars(&mut self) {
+        self.avatars = Some(crate::avatar::Avatars::new(
+            std::sync::Arc::new(|| {}),
+            None,
+        ));
+        if let Some(avatars) = &mut self.avatars {
+            avatars.fixture("white");
+        }
+        self.game.avatar_key = Some("white".into());
+        self.game.ratings = [Some("1842".into()), Some("1768".into())];
+    }
+    pub fn setup_avatars(&mut self, wake: rune::Waker) {
+        self.avatars = Some(crate::avatar::Avatars::new(
+            wake,
+            crate::desktop_paths::data_dir()
+                .ok()
+                .map(|dir| dir.join("avatars")),
+        ));
+    }
+    pub fn avatar(&self, index: usize) -> Option<&rune::Image> {
+        let key = self.game.avatar_key.as_ref()?;
+        self.avatars.as_ref()?.get(key, index)
+    }
     pub fn setup_preferences(&mut self, wake: rune::Waker) {
         match crate::desktop_paths::data_dir() {
             Ok(base) => {
@@ -378,11 +408,15 @@ impl State {
             bridge.close(id);
         }
         self.real_progress = None;
-        self.live_result = None;
+        self.live_positions.clear();
+        self.live_running = false;
+        self.live_error = None;
         self.live_key = None;
     }
     pub fn poll_bridge(&mut self) -> bool {
+        self.sync_live();
         let preferences_changed = self.poll_preferences();
+        let avatars_changed = self.avatars.as_mut().is_some_and(|avatars| avatars.poll());
         use engineroom_backend::review::types::Event;
         let events = self
             .bridge
@@ -408,7 +442,7 @@ impl State {
             .bridge
             .as_ref()
             .map_or_else(Vec::new, |bridge| bridge.drain_imports());
-        let mut changed = preferences_changed;
+        let mut changed = preferences_changed | avatars_changed;
         for event in imports {
             if event.request_id != self.chess_request.to_string() {
                 continue;
@@ -553,13 +587,44 @@ impl State {
                     self.real_progress = None;
                     self.live_key = None;
                 }
-                Event::Error { error, .. } => {
+                Event::Error {
+                    error,
+                    fen: Some(_),
+                } => {
+                    self.live_running = false;
+                    self.live_error = Some(error.to_string());
+                }
+                Event::Error { error, fen: None } => {
                     self.bridge_error = Some(error.to_string());
                     self.real_progress = None;
                 }
-                Event::LiveCompleted { analysis, .. } => self.live_result = Some(analysis),
-                Event::Warning { error } => self.bridge_error = Some(error.to_string()),
-                _ => {}
+                Event::LiveStarted { .. } => {
+                    self.live_running = true;
+                    self.live_error = None;
+                }
+                Event::LiveCompleted { analysis, .. } => {
+                    self.live_running = false;
+                    let replace = self
+                        .live_positions
+                        .get(&analysis.fen)
+                        .is_none_or(|old| prefer_incoming(old, &analysis));
+                    if replace {
+                        self.live_positions.insert(analysis.fen.clone(), analysis);
+                    }
+                }
+                Event::Classification {
+                    node_id,
+                    classification,
+                } => {
+                    if self.variation_node_id().as_deref() == Some(node_id.as_str())
+                        && let Some(i) = self.active_variation
+                        && let Some(j) = self.variations[i].cursor.checked_sub(1)
+                        && let Some(slot) = self.variations[i].classifications.get_mut(j)
+                    {
+                        *slot = Some(classification);
+                    }
+                }
+                Event::Warning { error } => eprintln!("review warning: {error}"),
             }
         }
         self.sync_live();
@@ -578,30 +643,43 @@ impl State {
             return;
         }
         let fen = Fen::from_position(self.position(), EnPassantMode::Legal).to_string();
+        let node_id = self.variation_node_id();
+        let source_fen = self.active_variation.and_then(|i| {
+            let v = &self.variations[i];
+            v.cursor
+                .checked_sub(1)
+                .map(|j| engineroom_backend::review::core::fen(&v.positions[j]))
+        });
+        let source_analysis = source_fen
+            .as_deref()
+            .and_then(|fen| self.analysis_for_fen(fen))
+            .cloned();
         let p = &self.preferences;
         let key = format!(
-            "{fen}:{}:{}:{}:{}:{}:{}:{}",
+            "{fen}:{node_id:?}:{}:{}:{}:{}:{}:{}:{}:{}",
             p.live_engine,
             p.search_seconds,
             p.lines,
             p.threads_auto,
             p.threads,
             p.hash_mb,
-            p.feedback
+            p.feedback,
+            self.playing
         );
         if self.live_key.as_ref() == Some(&key) {
             return;
         }
         self.live_key = Some(key);
         let request_id = self.session.invalidate_live();
-        self.live_result = None;
+        self.live_running = p.live_engine && self.real_result.is_some();
+        self.live_error = None;
         if let Some(bridge) = &self.bridge {
             if p.live_engine && self.real_result.is_some() {
                 let request = LiveRequest {
                     fen,
-                    variation_node_id: None,
-                    source_fen: None,
-                    source_analysis: None,
+                    variation_node_id: node_id,
+                    source_fen,
+                    source_analysis,
                 };
                 let settings = LiveSettings {
                     search_seconds: p.search_seconds as u32,
@@ -610,10 +688,11 @@ impl State {
                     threads: p.threads as u32,
                     memory_mb: p.hash_mb as u32,
                     move_feedback_enabled: p.feedback,
-                    fast_pass: false,
+                    fast_pass: self.playing,
                 };
                 if let Err(error) = bridge.analyze(&id, request_id, request, settings) {
-                    self.bridge_error = Some(error);
+                    self.live_running = false;
+                    self.live_error = Some(error);
                 }
             } else {
                 bridge.cancel_live(id, request_id);
@@ -621,8 +700,6 @@ impl State {
         }
     }
     pub fn classification(&self, ply: usize) -> Option<review_data::Classification> {
-        use engineroom_backend::review::types::Classification as C;
-        use review_data::Classification as D;
         if ply == 0 {
             return None;
         }
@@ -634,16 +711,9 @@ impl State {
             .iter()
             .find(|m| m.played.ply == ply)?
             .classification;
-        Some(match class {
-            C::Livro => D::Book,
-            C::Melhor => D::Best,
-            C::Excelente => D::Excellent,
-            C::Bom => D::Good,
-            C::Imprecisao => D::Inaccuracy,
-            C::Erro => D::Mistake,
-            C::Blunder => D::Blunder,
-        })
+        Some(display_classification(class))
     }
+
     pub(crate) fn invalidate_history_load(&mut self) {
         self.history_load_id = self
             .history_load_id
@@ -664,7 +734,14 @@ impl State {
             Ok(Some(mut config)) => {
                 self.history_loading = false;
                 match game::parse(&config.pgn) {
-                    Ok(game) => {
+                    Ok(mut game) => {
+                        let key = crate::avatar::game_key(&config.pgn);
+                        if let Some(avatars) = &mut self.avatars {
+                            for side in 0..2 {
+                                avatars.request(&key, side, None);
+                            }
+                        }
+                        game.avatar_key = Some(key);
                         self.park_review();
                         self.game = game;
                         self.go_to(0);
@@ -901,9 +978,19 @@ impl State {
     }
     pub fn select_chesscom(&mut self, index: usize) {
         if let Some(game) = self.chess_games.get(index) {
+            let players = [game.white.username.clone(), game.black.username.clone()];
             self.pgn.replace_text(&game.pgn);
             self.cancel_chesscom();
             self.prepare();
+            if self.page == Page::Configure {
+                let key = crate::avatar::game_key(&self.pgn.text);
+                if let Some(avatars) = &mut self.avatars {
+                    for (side, name) in players.iter().enumerate() {
+                        avatars.request(&key, side, Some(name));
+                    }
+                }
+                self.game.avatar_key = Some(key);
+            }
         }
     }
     pub fn chess_select(&mut self, index: usize) {
@@ -983,9 +1070,21 @@ impl State {
         self.selected_square = None;
         self.selected_candidate = 0;
     }
+    pub fn go_to_variation(&mut self, index: usize, cursor: usize) {
+        let Some(variation) = self.variations.get_mut(index) else {
+            return;
+        };
+        variation.cursor = cursor.min(variation.moves.len());
+        self.ply = variation.root_ply;
+        self.active_variation = Some(index);
+        self.playing = false;
+        self.selected_square = None;
+        self.selected_candidate = 0;
+    }
     pub fn next(&mut self) {
         self.playing = false;
         self.selected_square = None;
+        self.selected_candidate = 0;
         if let Some(index) = self.active_variation {
             let v = &mut self.variations[index];
             v.cursor = (v.cursor + 1).min(v.moves.len());
@@ -996,6 +1095,7 @@ impl State {
     pub fn previous(&mut self) {
         self.playing = false;
         self.selected_square = None;
+        self.selected_candidate = 0;
         if let Some(index) = self.active_variation {
             let v = &mut self.variations[index];
             v.cursor = v.cursor.saturating_sub(1);
@@ -1004,6 +1104,7 @@ impl State {
         }
     }
     pub fn first(&mut self) {
+        self.selected_candidate = 0;
         if let Some(i) = self.active_variation {
             self.variations[i].cursor = 0;
             self.playing = false;
@@ -1012,6 +1113,7 @@ impl State {
         }
     }
     pub fn last(&mut self) {
+        self.selected_candidate = 0;
         if let Some(i) = self.active_variation {
             self.variations[i].cursor = self.variations[i].moves.len();
             self.playing = false;
@@ -1050,20 +1152,52 @@ impl State {
             })
             .map(review_data::squares)
     }
+    fn variation_node_id(&self) -> Option<String> {
+        let i = self.active_variation?;
+        let variation = self.variations.get(i)?;
+        if variation.cursor == 0 {
+            return None;
+        }
+        Some(format!(
+            "{}:{}:{}:{}",
+            i,
+            variation.cursor,
+            engineroom_backend::review::core::fen(&variation.positions[variation.cursor - 1]),
+            engineroom_backend::review::core::fen(variation.position())
+        ))
+    }
+    fn analysis_for_fen(
+        &self,
+        fen: &str,
+    ) -> Option<&engineroom_backend::review::types::PositionAnalysis> {
+        let original = self
+            .real_result
+            .as_ref()
+            .and_then(|result| result.positions.iter().find(|p| p.fen == fen));
+        let live = self.live_positions.get(fen);
+        match (original, live) {
+            (Some(a), Some(b)) => Some(if prefer_incoming(a, b) { b } else { a }),
+            (Some(a), None) => Some(a),
+            (None, Some(b)) => Some(b),
+            (None, None) => None,
+        }
+    }
     pub fn position_analysis(
         &self,
     ) -> Option<&engineroom_backend::review::types::PositionAnalysis> {
-        let fen = engineroom_backend::review::core::fen(self.position());
-        self.live_result
-            .as_ref()
-            .filter(|p| p.fen == fen)
-            .or_else(|| {
-                self.active_variation
-                    .is_none()
-                    .then(|| self.real_result.as_ref()?.positions.get(self.ply))
-                    .flatten()
-                    .filter(|p| p.fen == fen)
-            })
+        self.analysis_for_fen(&engineroom_backend::review::core::fen(self.position()))
+    }
+    pub fn displayed_classification(&self) -> Option<review_data::Classification> {
+        if let Some(i) = self.active_variation {
+            let variation = self.variations.get(i)?;
+            let class = variation
+                .classifications
+                .get(variation.cursor.checked_sub(1)?)?
+                .as_ref()?;
+            Some(display_classification(*class))
+        } else {
+            self.classification(self.ply)
+        }
     }
     pub fn candidates(&self) -> Vec<review_data::Candidate> {
         use shakmaty::{CastlingMode, san::SanPlus, uci::UciMove};
@@ -1127,6 +1261,7 @@ impl State {
         };
         let v = &mut self.variations[i];
         v.cursor = (v.cursor + 1).min(v.moves.len());
+        self.selected_candidate = 0;
         self.playing = v.cursor < v.moves.len();
         self.next_step = now + 0.65;
         true
@@ -1152,6 +1287,7 @@ impl State {
                     .expect("variation created before append")]
                 .append(m);
                 self.selected_square = None;
+                self.selected_candidate = 0;
                 return;
             }
         }
@@ -1193,9 +1329,93 @@ fn chess_game_key(game: &engineroom_backend::imports::RemoteGame) -> String {
     }
 }
 
+fn display_classification(
+    class: engineroom_backend::review::types::Classification,
+) -> review_data::Classification {
+    use engineroom_backend::review::types::Classification as C;
+    use review_data::Classification as D;
+    match class {
+        C::Livro => D::Book,
+        C::Melhor => D::Best,
+        C::Excelente => D::Excellent,
+        C::Bom => D::Good,
+        C::Imprecisao => D::Inaccuracy,
+        C::Erro => D::Mistake,
+        C::Blunder => D::Blunder,
+    }
+}
+fn prefer_incoming(
+    old: &engineroom_backend::review::types::PositionAnalysis,
+    new: &engineroom_backend::review::types::PositionAnalysis,
+) -> bool {
+    if old.fen != new.fen {
+        return true;
+    }
+    if old.depth != new.depth {
+        return new.depth > old.depth;
+    }
+    let old_purpose = old.search.as_ref().map(|search| search.purpose.as_str());
+    let new_purpose = new.search.as_ref().map(|search| search.purpose.as_str());
+    if old_purpose != new_purpose {
+        if new_purpose == Some("playback") {
+            return false;
+        }
+        if old_purpose == Some("playback") {
+            return true;
+        }
+    }
+    if old.lines.len() != new.lines.len() {
+        return new.lines.len() > old.lines.len();
+    }
+    !matches!((&old.search, &new.search), (Some(a), Some(b)) if a.multipv == b.multipv && a.movetime_ms > b.movetime_ms)
+}
+
 #[cfg(test)]
 mod council_regressions {
     use super::*;
+    #[test]
+    fn stronger_evaluations_and_variation_feedback_remain_separate() {
+        use engineroom_backend::review::types::{Classification, Search};
+        let mut state = State::fixture();
+        let original = state.real_result.as_ref().unwrap().positions[0].clone();
+        let mut weaker = original.clone();
+        weaker.depth = original.depth.saturating_sub(1);
+        weaker.cp = 999;
+        state.live_positions.insert(weaker.fen.clone(), weaker);
+        assert_eq!(state.position_analysis().unwrap().cp, original.cp);
+        let mut playback = original.clone();
+        playback.search = Some(Search {
+            purpose: "playback".into(),
+            movetime_ms: 500,
+            multipv: 1,
+        });
+        assert!(!prefer_incoming(&original, &playback));
+        state.click_square(52);
+        state.click_square(36);
+        let node = state
+            .variation_node_id()
+            .expect("variation move has identity");
+        let index = state.active_variation.unwrap();
+        state.variations[index].classifications[0] = Some(Classification::Bom);
+        assert_eq!(
+            state.displayed_classification(),
+            Some(review_data::Classification::Good)
+        );
+        state.previous();
+        assert!(state.variation_node_id().is_none());
+        assert!(state.displayed_classification().is_none());
+        state.next();
+        assert_eq!(state.variation_node_id().as_deref(), Some(node.as_str()));
+        assert_eq!(
+            state.displayed_classification(),
+            Some(review_data::Classification::Good)
+        );
+        state.previous();
+        state.click_square(51); // d2
+        state.click_square(35); // d4 replaces the old branch
+        assert_ne!(state.variation_node_id().as_deref(), Some(node.as_str()));
+        assert!(state.displayed_classification().is_none());
+    }
     #[test]
     fn selecting_and_closing_reviews_preserves_the_import_draft_and_current_task() {
         for page in [Page::History, Page::Settings] {
