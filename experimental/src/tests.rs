@@ -1037,6 +1037,35 @@ fn history_filter_and_delete_confirmation_handle_errors_and_escape() {
 }
 
 #[test]
+fn history_delete_confirmation_and_error_are_visible_at_minimum_size() {
+    let mut rt = rune::App::new(spec()).headless_runtime(
+        (720.0, 560.0),
+        Env {
+            system_dark: true,
+            scale: 1.0,
+        },
+    );
+    rt.state.page = Page::History;
+    rt.state.history.push(summary(1));
+    rt.state.history_total = 1;
+    rt.state.request_history_delete(1);
+    rt.invalidate();
+    rt.frame(0.0);
+    for key in ["history-delete-cancel", "history-delete-confirm"] {
+        let (_, y) = rt.find(key).expect("confirmation action exists");
+        assert!(y < 540.0, "{key} must be visible at minimum height: {y}");
+    }
+    tap(&mut rt, "history-delete-confirm");
+    assert!(rt.state.history_delete_error.is_some());
+    for key in ["history-delete-cancel", "history-delete-confirm"] {
+        let (_, y) = rt.find(key).expect("confirmation action remains available");
+        assert!(y < 540.0, "{key} must remain visible after an error: {y}");
+    }
+    tap(&mut rt, "history-delete-cancel");
+    assert!(rt.state.history_confirm_delete.is_none());
+}
+
+#[test]
 fn text_file_drop_accepts_extension_and_rejects_other_formats() {
     let mut state = State::default();
     state.drop_pgn_files(&["game.TXT".into()]);
