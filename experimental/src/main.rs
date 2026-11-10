@@ -281,6 +281,55 @@ fn spec() -> AppSpec<State> {
                 s.page = Page::Review;
                 s.real_result = None;
             }),
+            ("home-search-error", |s| {
+                s.import_source = ImportSource::ChessCom;
+                s.chess_username.replace_text("jogador");
+                s.chess_searched = true;
+                s.import_error = Some("Não foi possível buscar partidas.".into());
+            }),
+            ("history-loading", |s| {
+                s.page = Page::History;
+                s.history_loading = true;
+            }),
+            ("history-error", |s| {
+                s.page = Page::History;
+                s.history_error = Some("Não foi possível carregar o histórico.".into());
+            }),
+            ("history-no-results", |s| {
+                s.page = Page::History;
+                s.history_filter.replace_text("sem resultados");
+            }),
+            ("history-delete-pending", |s| {
+                s.page = Page::History;
+                s.history.push(engineroom_backend::db::games::GameSummary {
+                    id: 1,
+                    white: "José Silva".into(),
+                    black: "Ana Costa".into(),
+                    result: "1-0".into(),
+                    plies: 40,
+                    engine_tier: "custom".into(),
+                    mode: engineroom_backend::db::mode::Mode::Depth,
+                    analysis_kind: "manual".into(),
+                    depth: 20,
+                    multipv: 2,
+                    accuracy_white: 80.0,
+                    accuracy_black: 70.0,
+                    created_at: "2026-11-10".into(),
+                });
+                s.history_total = 1;
+                s.history_confirm_delete = Some(1);
+                s.history_delete_pending = true;
+            }),
+            ("settings-probe-running", |s| {
+                s.open_settings();
+                s.section = SettingsSection::Analysis;
+                s.engine_probe = engine_probe::Status::Running;
+            }),
+            ("settings-probe-success", |s| {
+                s.open_settings();
+                s.section = SettingsSection::Analysis;
+                s.engine_probe = engine_probe::Status::Success(Some("Stockfish 19".into()));
+            }),
             ("history", |s| s.page = Page::History),
             ("history-search-delete", |s| {
                 s.page = Page::History;

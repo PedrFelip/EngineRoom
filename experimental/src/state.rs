@@ -98,6 +98,13 @@ impl Default for Preferences {
 mod workspace;
 pub(crate) use workspace::WorkspaceReview;
 
+#[derive(Clone, Debug, PartialEq)]
+enum HistoryOperation {
+    List,
+    Page { created_at: String, id: i64 },
+    Open { id: i64, reanalyze: bool },
+}
+
 pub struct State {
     avatars: Option<crate::avatar::Avatars>,
     pub workspace: Vec<WorkspaceReview>,
@@ -156,6 +163,7 @@ pub struct State {
     history_load_id: u64,
     pub history_loading: bool,
     pub history_error: Option<String>,
+    history_operation: Option<HistoryOperation>,
     pub game: Game,
     pub ply: usize,
     pub flipped: bool,
@@ -238,6 +246,7 @@ impl Default for State {
             history_load_id: 0,
             history_loading: false,
             history_error: None,
+            history_operation: None,
             game: Game::empty(),
             ply: 0,
             flipped: false,
@@ -397,6 +406,7 @@ impl State {
             lines: self.preferences.lines as u32,
             initial_result: None,
         };
+        self.reset_annotations();
         self.register_review(config.clone());
         let id = format!(
             "review-{}",
@@ -431,8 +441,7 @@ impl State {
         self.live_error = None;
         self.live_key = None;
     }
-    pub fn poll_bridge(&mut self) -> bool {
-        self.sync_live();
+    fn sync_annotations(&mut self) {
         let fen =
             shakmaty::fen::Fen::from_position(self.position(), shakmaty::EnPassantMode::Legal)
                 .to_string();
@@ -444,6 +453,14 @@ impl State {
             self.board_annotations.clear();
         }
         self.annotation_fen = Some(fen);
+    }
+    fn reset_annotations(&mut self) {
+        self.board_annotations = Default::default();
+        self.annotation_fen = None;
+    }
+    pub fn poll_bridge(&mut self) -> bool {
+        self.sync_live();
+        self.sync_annotations();
         let preferences_changed = self.poll_preferences();
         let avatars_changed = self.avatars.as_mut().is_some_and(|avatars| avatars.poll());
         use engineroom_backend::review::types::Event;
@@ -576,9 +593,24 @@ impl State {
                 crate::bridge::DataEvent::Game(result, reanalyze, request_id) => {
                     self.apply_history_load(request_id, result, reanalyze);
                 }
-                crate::bridge::DataEvent::Games(Err(error), _) => {
+                crate::bridge::DataEvent::Games(Err(error), append) => {
                     self.history_loading = false;
                     self.history_error = Some(error);
+                    if !matches!(
+                        self.history_operation,
+                        Some(HistoryOperation::List | HistoryOperation::Page { .. })
+                    ) {
+                        self.history_operation = if append {
+                            self.history_cursor
+                                .as_ref()
+                                .map(|cursor| HistoryOperation::Page {
+                                    created_at: cursor.created_at.clone(),
+                                    id: cursor.id,
+                                })
+                        } else {
+                            Some(HistoryOperation::List)
+                        };
+                    }
                 }
             }
             changed = true;
@@ -790,6 +822,8 @@ impl State {
                 self.history_loading = false;
                 match game::parse(&config.pgn) {
                     Ok(mut game) => {
+                        self.history_error = None;
+                        self.history_operation = None;
                         let key = crate::avatar::game_key(&config.pgn);
                         if let Some(avatars) = &mut self.avatars {
                             for side in 0..2 {
@@ -799,6 +833,7 @@ impl State {
                         game.avatar_key = Some(key);
                         self.park_review();
                         self.game = game;
+                        self.reset_annotations();
                         self.go_to(0);
                         self.variations.clear();
                         self.real_result = None;
@@ -860,6 +895,8 @@ impl State {
         append: bool,
     ) {
         self.history_loading = false;
+        self.history_error = None;
+        self.history_operation = None;
         self.history_total = page.total;
         if append {
             for game in page.games {
@@ -872,32 +909,65 @@ impl State {
         }
         self.history_cursor = page.next_cursor;
     }
-    pub fn refresh_history(&mut self) {
-        if let Some(bridge) = &self.bridge {
-            match bridge.list_games(None) {
-                Ok(()) => {
-                    self.history_loading = true;
-                    self.history_error = None;
-                }
-                Err(e) => self.history_error = Some(e),
-            }
-        }
-    }
-    pub fn next_history(&mut self) {
+    fn run_history_operation(&mut self, operation: HistoryOperation) {
         if self.history_loading {
             return;
         }
-        if let (Some(bridge), Some(cursor)) = (&self.bridge, self.history_cursor.take()) {
-            match bridge.list_games(Some(cursor)) {
-                Ok(()) => {
-                    self.history_loading = true;
-                    self.history_error = None;
-                }
-                Err(e) => {
-                    self.history_error = Some(e);
-                    self.refresh_history();
-                }
+        self.history_operation = Some(operation.clone());
+        let result = match (&self.bridge, operation) {
+            (Some(bridge), HistoryOperation::List) => bridge.list_games(None),
+            (Some(bridge), HistoryOperation::Page { created_at, id }) => {
+                bridge.list_games(Some(engineroom_backend::db::games::GameCursor {
+                    created_at,
+                    id,
+                }))
             }
+            (Some(bridge), HistoryOperation::Open { id, reanalyze }) => {
+                bridge.load_game(id, reanalyze, self.history_load_id)
+            }
+            (None, _) => {
+                self.history_error = None;
+                return;
+            }
+        };
+        match result {
+            Ok(()) => {
+                self.history_loading = true;
+                self.history_error = None;
+            }
+            Err(error) => self.history_error = Some(error),
+        }
+    }
+    pub fn refresh_history(&mut self) {
+        self.run_history_operation(HistoryOperation::List);
+    }
+    pub fn next_history(&mut self) {
+        if let Some(cursor) = &self.history_cursor {
+            self.run_history_operation(HistoryOperation::Page {
+                created_at: cursor.created_at.clone(),
+                id: cursor.id,
+            });
+        }
+    }
+    pub(crate) fn history_error_context(&self) -> &'static str {
+        match self.history_operation {
+            Some(HistoryOperation::List) => "Não foi possível carregar o histórico",
+            Some(HistoryOperation::Page { .. }) => "Não foi possível carregar mais partidas",
+            Some(HistoryOperation::Open {
+                reanalyze: false, ..
+            }) => "Não foi possível abrir a partida",
+            Some(HistoryOperation::Open {
+                reanalyze: true, ..
+            }) => "Não foi possível reanalisar a partida",
+            None => "Erro no histórico",
+        }
+    }
+    pub fn retry_history(&mut self) {
+        if let Some(operation) = self.history_operation.clone() {
+            if matches!(operation, HistoryOperation::Open { .. }) {
+                self.invalidate_history_load();
+            }
+            self.run_history_operation(operation);
         }
     }
     pub fn refresh_storage(&mut self) {
@@ -944,16 +1014,7 @@ impl State {
     }
     pub fn history_open(&mut self, id: i64, reanalyze: bool) {
         self.invalidate_history_load();
-        let request_id = self.history_load_id;
-        if let Some(bridge) = &self.bridge {
-            match bridge.load_game(id, reanalyze, request_id) {
-                Ok(()) => {
-                    self.history_loading = true;
-                    self.history_error = None;
-                }
-                Err(e) => self.history_error = Some(e),
-            }
-        }
+        self.run_history_operation(HistoryOperation::Open { id, reanalyze });
     }
     pub fn start_engine_probe(&mut self) {
         if matches!(self.engine_probe, crate::engine_probe::Status::Running) {
@@ -1149,6 +1210,7 @@ impl State {
         match game::parse(&self.pgn.text) {
             Ok(game) => {
                 self.game = game;
+                self.reset_annotations();
                 self.go_to(0);
                 self.variations.clear();
                 self.import_error = None;
@@ -1761,3 +1823,7 @@ mod council_regressions {
         assert_eq!(state.workspace.len(), 2);
     }
 }
+
+#[cfg(test)]
+#[path = "state_regression_tests.rs"]
+mod regression_tests;

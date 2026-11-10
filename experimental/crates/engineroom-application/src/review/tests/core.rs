@@ -158,6 +158,9 @@ fn pgn_comments_variations_fen_promotion_and_invalid_moves() {
     assert_eq!(g.moves[0].uci, "a7a8q");
     assert!(g.fens[0].starts_with("7k/P7"));
     assert!(core::extract("1. e5").is_err());
+    assert!(core::extract("1. e4 e5 2. Invalid").is_err());
+    assert!(core::extract("1. e4 e5 2. Nf3 nonsense *").is_err());
+    assert!(core::extract("1.e4$1 e5 ; comment\n2.Nf3!? (2. Bc4) Nc6 1-0 { end }").is_ok());
     assert!(core::extract("").is_err());
     assert!(core::extract("1. e4 e5 1-0\n\n1. d4 d5 0-1").is_err());
     assert!(core::extract("[FEN \"bad\"]\n1. e4").is_err());

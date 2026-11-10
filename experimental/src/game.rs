@@ -121,6 +121,7 @@ pub fn parse(pgn: &str) -> Result<Game, String> {
     if pgn.len() > 1_000_000 {
         return Err("O PGN deve ter no máximo 1 MB.".into());
     }
+    engineroom_backend::review::core::extract(pgn).map_err(|error| error.to_string())?;
     let mut reader = Reader::new(Cursor::new(pgn.as_bytes()));
     let game = reader
         .read_game(&mut Preview)
@@ -144,6 +145,8 @@ mod tests {
         let p = game.board(16);
         assert_eq!((p[62], p[60], p[6], p[5]), ('K', 'R', 'k', 'r'));
         assert!(parse("1. e4 e5 2. Ke5 *").is_err());
+        assert!(parse("1. e4 e5 2. Invalid").is_err());
+        assert!(parse("1. e4 { comment } e5 (1... c5) 2. Nf3!? *").is_ok());
         assert!(parse(&format!("{DEMO_PGN}\n{DEMO_PGN}")).is_err());
     }
     #[test]

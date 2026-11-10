@@ -4,6 +4,7 @@ use super::types::{ReviewError, ReviewErrorCode};
 mod build;
 mod opening;
 mod pgn;
+mod pgn_tokens;
 mod phase;
 mod position;
 

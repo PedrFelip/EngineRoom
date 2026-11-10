@@ -85,10 +85,14 @@ pub fn view(s: &State, k: &Kit, layout: Layout) -> El {
     }
     if let Some(error) = &s.history_error {
         content = content.child(
-            ui::label(error, 12.0, k.c.danger.fg)
-                .role("alert")
-                .wrap()
-                .w_full(),
+            ui::label(
+                format!("{}: {error}", s.history_error_context()),
+                12.0,
+                k.c.danger.fg,
+            )
+            .role("alert")
+            .wrap()
+            .w_full(),
         );
     }
     if show_empty_history(
@@ -113,9 +117,9 @@ pub fn view(s: &State, k: &Kit, layout: Layout) -> El {
         };
         content = content.child(ui::label(message, 12.0, k.c.text_muted).wrap().w_full());
     }
-    if s.history_error.is_some() && s.bridge.is_some() && !s.history_loading {
+    if s.history_error.is_some() && !s.history_loading {
         content = content.child(
-            ui::button("history-retry", "Tentar novamente", k).on_press(State::refresh_history),
+            ui::button("history-retry", "Tentar novamente", k).on_press(State::retry_history),
         );
     }
     if s.history_total > 0 {

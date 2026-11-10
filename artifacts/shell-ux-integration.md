@@ -1,0 +1,7 @@
+# Shell UX integration
+
+The experimental Rune shell now exposes New review, History, an open-session shortcut, and Settings in the collapsed rail. The shortcut uses the active workspace entry when one exists; otherwise it uses the last entry in workspace order. Opening the full sidebar remains necessary to choose among multiple sessions or close one. No state, main, bridge, board, review, or form changes are required to integrate this shell change.
+
+The new headless interaction test lives in `experimental/src/components/shell.rs`. To reproduce the capture checks, build `experimental` with `cargo build --locked`, render the `sessions` and `demo-collapsed` scenes at 1920x1080, 900x700, and 720x560 into `experimental/artifacts/shell-ux/` (PNG and JSON), then run `python3 scripts/check-shell-ux.py` from `experimental/`. The generated artifacts are ignored by git; retain them separately if needed. Consider adding these captures and the Python check to the shared headless script when integrating the other workers' changes.
+
+Remaining limitations: the rail uses 28-pixel icon controls and tooltips; its selected destination is visually indicated but the generated accessibility tree does not expose a selected state for these buttons. The session shortcut falls back to workspace order, not a tracked most-recently-used history. Native focus appearance, tooltips, screen reader behavior, and audio were not verified. A longer session list and extreme window sizes were not visually exercised in this pass.

@@ -119,6 +119,20 @@ fn sidebar(s: &State, k: &Kit) -> El {
         )
         .build(k)
 }
+fn rail_button(icon: &'static rune::Icon, label: &str, selected: bool, k: &Kit) -> El {
+    IconButton::new(icon)
+        .variant(if selected {
+            IconButtonVariant::Neutral
+        } else {
+            IconButtonVariant::GhostMuted
+        })
+        .control_size(ControlSize::Large)
+        .label(label)
+        .help(label)
+        .build(k)
+        .checked(selected)
+}
+
 fn toggle(open: bool, k: &Kit) -> El {
     let label = if open {
         "Recolher barra lateral"
@@ -205,7 +219,47 @@ pub fn view(s: &State, cx: &mut Cx<State>, main: El, trailing: Option<El>, k: &K
                     12.0
                 })
                 .px(4.0)
-                .child(toggle(false, k)),
+                .gap(8.0)
+                .child(toggle(false, k))
+                .child(
+                    rail_button(
+                        &icons::PLUS,
+                        "Nova revisão",
+                        matches!(s.page, Page::Home | Page::Configure),
+                        k,
+                    )
+                    .key("rail-home")
+                    .on_press(|s: &mut State| s.navigate(Page::Home)),
+                )
+                .child(
+                    rail_button(&icons::FOLDER, "Histórico", s.page == Page::History, k)
+                        .key("rail-history")
+                        .on_press(|s: &mut State| s.navigate(Page::History)),
+                )
+                .children(
+                    s.active_workspace
+                        .or_else(|| s.workspace.last().map(|entry| entry.key))
+                        .map(|key| {
+                            rail_button(
+                                &icons::BRANCH,
+                                "Abrir última sessão",
+                                s.page == Page::Review,
+                                k,
+                            )
+                            .key("rail-session")
+                            .on_press(move |s: &mut State| s.activate_review(key))
+                        }),
+                )
+                .child(
+                    rail_button(
+                        &icons::SETTINGS_GEAR,
+                        "Configurações",
+                        s.page == Page::Settings,
+                        k,
+                    )
+                    .key("rail-settings")
+                    .on_press(|s: &mut State| s.open_settings()),
+                ),
         );
     }
     shell
@@ -236,4 +290,41 @@ pub fn view(s: &State, cx: &mut Cx<State>, main: El, trailing: Option<El>, k: &K
                 ),
         )
         .children(trailing)
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::state::{Page, State};
+    use rune::{Env, Runtime};
+
+    fn tap(rt: &mut Runtime<State>, key: &str) {
+        let (x, y) = rt.find(key).unwrap_or_else(|| panic!("missing {key}"));
+        rt.pointer_down(x, y);
+        rt.pointer_up(x, y);
+        rt.frame(1.0 / 60.0);
+    }
+
+    #[test]
+    fn collapsed_rail_navigates_and_returns_to_active_session() {
+        let mut rt = rune::App::new(crate::spec()).headless_runtime(
+            (720.0, 560.0),
+            Env {
+                system_dark: true,
+                scale: 1.0,
+            },
+        );
+        rt.state = State::fixture();
+        rt.state.sidebar.set_open(false);
+        rt.invalidate();
+        rt.frame(0.0);
+        tap(&mut rt, "rail-history");
+        assert_eq!(rt.state.page, Page::History);
+        tap(&mut rt, "rail-settings");
+        assert_eq!(rt.state.page, Page::Settings);
+        tap(&mut rt, "rail-home");
+        assert_eq!(rt.state.page, Page::Home);
+        tap(&mut rt, "rail-session");
+        assert_eq!(rt.state.page, Page::Review);
+        assert!(!rt.state.sidebar.is_open());
+    }
 }

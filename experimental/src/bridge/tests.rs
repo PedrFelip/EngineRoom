@@ -967,3 +967,109 @@ fn dropping_bridge_cancels_probe_and_awaits_teardown() {
     drop(bridge);
     assert_eq!(stopped.load(Ordering::SeqCst), 1);
 }
+
+#[test]
+fn history_keyboard_retry_recovers_initial_and_paginated_failures() {
+    use rune::{Env, Runtime};
+    fn settle(rt: &mut Runtime<crate::state::State>, wake: &mpsc::Receiver<()>) {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while rt.state.history_loading {
+            wake.recv_timeout(deadline.saturating_duration_since(Instant::now()))
+                .expect("history response before deadline");
+            rt.state.poll_bridge();
+        }
+        rt.invalidate();
+        rt.frame(0.0);
+    }
+    fn retry(rt: &mut Runtime<crate::state::State>) {
+        rt.set_tab_visits_controls(true);
+        for _ in 0..150 {
+            if rt
+                .elements()
+                .iter()
+                .any(|e| e.focused && e.key.as_deref() == Some("history-retry"))
+            {
+                rt.key(rune::KeyEvent {
+                    key: rune::Key::Text(" ".into()),
+                    mods: Default::default(),
+                });
+                rt.frame(0.0);
+                assert!(
+                    rt.state.history_loading,
+                    "keyboard retry must enqueue a request"
+                );
+                return;
+            }
+            rt.key(rune::KeyEvent {
+                key: rune::Key::Tab,
+                mods: Default::default(),
+            });
+            rt.frame(0.0);
+        }
+        panic!("history retry must be keyboard reachable");
+    }
+    let dir = temp_dir("history-retry");
+    let data_dir = dir.join("data");
+    let db = data_dir.join("history.db");
+    let (bridge, repo, wake) = data_bridge(db);
+    let mut rt = rune::App::new(crate::spec()).headless_runtime(
+        (1220.0, 900.0),
+        Env {
+            system_dark: true,
+            scale: 1.0,
+        },
+    );
+    rt.state = crate::state::State::fixture();
+    rt.state.bridge = Some(bridge);
+    rt.state.navigate(crate::state::Page::History);
+    settle(&mut rt, &wake);
+    assert!(
+        rt.state.history_error.is_some(),
+        "missing directory must fail initial load"
+    );
+    std::fs::create_dir(&data_dir).expect("restore database directory");
+    retry(&mut rt);
+    settle(&mut rt, &wake);
+    assert!(rt.state.history_error.is_none());
+    assert!(rt.state.history.is_empty());
+
+    let saved = config(false);
+    let game = core::extract(&saved.pgn).expect("legal PGN");
+    let raw: Vec<_> = game
+        .fens
+        .iter()
+        .map(|fen| core::terminal_raw(fen, 0))
+        .collect();
+    let reviewed = core::build(&game, &raw).expect("review");
+    rt.state
+        .bridge
+        .as_ref()
+        .expect("bridge")
+        .runtime
+        .block_on(repo.save(&saved, &reviewed))
+        .expect("save game");
+    rt.state.history_cursor = Some(engineroom_backend::db::games::GameCursor {
+        created_at: "9999".into(),
+        id: i64::MAX,
+    });
+    let moved = dir.join("offline");
+    std::fs::rename(&data_dir, &moved).expect("make database unavailable");
+    rt.state.next_history();
+    settle(&mut rt, &wake);
+    assert!(
+        rt.state.history_error.is_some(),
+        "pagination failure must be visible"
+    );
+    std::fs::rename(&moved, &data_dir).expect("restore database");
+    retry(&mut rt);
+    settle(&mut rt, &wake);
+    assert!(rt.state.history_error.is_none());
+    assert_eq!(
+        rt.state.history.len(),
+        1,
+        "retry must append the saved game"
+    );
+    drop(rt);
+    drop(repo);
+    std::fs::remove_dir_all(dir).expect("remove temporary database");
+}

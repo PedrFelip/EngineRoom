@@ -22,6 +22,8 @@ pub(crate) struct WorkspaceReview {
     profile: Profile,
     depth: usize,
     manual_time: bool,
+    annotation_fen: Option<String>,
+    board_annotations: crate::components::board::annotations::Annotations,
 }
 impl WorkspaceReview {
     pub fn status(&self) -> &'static str {
@@ -68,6 +70,8 @@ impl State {
             profile: self.profile,
             depth: self.depth,
             manual_time: self.manual_time,
+            annotation_fen: self.annotation_fen.clone(),
+            board_annotations: self.board_annotations.clone(),
         }
     }
     pub(crate) fn register_review(&mut self, config: ReviewConfig) {
@@ -80,6 +84,7 @@ impl State {
         self.active_workspace = Some(key);
     }
     pub(super) fn park_review(&mut self) {
+        self.sync_annotations();
         if let Some(key) = self.active_workspace
             && let Some(index) = self.workspace.iter().position(|s| s.key == key)
         {
@@ -110,6 +115,8 @@ impl State {
         self.profile = saved.profile;
         self.depth = saved.depth;
         self.manual_time = saved.manual_time;
+        self.annotation_fen = saved.annotation_fen;
+        self.board_annotations = saved.board_annotations;
         self.active_workspace = Some(key);
         self.page = Page::Review;
         self.playing = false;

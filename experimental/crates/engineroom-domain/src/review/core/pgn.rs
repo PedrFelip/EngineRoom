@@ -112,6 +112,7 @@ impl Visitor for PgnVisitor {
     }
 }
 pub fn extract(pgn: &str) -> Result<Game> {
+    super::pgn_tokens::validate(pgn).map_err(invalid)?;
     let mut reader = Reader::new(Cursor::new(pgn.as_bytes()));
     let game = reader
         .read_game(&mut PgnVisitor)
