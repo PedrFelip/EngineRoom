@@ -298,17 +298,7 @@ fn playback(s: &State, k: &Kit) -> El {
                 .control_size(ControlSize::Large)
                 .label(if s.playing { "Pausar" } else { "Reproduzir" })
                 .on_press_tx(|s: &mut State, tx| {
-                    s.selected_square = None;
-                    s.selected_candidate = 0;
-                    if !s.playing
-                        && let Some(i) = s.active_variation
-                        && s.variations[i].cursor == s.variations[i].moves.len()
-                    {
-                        s.variations[i].cursor =
-                            s.variations[i].branch_from.map_or(0, |(_, cursor)| cursor);
-                    }
-                    s.playing = !s.playing;
-                    s.next_step = s.clock + 0.65;
+                    s.toggle_playback();
                     tx.wake_after(std::time::Duration::from_millis(50));
                 })
                 .build(k)
@@ -656,6 +646,11 @@ fn status(s: &State, k: &Kit) -> El {
             .key("analysis-error")
             .gap(8.0)
             .role("alert")
+            .child(
+                ui::label("Não foi possível concluir a análise.", 13.0, k.c.text_base)
+                    .wrap()
+                    .w_full(),
+            )
             .child(ui::label(error, 13.0, k.c.danger.fg).wrap().w_full())
             .child(
                 ui::button("retry-analysis", "Tentar novamente", k).on_press(State::retry_review),
@@ -665,7 +660,7 @@ fn status(s: &State, k: &Kit) -> El {
         return col()
             .gap(8.0)
             .child(ui::label(
-                format!("Analisando {done}/{total}"),
+                format!("Analisando posições: {done} de {total}"),
                 13.0,
                 k.c.text_base,
             ))

@@ -24,11 +24,11 @@ fn preferences(s: &State, k: &Kit) -> El {
     .label("Tema da interface")
     .width(Some(220.0))
     .on_pick(|s: &mut State, index, _| {
-        s.preferences.appearance = if index == 0 {
+        s.set_appearance(if index == 0 {
             Appearance::Dark
         } else {
             Appearance::Light
-        }
+        });
     })
     .build(k)
     .key("appearance");
@@ -71,7 +71,7 @@ fn preferences(s: &State, k: &Kit) -> El {
             "Aparência",
             col().child(ui::setting(
                 "Tema",
-                "A paleta do OpenCode, em claro ou escuro.",
+                "Escolha a aparência clara ou escura.",
                 theme,
                 k,
             )),
@@ -127,19 +127,90 @@ fn analysis(s: &State, k: &Kit, layers: &mut Vec<El>) -> El {
             s.select_open = false;
         })
         .build(k, layers);
-    col().w_full().gap(26.0)
-        .child(ui::section("Durante a revisão",col().gap(8.0)
-            .child(ui::setting("Motor ao vivo","Analisar a posição selecionada durante a navegação.",toggle("live-engine","Motor ao vivo",s.preferences.live_engine,|s|s.preferences.live_engine= !s.preferences.live_engine,k),k))
-            .child(ui::rule(k))
-            .child(ui::setting("Feedback dos lances","Mostrar a classificação ao avançar pela partida.",toggle("feedback","Feedback dos lances",s.preferences.feedback,|s|s.preferences.feedback= !s.preferences.feedback,k),k))
-            .child(ui::rule(k)).child(ui::setting("Linhas candidatas","Número de alternativas exibidas pelo motor.",lines,k)),k))
-        .child(ui::section("Recursos do Stockfish",col().gap(8.0)
-            .child(ui::setting("Threads",&format!("{} threads selecionadas",s.preferences.threads),
-                ui::slider("threads","Threads do motor",(s.preferences.threads as f32-1.0)/7.0,|s|(s.preferences.threads as f32-1.0)/7.0,|s,v|s.preferences.threads=(1.0+v*7.0).round() as usize,k),k))
-            .child(ui::rule(k)).child(ui::setting("Memória Hash",&format!("{} MB selecionados",s.preferences.hash_mb),
-                ui::slider("hash","Memória Hash",(s.preferences.hash_mb as f32-64.0)/960.0,|s|(s.preferences.hash_mb as f32-64.0)/960.0,|s,v|s.preferences.hash_mb=64+(v*15.0).round() as usize*64,k),k)),k))
-        .child(ui::section("Engine Stockfish", probe(s, k), k))
-        .child(ui::label("As preferências de análise ao vivo são enviadas ao backend. As demais preferências são salvas em um arquivo local.",11.0,k.c.text_muted).wrap().w_full())
+    col()
+        .w_full()
+        .gap(26.0)
+        .child(ui::section(
+            "Durante a revisão",
+            col()
+                .gap(8.0)
+                .child(ui::setting(
+                    "Motor ao vivo",
+                    "Analisar a posição selecionada durante a navegação.",
+                    toggle(
+                        "live-engine",
+                        "Motor ao vivo",
+                        s.preferences.live_engine,
+                        State::toggle_live_engine,
+                        k,
+                    ),
+                    k,
+                ))
+                .child(ui::rule(k))
+                .child(ui::setting(
+                    "Feedback dos lances",
+                    "Mostrar a classificação ao avançar pela partida.",
+                    toggle(
+                        "feedback",
+                        "Feedback dos lances",
+                        s.preferences.feedback,
+                        |s| s.preferences.feedback = !s.preferences.feedback,
+                        k,
+                    ),
+                    k,
+                ))
+                .child(ui::rule(k))
+                .child(ui::setting(
+                    "Linhas candidatas",
+                    "Número de alternativas exibidas pelo motor.",
+                    lines,
+                    k,
+                )),
+            k,
+        ))
+        .child(ui::section(
+            "Recursos do Stockfish",
+            col()
+                .gap(8.0)
+                .child(ui::setting(
+                    "Threads",
+                    &format!("{} threads selecionadas", s.preferences.threads),
+                    ui::slider(
+                        "threads",
+                        "Threads do motor",
+                        (s.preferences.threads as f32 - 1.0) / 7.0,
+                        |s| (s.preferences.threads as f32 - 1.0) / 7.0,
+                        |s, v| s.preferences.threads = (1.0 + v * 7.0).round() as usize,
+                        k,
+                    ),
+                    k,
+                ))
+                .child(ui::rule(k))
+                .child(ui::setting(
+                    "Memória Hash",
+                    &format!("{} MB selecionados", s.preferences.hash_mb),
+                    ui::slider(
+                        "hash",
+                        "Memória Hash",
+                        (s.preferences.hash_mb as f32 - 64.0) / 960.0,
+                        |s| (s.preferences.hash_mb as f32 - 64.0) / 960.0,
+                        |s, v| s.preferences.hash_mb = 64 + (v * 15.0).round() as usize * 64,
+                        k,
+                    ),
+                    k,
+                )),
+            k,
+        ))
+        .child(ui::section("Verificar Stockfish", probe(s, k), k))
+        .child(
+            ui::label(
+                "As preferências são salvas neste computador.",
+                12.0,
+                k.c.text_muted,
+            )
+            .wrap()
+            .w_full(),
+        )
 }
 fn probe(s: &State, k: &Kit) -> El {
     let running = matches!(s.engine_probe, crate::engine_probe::Status::Running);
@@ -147,7 +218,7 @@ fn probe(s: &State, k: &Kit) -> El {
         .gap(10.0)
         .child(
             ui::label(
-                "Verifica se o Stockfish responde aos comandos UCI.",
+                "Verifique se o Stockfish está disponível para analisar partidas.",
                 12.0,
                 k.c.text_muted,
             )
@@ -158,7 +229,7 @@ fn probe(s: &State, k: &Kit) -> El {
             Button::new(if running {
                 "Testando…"
             } else {
-                "Testar engine"
+                "Testar Stockfish"
             })
             .control_size(ControlSize::ExtraLarge)
             .disabled(running || s.bridge.is_none())
@@ -170,7 +241,7 @@ fn probe(s: &State, k: &Kit) -> El {
         crate::engine_probe::Status::Success(name) => {
             content = content.child(
                 ui::label(
-                    name.as_deref().unwrap_or("Engine respondeu (uciok)"),
+                    name.as_deref().unwrap_or("Stockfish respondeu"),
                     12.0,
                     k.c.success.fg,
                 )
@@ -258,8 +329,8 @@ fn storage(s: &State, k: &Kit) -> El {
             .child(ui::rule(k))
             .child(
                 ui::setting(
-                    "Arquivo do banco",
-                    "Tamanho total do arquivo SQLite no disco.",
+                    "Arquivo de dados",
+                    "Tamanho total dos dados locais no disco.",
                     ui::label(readable_bytes(stats.db_bytes), 13.0, k.c.text_base),
                     k,
                 )
@@ -287,7 +358,9 @@ fn storage(s: &State, k: &Kit) -> El {
             storage_destructive("clear-history", "Limpar histórico", disabled, k)
                 .on_press(|s: &mut State| s.request_clear_history()),
         );
-    let mut maintenance = col().w_full().gap(8.0).child(actions);
+    let mut maintenance = col().w_full().gap(8.0)
+        .child(ui::label("Limpar o cache remove avaliações reutilizáveis. Limpar o histórico remove as revisões salvas.", 12.0, k.c.text_muted).wrap().w_full())
+        .child(actions);
     if s.confirm_clear_history {
         maintenance = maintenance.child(ui::rule(k)).child(ui::group(
             col()

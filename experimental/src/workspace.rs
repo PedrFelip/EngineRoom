@@ -94,6 +94,9 @@ impl State {
         self.cancel_review();
     }
     pub fn activate_review(&mut self, key: u64) {
+        if !self.workspace.iter().any(|review| review.key == key) {
+            return;
+        }
         self.invalidate_history_load();
         if self.active_workspace == Some(key) && self.page == Page::Review {
             return;

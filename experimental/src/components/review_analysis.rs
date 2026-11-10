@@ -58,7 +58,7 @@ pub fn view(s: &State, k: &Kit) -> El {
     }
     for (i, line) in lines.iter().take(s.preferences.lines).enumerate() {
         let title = format!(
-            "{}  {}   {}  d{}",
+            "{}  {} · avaliação {} · profundidade {}",
             i + 1,
             line.san.first().map_or("—", String::as_str),
             review_data::eval(line.cp),
@@ -107,7 +107,10 @@ pub fn view(s: &State, k: &Kit) -> El {
             )
             .child(
                 ui::label(
-                    format!("Chance das brancas: {:.1}%", line.win_pct),
+                    format!(
+                        "Estimativa baseada na avaliação para as brancas: {:.1}%",
+                        line.win_pct
+                    ),
                     12.0,
                     k.c.text_muted,
                 )

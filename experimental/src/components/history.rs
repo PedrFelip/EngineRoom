@@ -10,7 +10,7 @@ use rune_kit::{Button, ButtonVariant, ControlSize, Kit, TextInput};
 pub fn view(s: &State, k: &Kit, layout: Layout) -> El {
     let mut content = col().gap(16.0).child(ui::heading("Histórico", k)).child(
         ui::label(
-            "Suas revisões salvas, da mais recente para a mais antiga.",
+            "Revisões salvas, da mais recente para a mais antiga. A busca filtra apenas as partidas carregadas.",
             14.0,
             k.c.text_muted,
         )
@@ -27,10 +27,11 @@ pub fn view(s: &State, k: &Kit, layout: Layout) -> El {
             .build(k)
             .key("history-search"),
     );
+    let search = history_search::HistorySearch::new(&s.history_filter.text);
     let filtered: Vec<_> = s
         .history
         .iter()
-        .filter(|game| history_search::matches(&game.white, &game.black, &s.history_filter.text))
+        .filter(|game| search.matches(&game.white, &game.black))
         .collect();
     if let Some(game) = s
         .history_confirm_delete
@@ -58,6 +59,7 @@ pub fn view(s: &State, k: &Kit, layout: Layout) -> El {
         }
         confirmation = confirmation.child(
             row()
+                .flex_wrap()
                 .gap(8.0)
                 .child(
                     ui::button("history-delete-cancel", "Cancelar", k)

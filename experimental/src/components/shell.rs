@@ -85,7 +85,7 @@ fn sidebar(s: &State, k: &Kit) -> El {
                         .py(12.0)
                         .gap(4.0)
                         .child(ui::label("EngineRoom", 19.0, k.c.text_base))
-                        .child(ui::label("REVISÃO DE XADREZ", 10.0, k.c.text_muted)),
+                        .child(ui::label("REVISÃO DE XADREZ", 12.0, k.c.text_muted)),
                 )
                 .child(toggle(true, k)),
         )
@@ -114,8 +114,8 @@ fn sidebar(s: &State, k: &Kit) -> El {
                 .gap(5.0)
                 .px(12.0)
                 .py(8.0)
-                .child(ui::label("Uma análise ativa por vez", 10.0, k.c.text_muted))
-                .child(ui::label("EngineRoom · local", 10.0, k.c.text_faint)),
+                .child(ui::label("Uma análise ativa por vez", 12.0, k.c.text_muted))
+                .child(ui::label("EngineRoom · local", 12.0, k.c.text_muted)),
         )
         .build(k)
 }

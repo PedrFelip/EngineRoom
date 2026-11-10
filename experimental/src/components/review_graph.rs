@@ -106,7 +106,13 @@ pub fn meter(s: &State, _k: &Kit, size: f32) -> El {
     let label = s
         .position_analysis()
         .map_or_else(|| "—".into(), |p| review_data::eval(p.cp));
-    let label_size = if label.len() > 6 { 9.0 } else { 12.0 };
+    // Keep the meter legible for extreme scores; its accessible label retains precision.
+    let display_label = if label.len() > 6 {
+        s.position_analysis()
+            .map_or_else(|| "—".into(), |p| format!("{:+.0}", p.cp as f32 / 100.0))
+    } else {
+        label.clone()
+    };
     // Port of the Tauri EvalBar: padded gradient shell with border and shadow, a clipped
     // gradient track, boundary marker and a label riding the dominant side.
     const PAD: f32 = 3.0;
@@ -194,10 +200,10 @@ pub fn meter(s: &State, _k: &Kit, size: f32) -> El {
                 ),
         )
         .child(
-            rune::text(label)
+            rune::text(display_label)
                 .font(rune::TextStyle {
                     line_height: 14.0,
-                    ..rune::TextStyle::new(label_size, 600.0).mono()
+                    ..rune::TextStyle::new(12.0, 600.0).mono()
                 })
                 .color(if white_advances {
                     rune::color::hex("#18181b").unwrap()

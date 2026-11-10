@@ -68,21 +68,11 @@ pub fn view(s: &State, k: &Kit, layout: Layout) -> El {
         .label("Origem da partida")
         .width(None)
         .on_pick(|s: &mut State, index, _| {
-            s.cancel_chesscom();
-            s.import_source = match index {
+            s.select_import_source(match index {
                 0 => ImportSource::File,
                 1 => ImportSource::Paste,
                 _ => ImportSource::ChessCom,
-            };
-            s.import_error = None;
-            s.file_drag_over = false;
-            if s.import_source == ImportSource::ChessCom
-                && !s.preferences.chess_username.is_empty()
-                && s.chess_games.is_empty()
-                && !s.chess_searched
-            {
-                s.search_chesscom();
-            }
+            });
         })
         .build(k)
         .key("import-source");
@@ -304,7 +294,7 @@ pub fn view(s: &State, k: &Kit, layout: Layout) -> El {
                 .child(ui::label("Suas partidas no Chess.com", 18.0, k.c.text_base))
                 .child(
                     ui::label(
-                        "Busque pelo seu usuário e escolha uma partida para analisar.",
+                        "A busca exige internet; a análise da partida acontece neste computador.",
                         12.0,
                         k.c.text_muted,
                     )
@@ -482,10 +472,10 @@ pub fn view(s: &State, k: &Kit, layout: Layout) -> El {
         } else {
             col()
                 .gap(10.0)
-                .child(ui::heading("Sua próxima descoberta começa aqui.", k))
+                .child(ui::heading("Importar partida", k))
                 .child(
                     ui::label(
-                        "Escolha uma partida para explorar suas decisões, lance a lance.",
+                        "Escolha uma fonte para começar sua revisão.",
                         13.0,
                         k.c.text_muted,
                     )
@@ -533,9 +523,11 @@ pub fn configure(s: &State, k: &Kit, layout: Layout) -> El {
         .build(k)
         .key("profile");
     let description = match s.profile {
-        Profile::Fast => "Revisão automática para encontrar os momentos importantes da partida.",
-        Profile::Deep => "Revisão automática com mais atenção às decisões críticas.",
-        Profile::Manual => "Escolha o orçamento e as linhas candidatas para esta prévia.",
+        Profile::Fast => "Análise automática mais rápida, com menos tempo dedicado às posições.",
+        Profile::Deep => {
+            "Análise automática mais detalhada, que dedica mais tempo às posições críticas."
+        }
+        Profile::Manual => "Escolha o limite por posição e o número de linhas candidatas.",
     };
     let mut settings = col()
         .gap(20.0)
@@ -665,7 +657,7 @@ pub fn configure(s: &State, k: &Kit, layout: Layout) -> El {
                     .child(
                         ui::button_trailing(
                             "start-review",
-                            "Abrir revisão",
+                            "Iniciar análise",
                             ButtonVariant::Contrast,
                             k,
                         )

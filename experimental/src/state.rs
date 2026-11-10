@@ -347,6 +347,14 @@ impl State {
         }
         changed
     }
+    #[expect(dead_code, reason = "component wiring is owned by the design work")]
+    pub fn set_appearance(&mut self, appearance: Appearance) {
+        self.preferences.appearance = appearance;
+    }
+    #[expect(dead_code, reason = "component wiring is owned by the design work")]
+    pub fn toggle_live_engine(&mut self) {
+        self.preferences.live_engine = !self.preferences.live_engine;
+    }
     pub fn setup_bridge(&mut self, wake: rune::Waker) {
         match crate::bridge::Bridge::new(wake) {
             Ok(bridge) => self.bridge = Some(bridge),
@@ -1073,6 +1081,20 @@ impl State {
         self.chess_request += 1;
         self.chess_loading = false;
     }
+    #[expect(dead_code, reason = "component wiring is owned by the design work")]
+    pub fn select_import_source(&mut self, source: ImportSource) {
+        self.cancel_chesscom();
+        self.import_source = source;
+        self.import_error = None;
+        self.file_drag_over = false;
+        if source == ImportSource::ChessCom
+            && !self.preferences.chess_username.is_empty()
+            && self.chess_games.is_empty()
+            && !self.chess_searched
+        {
+            self.search_chesscom();
+        }
+    }
     pub fn chess_username_changed(&mut self) {
         self.chess_filter.replace_text("");
         self.chess_searched = false;
@@ -1209,6 +1231,8 @@ impl State {
     pub fn prepare(&mut self) {
         match game::parse(&self.pgn.text) {
             Ok(game) => {
+                self.park_review();
+                self.active_workspace = None;
                 self.game = game;
                 self.reset_annotations();
                 self.go_to(0);
@@ -1488,6 +1512,21 @@ impl State {
         self.active_variation = Some(self.variations.len() - 1);
         self.selected_square = None;
         self.playing = true;
+        self.next_step = self.clock + 0.65;
+    }
+    #[expect(dead_code, reason = "component wiring is owned by the design work")]
+    pub fn toggle_playback(&mut self) {
+        self.selected_square = None;
+        self.selected_candidate = 0;
+        if !self.playing
+            && let Some(i) = self.active_variation
+            && self.variations[i].cursor == self.variations[i].moves.len()
+        {
+            self.variations[i].cursor = self.variations[i]
+                .branch_from
+                .map_or(0, |(_, cursor)| cursor);
+        }
+        self.playing = !self.playing;
         self.next_step = self.clock + 0.65;
     }
     pub fn tick(&mut self, now: f64) -> bool {

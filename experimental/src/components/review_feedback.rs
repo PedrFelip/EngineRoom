@@ -82,14 +82,11 @@ pub fn current(s: &State, k: &Kit) -> El {
                 .children(s.active_variation.is_none().then(|| {
                     ui::label(
                         format!(
-                            "Δ {:.2}{}",
-                            {
-                                s.real_result
-                                    .as_ref()
-                                    .and_then(|r| r.moves.iter().find(|m| m.played.ply == ply))
-                                    .map_or(0.0, |m| m.cp_loss / 100.0)
-                            },
-                            { "" }
+                            "Perda de avaliação: {:.2} peões",
+                            s.real_result
+                                .as_ref()
+                                .and_then(|r| r.moves.iter().find(|m| m.played.ply == ply))
+                                .map_or(0.0, |m| m.cp_loss / 100.0)
                         ),
                         12.0,
                         k.c.text_muted,

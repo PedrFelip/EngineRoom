@@ -25,6 +25,10 @@ pub fn kit(appearance: Appearance) -> &'static Kit {
             k.c.text_accent = accent;
             k.c.icon_accent = accent;
             k.c.border_focus = accent;
+            k.c.text_faint = hex("#999999").expect("valid faint text color");
+        } else {
+            k.c.text_faint = hex("#696969").expect("valid faint text color");
+            k.c.border_focus = hex("#5878cf").expect("valid focus color");
         }
         k.ty.ui = TextStyle::new(14.0, 400.0).lh(20.0);
         k.ty.ui_medium = TextStyle::new(14.0, 500.0).lh(20.0);
@@ -40,4 +44,45 @@ pub fn kit(appearance: Appearance) -> &'static Kit {
         k.ty.mono = TextStyle::new(13.0, 400.0).mono().lh(20.0);
         k
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rune::Color;
+
+    fn contrast(a: Color, b: Color) -> f32 {
+        let (a, b) = (a.luminance(), b.luminance());
+        (a.max(b) + 0.05) / (a.min(b) + 0.05)
+    }
+
+    #[test]
+    fn secondary_text_and_focus_remain_distinguishable_on_common_surfaces() {
+        for appearance in [Appearance::Dark, Appearance::Light] {
+            let colors = &kit(appearance).c;
+            for surface in [
+                colors.bg_base,
+                colors.bg_deep,
+                colors.layer_01,
+                colors.layer_02,
+            ] {
+                for text in [colors.text_muted, colors.text_faint] {
+                    assert!(
+                        contrast(text, surface) >= 4.5,
+                        "text {} on {}: {:.2}",
+                        text.hex(),
+                        surface.hex(),
+                        contrast(text, surface)
+                    );
+                }
+                assert!(
+                    contrast(colors.border_focus, surface) >= 3.0,
+                    "focus {} on {}: {:.2}",
+                    colors.border_focus.hex(),
+                    surface.hex(),
+                    contrast(colors.border_focus, surface)
+                );
+            }
+        }
+    }
 }

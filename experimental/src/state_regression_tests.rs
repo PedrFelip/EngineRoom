@@ -1,5 +1,63 @@
-use super::{HistoryOperation, State};
+use super::{Appearance, HistoryOperation, ImportSource, State};
 use crate::components::board::annotations::{Annotation, Brush};
+
+#[test]
+fn activating_missing_workspace_keeps_current_session_and_history_request() {
+    let mut state = State::fixture();
+    state.session.open("active".into());
+    state.real_progress = Some((2, 10));
+    let history_load_id = state.history_load_id;
+    let active = state.active_workspace;
+
+    state.activate_review(u64::MAX);
+
+    assert_eq!(state.active_workspace, active);
+    assert_eq!(state.session.id(), Some("active"));
+    assert_eq!(state.session.phase, crate::review_session::Phase::Opening);
+    assert_eq!(state.real_progress, Some((2, 10)));
+    assert_eq!(state.history_load_id, history_load_id);
+}
+
+#[test]
+fn import_source_change_cancels_request_and_clears_transient_ui() {
+    let mut state = State {
+        chess_loading: true,
+        import_error: Some("old error".into()),
+        file_drag_over: true,
+        ..State::default()
+    };
+    let request = state.chess_request;
+    state.select_import_source(ImportSource::File);
+    assert_eq!(state.import_source, ImportSource::File);
+    assert_eq!(state.chess_request, request + 1);
+    assert!(!state.chess_loading);
+    assert!(!state.file_drag_over);
+    assert!(state.import_error.is_none());
+}
+
+#[test]
+fn playback_intent_restarts_finished_variation_and_clears_selection() {
+    let mut state = State::fixture();
+    state.explore_candidate();
+    let index = state.active_variation.expect("fixture has a candidate");
+    state.playing = false;
+    state.variations[index].cursor = state.variations[index].moves.len();
+    state.selected_square = Some(1);
+    state.selected_candidate = 1;
+    state.clock = 4.0;
+    state.toggle_playback();
+    assert!(state.playing);
+    assert_eq!(state.variations[index].cursor, 0);
+    assert_eq!(state.selected_square, None);
+    assert_eq!(state.selected_candidate, 0);
+    assert_eq!(state.next_step, 4.65);
+    state.toggle_playback();
+    assert!(!state.playing);
+    state.set_appearance(Appearance::Light);
+    state.toggle_live_engine();
+    assert_eq!(state.preferences.appearance, Appearance::Light);
+    assert!(!state.preferences.live_engine);
+}
 
 #[test]
 fn history_retry_keeps_the_failed_operation_and_cursor() {
