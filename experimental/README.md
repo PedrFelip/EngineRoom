@@ -72,6 +72,7 @@ orienta layout, escopos de eventos, acessibilidade e testes headless.
 - Visualizar barra de avaliação, selos no tabuleiro/lista, setas e resumo por fase da análise.
 - Selecionar candidatos legais, reproduzir uma linha, pausar e retornar à partida.
 - Criar variações por clique ou arraste de peças, escolhendo a peça de promoção.
+- Marcar casas com clique secundário e modificadores; as marcas acompanham a posição atual. Setas por arraste secundário ainda dependem de suporte de eventos do Rune.
 - Configurar linhas, feedback, tempo, threads e memória no modal da revisão.
 - Alternar foco no tabuleiro e painéis, inclusive com a sidebar fechada.
 - Trocar tema em toda a interface; mudar switches, sliders e linhas candidatas.

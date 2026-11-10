@@ -915,3 +915,55 @@ fn real_stockfish_bridge_resumes_interrupted_review_from_cache() {
     drop(b);
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn probe_delivers_error_and_wakes_ui() {
+    let (bridge, wake) = bridge(Arc::new(NoEngine), Arc::new(MemoryRepo::default()));
+    bridge.start_probe();
+    assert!(matches!(
+        next_data(&bridge, &wake),
+        DataEvent::Probe(Err(_))
+    ));
+}
+
+struct WaitingProbe {
+    started: mpsc::Sender<()>,
+    stopped: Arc<AtomicUsize>,
+}
+struct WaitingPort(Arc<AtomicUsize>);
+impl EngineFactory for WaitingProbe {
+    fn acquire<'a>(&'a self, _: &'a Cancellation) -> Task<'a, Result<Box<dyn EnginePort>>> {
+        let _ = self.started.send(());
+        Box::pin(async { Ok(Box::new(WaitingPort(self.stopped.clone())) as Box<dyn EnginePort>) })
+    }
+}
+impl EnginePort for WaitingPort {
+    fn send<'a>(&'a mut self, _: &'a str) -> Task<'a, Result<()>> {
+        Box::pin(async { Ok(()) })
+    }
+    fn next(&mut self) -> Task<'_, Result<String>> {
+        Box::pin(std::future::pending())
+    }
+    fn shutdown(&mut self) -> Task<'_, ()> {
+        self.0.fetch_add(1, Ordering::SeqCst);
+        Box::pin(async {})
+    }
+}
+#[test]
+fn dropping_bridge_cancels_probe_and_awaits_teardown() {
+    let (started, received) = mpsc::channel();
+    let stopped = Arc::new(AtomicUsize::new(0));
+    let (bridge, _) = bridge(
+        Arc::new(WaitingProbe {
+            started,
+            stopped: stopped.clone(),
+        }),
+        Arc::new(MemoryRepo::default()),
+    );
+    bridge.start_probe();
+    received
+        .recv_timeout(Duration::from_secs(5))
+        .expect("probe started");
+    drop(bridge);
+    assert_eq!(stopped.load(Ordering::SeqCst), 1);
+}

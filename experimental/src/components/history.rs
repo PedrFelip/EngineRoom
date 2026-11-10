@@ -32,6 +32,54 @@ pub fn view(s: &State, k: &Kit, layout: Layout) -> El {
         .iter()
         .filter(|game| history_search::matches(&game.white, &game.black, &s.history_filter.text))
         .collect();
+    if let Some(game) = s
+        .history_confirm_delete
+        .and_then(|id| s.history.iter().find(|game| game.id == id))
+    {
+        let id = game.id;
+        let mut confirmation = col()
+            .key(format!("history-confirm-{id}"))
+            .focus_return(format!("delete-{id}"))
+            .role("alertdialog")
+            .gap(8.0)
+            .child(ui::label(
+                "Excluir esta revisão do histórico?",
+                14.0,
+                k.c.text_base,
+            ))
+            .child(ui::label(
+                format!("{} × {}", game.white, game.black),
+                12.0,
+                k.c.text_muted,
+            ));
+        if let Some(error) = &s.history_delete_error {
+            confirmation =
+                confirmation.child(ui::label(error, 12.0, k.c.danger.fg).role("alert").wrap());
+        }
+        confirmation = confirmation.child(
+            row()
+                .gap(8.0)
+                .child(
+                    ui::button("history-delete-cancel", "Cancelar", k)
+                        .autofocus()
+                        .disabled(s.history_delete_pending)
+                        .on_press(State::cancel_history_delete),
+                )
+                .child(
+                    Button::new(if s.history_delete_pending {
+                        "Excluindo…"
+                    } else {
+                        "Excluir revisão"
+                    })
+                    .variant(ButtonVariant::Danger)
+                    .disabled(s.history_delete_pending)
+                    .build(k)
+                    .key("history-delete-confirm")
+                    .on_press(State::confirm_history_delete),
+                ),
+        );
+        content = content.child(ui::group(confirmation, k));
+    }
     if s.history_loading {
         content = content.child(ui::label("Carregando histórico…", 12.0, k.c.text_muted));
     }
@@ -173,55 +221,12 @@ pub fn view(s: &State, k: &Kit, layout: Layout) -> El {
                             .build(k)
                             .key(format!("delete-{id}"))
                             .disabled(s.history_delete_pending)
-                            .on_press(move |s: &mut State| s.request_history_delete(id)),
+                            .on_press_tx(move |s: &mut State, tx| {
+                                s.request_history_delete(id);
+                                tx.scroll_into_view("history-delete-confirm");
+                            }),
                     ),
             );
-        let entry = if s.history_confirm_delete == Some(id) {
-            let mut confirmation = col()
-                .key(format!("history-confirm-{id}"))
-                .focus_return(format!("delete-{id}"))
-                .role("alertdialog")
-                .gap(8.0)
-                .child(ui::label(
-                    "Excluir esta revisão do histórico?",
-                    14.0,
-                    k.c.text_base,
-                ))
-                .child(ui::label(
-                    format!("{} × {}", game.white, game.black),
-                    12.0,
-                    k.c.text_muted,
-                ));
-            if let Some(error) = &s.history_delete_error {
-                confirmation =
-                    confirmation.child(ui::label(error, 12.0, k.c.danger.fg).role("alert").wrap());
-            }
-            confirmation = confirmation.child(
-                row()
-                    .gap(8.0)
-                    .child(
-                        ui::button("history-delete-cancel", "Cancelar", k)
-                            .autofocus()
-                            .disabled(s.history_delete_pending)
-                            .on_press(State::cancel_history_delete),
-                    )
-                    .child(
-                        Button::new(if s.history_delete_pending {
-                            "Excluindo…"
-                        } else {
-                            "Excluir revisão"
-                        })
-                        .variant(ButtonVariant::Danger)
-                        .disabled(s.history_delete_pending)
-                        .build(k)
-                        .key("history-delete-confirm")
-                        .on_press(State::confirm_history_delete),
-                    ),
-            );
-            entry.child(ui::group(confirmation, k))
-        } else {
-            entry
-        };
         content = content.child(ui::group(entry, k));
     }
     if s.history_cursor.is_some() {

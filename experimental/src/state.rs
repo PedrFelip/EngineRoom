@@ -165,6 +165,7 @@ pub struct State {
     pub selected_candidate: usize,
     pub analysis_settings_open: bool,
     pub review_sidebar: PaneState,
+    annotation_fen: Option<String>,
     pub(crate) board_annotations: crate::components::board::annotations::Annotations,
     pub selected_square: Option<usize>,
     pub promotion_pending: Option<(usize, usize)>,
@@ -246,6 +247,7 @@ impl Default for State {
             selected_candidate: 0,
             analysis_settings_open: false,
             review_sidebar: PaneState::new(352.0).range(304.0, 392.0),
+            annotation_fen: None,
             board_annotations: Default::default(),
             selected_square: None,
             promotion_pending: None,
@@ -431,6 +433,17 @@ impl State {
     }
     pub fn poll_bridge(&mut self) -> bool {
         self.sync_live();
+        let fen =
+            shakmaty::fen::Fen::from_position(self.position(), shakmaty::EnPassantMode::Legal)
+                .to_string();
+        if self
+            .annotation_fen
+            .as_ref()
+            .is_some_and(|previous| previous != &fen)
+        {
+            self.board_annotations.clear();
+        }
+        self.annotation_fen = Some(fen);
         let preferences_changed = self.poll_preferences();
         let avatars_changed = self.avatars.as_mut().is_some_and(|avatars| avatars.poll());
         use engineroom_backend::review::types::Event;
@@ -1150,8 +1163,9 @@ impl State {
         let previous_ply = self.ply;
         let was_mainline = self.active_variation.is_none();
         self.ply = ply.min(self.game.moves.len());
-        if was_mainline && self.bridge.is_some() {
-            if let Some(sound) = crate::audio::forward_sound(
+        if was_mainline
+            && self.bridge.is_some()
+            && let Some(sound) = crate::audio::forward_sound(
                 previous_ply,
                 self.ply,
                 self.ply
@@ -1159,9 +1173,9 @@ impl State {
                     .and_then(|i| self.game.moves.get(i))
                     .map(String::as_str),
                 self.preferences.sound,
-            ) {
-                crate::audio::play(sound, self.preferences.volume);
-            }
+            )
+        {
+            crate::audio::play(sound, self.preferences.volume);
         }
         self.active_variation = None;
         self.playing = false;
@@ -1437,7 +1451,6 @@ impl State {
         true
     }
     pub fn click_square(&mut self, index: usize) {
-        self.board_annotations.clear();
         if self.promotion_pending.is_some() {
             return;
         }

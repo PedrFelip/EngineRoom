@@ -282,6 +282,49 @@ fn spec() -> AppSpec<State> {
                 s.real_result = None;
             }),
             ("history", |s| s.page = Page::History),
+            ("history-search-delete", |s| {
+                s.page = Page::History;
+                s.history.push(engineroom_backend::db::games::GameSummary {
+                    id: 1,
+                    white: "José Silva".into(),
+                    black: "Ana Costa".into(),
+                    result: "1-0".into(),
+                    plies: 40,
+                    engine_tier: "custom".into(),
+                    mode: engineroom_backend::db::mode::Mode::Depth,
+                    analysis_kind: "manual".into(),
+                    depth: 20,
+                    multipv: 2,
+                    accuracy_white: 80.0,
+                    accuracy_black: 70.0,
+                    created_at: "2026-11-10".into(),
+                });
+                s.history_total = 1;
+                s.history_filter.replace_text("jose");
+                s.request_history_delete(1);
+                s.history_delete_error = Some("Não foi possível excluir a revisão.".into());
+            }),
+            ("settings-probe-error", |s| {
+                s.open_settings();
+                s.section = SettingsSection::Analysis;
+                s.engine_probe =
+                    engine_probe::Status::Error("Não foi possível iniciar o Stockfish.".into());
+            }),
+            ("review-annotations", |s| {
+                *s = State::fixture();
+                s.page = Page::Review;
+                use components::board::annotations::{Annotation, Brush};
+                s.board_annotations.toggle(Annotation {
+                    from: 52,
+                    to: 36,
+                    brush: Brush::Green,
+                });
+                s.board_annotations.toggle(Annotation {
+                    from: 12,
+                    to: 12,
+                    brush: Brush::Red,
+                });
+            }),
             ("configure", |s| {
                 s.load_fixture();
                 s.prepare();
