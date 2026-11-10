@@ -359,21 +359,6 @@ fn spec() -> AppSpec<State> {
                 s.engine_probe =
                     engine_probe::Status::Error("Não foi possível iniciar o Stockfish.".into());
             }),
-            ("review-annotations", |s| {
-                *s = State::fixture();
-                s.page = Page::Review;
-                use components::board::annotations::{Annotation, Brush};
-                s.board_annotations.toggle(Annotation {
-                    from: 52,
-                    to: 36,
-                    brush: Brush::Green,
-                });
-                s.board_annotations.toggle(Annotation {
-                    from: 12,
-                    to: 12,
-                    brush: Brush::Red,
-                });
-            }),
             ("configure", |s| {
                 s.load_fixture();
                 s.prepare();

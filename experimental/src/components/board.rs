@@ -1,9 +1,7 @@
 //! Board and player tags. Position data comes from the validated PGN preview.
-pub(crate) mod annotations;
 
 use super::{pieces, review_feedback, ui::label};
 use crate::{review_data, state::State, variation};
-use annotations::{Annotation, Brush};
 use rune::{El, LineCap, Phase, Shape, col, el, icon, oklch, row};
 use rune_kit::Kit;
 use shakmaty::Position;
@@ -116,31 +114,12 @@ pub fn view(s: &State, k: &Kit, size: f32) -> El {
             tile = tile
                 .role("button")
                 .focusable(true)
-                .on_secondary_press(move |s: &mut State, _, tx| {
-                    let mods = tx.mods();
-                    s.board_annotations.toggle(Annotation {
-                        from: index,
-                        to: index,
-                        brush: Brush::from_modifiers(
-                            mods.shift || mods.ctrl,
-                            mods.alt || mods.logo,
-                        ),
-                    });
-                })
                 .on_press_tx(move |s: &mut State, tx| {
-                    if s.board_annotations.drawing() {
-                        s.board_annotations.select_square(index);
-                    } else {
-                        s.click_square(index);
-                        crate::reveal_move(s, tx);
-                    }
+                    s.click_square(index);
+                    crate::reveal_move(s, tx);
                 })
                 .on_drag(move |s: &mut State, d, tx| match d.phase {
-                    Phase::Up
-                        if !s.board_annotations.drawing()
-                            && !d.cancelled()
-                            && d.dx.hypot(d.dy) > 6.0 =>
-                    {
+                    Phase::Up if !d.cancelled() && d.dx.hypot(d.dy) > 6.0 => {
                         let to_file = file as i32 + (d.x / square_size).floor() as i32;
                         let to_rank = rank as i32 + (d.y / square_size).floor() as i32;
                         if (0..8).contains(&to_file) && (0..8).contains(&to_rank) {
@@ -155,7 +134,7 @@ pub fn view(s: &State, k: &Kit, size: f32) -> El {
             if last.is_some_and(|(from, to)| from == index || to == index) {
                 tile = tile.fill(oklch(0.75, 0.11, 92.0));
             }
-            if s.selected_square == Some(index) || s.board_annotations.origin() == Some(index) {
+            if s.selected_square == Some(index) {
                 tile = tile.border(3.0, k.c.bg_accent);
             }
             if let Some((body, lines, white)) = piece_icon {
@@ -202,65 +181,6 @@ pub fn view(s: &State, k: &Kit, size: f32) -> El {
             line = line.child(tile);
         }
         board = board.child(line);
-    }
-    for (i, annotation) in s.board_annotations.shapes().iter().enumerate() {
-        let center = |index: usize| {
-            let index = if s.flipped { 63 - index } else { index };
-            [
-                (index % 8) as f32 * square_size + square_size / 2.0,
-                (index / 8) as f32 * square_size + square_size / 2.0,
-            ]
-        };
-        let start = center(annotation.from);
-        let end = center(annotation.to);
-        let color = annotation.brush.color();
-        let shape = if annotation.from == annotation.to {
-            let radius = square_size * 0.36;
-            let points: Vec<_> = (0..32)
-                .map(|step| {
-                    let angle = step as f32 * std::f32::consts::TAU / 32.0;
-                    [
-                        start[0] + radius * angle.cos(),
-                        start[1] + radius * angle.sin(),
-                    ]
-                })
-                .collect();
-            Shape::new().stroke_with(points, true, square_size * 0.08, LineCap::Round, color)
-        } else {
-            let dx = end[0] - start[0];
-            let dy = end[1] - start[1];
-            let len = dx.hypot(dy);
-            let (ux, uy) = (dx / len, dy / len);
-            let tip = square_size * 0.26;
-            let end = [
-                end[0] - ux * square_size * 0.18,
-                end[1] - uy * square_size * 0.18,
-            ];
-            Shape::new()
-                .line(start, end, square_size * 0.1, LineCap::Round, color)
-                .fill(
-                    vec![
-                        end,
-                        [
-                            end[0] - ux * tip - uy * tip * 0.6,
-                            end[1] - uy * tip + ux * tip * 0.6,
-                        ],
-                        [
-                            end[0] - ux * tip + uy * tip * 0.6,
-                            end[1] - uy * tip - ux * tip * 0.6,
-                        ],
-                    ],
-                    color,
-                )
-        };
-        board = board.child(
-            el().key(format!("user-annotation-{i}"))
-                .shape(shape)
-                .size(size, size)
-                .absolute(0.0, 0.0)
-                .inert()
-                .a11y_hidden(),
-        );
     }
     if s.preferences.live_engine {
         let colors = [
@@ -365,7 +285,7 @@ pub fn player(
     rating: &Option<String>,
     k: &Kit,
     size: f32,
-    compact: bool,
+    (compact, score): (bool, Option<El>),
 ) -> El {
     let avatar_size = if compact { 32.0 } else { 40.0 };
     let fallback = name
@@ -401,5 +321,6 @@ pub fn player(
                 .map_or_else(el, |rating| label(rating, 12.0, k.c.text_base)),
         )
         .child(el().grow(1.0))
+        .children(score)
         .child(label(side, 10.0, k.c.text_muted))
 }

@@ -1081,21 +1081,3 @@ fn text_file_drop_accepts_extension_and_rejects_other_formats() {
             .is_some_and(|error| error.contains(".txt"))
     );
 }
-
-#[test]
-fn annotations_survive_same_position_clicks_and_clear_when_fen_changes() {
-    use crate::components::board::annotations::{Annotation, Brush};
-    let mut state = State::fixture();
-    state.poll_bridge();
-    state.board_annotations.toggle(Annotation {
-        from: 52,
-        to: 52,
-        brush: Brush::Green,
-    });
-    state.click_square(52);
-    state.poll_bridge();
-    assert_eq!(state.board_annotations.shapes().len(), 1);
-    state.click_square(36);
-    state.poll_bridge();
-    assert!(state.board_annotations.shapes().is_empty());
-}

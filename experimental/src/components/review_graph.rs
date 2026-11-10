@@ -101,29 +101,29 @@ fn phases(mut shape: Shape, count: usize, width: f32, height: f32, color: Color)
     shape
 }
 
+pub fn score(cp: i32) -> String {
+    if cp.unsigned_abs() >= 90_000 {
+        format!(
+            "{}M{}",
+            if cp >= 0 { "+" } else { "−" },
+            100_000_u32.saturating_sub(cp.unsigned_abs())
+        )
+    } else {
+        review_data::eval(cp)
+    }
+}
+
 pub fn meter(s: &State, _k: &Kit, size: f32) -> El {
     let value = s.position_analysis().map_or(50.0, |p| p.win_pct as f32);
     let label = s
         .position_analysis()
-        .map_or_else(|| "—".into(), |p| review_data::eval(p.cp));
-    // Keep the meter legible for extreme scores; its accessible label retains precision.
-    let display_label = if label.len() > 6 {
-        s.position_analysis()
-            .map_or_else(|| "—".into(), |p| format!("{:+.0}", p.cp as f32 / 100.0))
-    } else {
-        label.clone()
-    };
-    // Port of the Tauri EvalBar: padded gradient shell with border and shadow, a clipped
-    // gradient track, boundary marker and a label riding the dominant side.
-    const PAD: f32 = 3.0;
-    const W: f32 = 48.0;
+        .map_or_else(|| "—".into(), |p| score(p.cp));
+    const PAD: f32 = 1.0;
+    const W: f32 = 14.0;
     let track_w = W - PAD * 2.0;
     let track_h = size - PAD * 2.0;
-    let white_h = track_h * value / 100.0;
+    let white_h = track_h * value.clamp(0.0, 100.0) / 100.0;
     let white_top = if s.flipped { 0.0 } else { track_h - white_h };
-    let white_advances = value >= 50.0;
-    let label_bottom = white_advances == !s.flipped;
-    let label_y = PAD + if label_bottom { track_h - 20.0 } else { 8.0 };
     let marker_top = if s.flipped {
         white_h - 1.0
     } else {
@@ -144,13 +144,12 @@ pub fn meter(s: &State, _k: &Kit, size: f32) -> El {
             });
     meter
         .size(W, size)
-        .radius(14.0)
+        .radius(4.0)
         .gradient(
             rune::color::hex(shell_top).unwrap(),
             rune::color::hex(shell_bottom).unwrap(),
         )
         .border(1.0, rune::color::hex(shell_border).unwrap())
-        .shadow(2.0, 6.0, Color::BLACK.alpha(0.10))
         .child(
             el().size(track_w, track_h)
                 .absolute(PAD, PAD)
@@ -161,7 +160,7 @@ pub fn meter(s: &State, _k: &Kit, size: f32) -> El {
                         (1.0, rune::color::hex("#29292e").unwrap()),
                     ],
                 )
-                .clip_rounded(10.0)
+                .clip_rounded(3.0)
                 .child(
                     el().size(track_w, white_h)
                         .absolute(0.0, white_top)
@@ -175,8 +174,8 @@ pub fn meter(s: &State, _k: &Kit, size: f32) -> El {
                         .a11y_hidden(),
                 )
                 .child(
-                    el().size(12.0, 1.0)
-                        .absolute((track_w - 12.0) / 2.0, track_h / 2.0 - 0.5)
+                    el().size(6.0, 1.0)
+                        .absolute((track_w - 6.0) / 2.0, track_h / 2.0 - 0.5)
                         .fill(rune::color::hex("#8c8c8c").unwrap().alpha(0.4))
                         .a11y_hidden(),
                 )
@@ -198,21 +197,6 @@ pub fn meter(s: &State, _k: &Kit, size: f32) -> El {
                         .fill(Color::BLACK.alpha(0.20))
                         .a11y_hidden(),
                 ),
-        )
-        .child(
-            rune::text(display_label)
-                .font(rune::TextStyle {
-                    line_height: 14.0,
-                    ..rune::TextStyle::new(12.0, 600.0).mono()
-                })
-                .color(if white_advances {
-                    rune::color::hex("#18181b").unwrap()
-                } else {
-                    rune::color::hex("#fafafa").unwrap()
-                })
-                .absolute(0.0, label_y)
-                .w(W)
-                .center(),
         )
 }
 
@@ -388,7 +372,15 @@ pub fn chart(s: &State, k: &Kit) -> El {
 
 #[cfg(test)]
 mod tests {
-    use super::smooth;
+    use super::{score, smooth};
+
+    #[test]
+    fn score_distinguishes_advantage_and_mate() {
+        assert_eq!(score(142), "+1.42");
+        assert_eq!(score(-142), "-1.42");
+        assert_eq!(score(99_997), "+M3");
+        assert_eq!(score(-99_997), "−M3");
+    }
 
     #[test]
     fn smoothed_curve_passes_through_each_evaluation() {

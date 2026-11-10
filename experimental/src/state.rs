@@ -173,8 +173,6 @@ pub struct State {
     pub selected_candidate: usize,
     pub analysis_settings_open: bool,
     pub review_sidebar: PaneState,
-    annotation_fen: Option<String>,
-    pub(crate) board_annotations: crate::components::board::annotations::Annotations,
     pub selected_square: Option<usize>,
     pub promotion_pending: Option<(usize, usize)>,
     pub variations: Vec<Variation>,
@@ -256,8 +254,6 @@ impl Default for State {
             selected_candidate: 0,
             analysis_settings_open: false,
             review_sidebar: PaneState::new(352.0).range(304.0, 392.0),
-            annotation_fen: None,
-            board_annotations: Default::default(),
             selected_square: None,
             promotion_pending: None,
             variations: Vec::new(),
@@ -412,7 +408,6 @@ impl State {
             lines: self.preferences.lines as u32,
             initial_result: None,
         };
-        self.reset_annotations();
         self.register_review(config.clone());
         let id = format!(
             "review-{}",
@@ -447,26 +442,8 @@ impl State {
         self.live_error = None;
         self.live_key = None;
     }
-    fn sync_annotations(&mut self) {
-        let fen =
-            shakmaty::fen::Fen::from_position(self.position(), shakmaty::EnPassantMode::Legal)
-                .to_string();
-        if self
-            .annotation_fen
-            .as_ref()
-            .is_some_and(|previous| previous != &fen)
-        {
-            self.board_annotations.clear();
-        }
-        self.annotation_fen = Some(fen);
-    }
-    fn reset_annotations(&mut self) {
-        self.board_annotations = Default::default();
-        self.annotation_fen = None;
-    }
     pub fn poll_bridge(&mut self) -> bool {
         self.sync_live();
-        self.sync_annotations();
         let preferences_changed = self.poll_preferences();
         let avatars_changed = self.avatars.as_mut().is_some_and(|avatars| avatars.poll());
         use engineroom_backend::review::types::Event;
@@ -839,7 +816,6 @@ impl State {
                         game.avatar_key = Some(key);
                         self.park_review();
                         self.game = game;
-                        self.reset_annotations();
                         self.go_to(0);
                         self.variations.clear();
                         self.real_result = None;
@@ -1231,7 +1207,6 @@ impl State {
                 self.park_review();
                 self.active_workspace = None;
                 self.game = game;
-                self.reset_annotations();
                 self.go_to(0);
                 self.variations.clear();
                 self.import_error = None;

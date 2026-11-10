@@ -129,11 +129,6 @@ octicon!(PREVIOUS, "../../assets/chevron-left-16.svg", "chevron-left");
 octicon!(NEXT, "../../assets/chevron-right-16.svg", "chevron-right");
 octicon!(LAST, "../../assets/move-to-end-16.svg", "move-to-end");
 octicon!(FLIP, "../../assets/arrow-switch-16.svg", "arrow-switch");
-static DRAW: Icon = Icon {
-    name: "draw-annotation",
-    view: 16.0,
-    body: r#"<path d="M3 13L12 4M8 4h4v4M3 10v3h3" fill="none" stroke="currentColor" stroke-width="1.5"/>"#,
-};
 static PLAY: Icon = Icon {
     name: "play-variation",
     view: 16.0,
@@ -254,29 +249,6 @@ fn playback(s: &State, k: &Kit) -> El {
                 .checked(s.flipped)
                 .size(32.0, 32.0),
         )
-        .child(
-            IconButton::new(&DRAW)
-                .variant(IconButtonVariant::GhostMuted)
-                .control_size(ControlSize::Large)
-                .label(if s.board_annotations.drawing() {
-                    "Sair do modo de desenho"
-                } else {
-                    "Desenhar setas e círculos"
-                })
-                .help(if s.board_annotations.drawing() {
-                    "Escolha duas casas; a mesma casa cria um círculo"
-                } else {
-                    "Desenhar: escolha duas casas"
-                })
-                .on_press(|s: &mut State| {
-                    s.selected_square = None;
-                    s.board_annotations.toggle_drawing();
-                })
-                .build(k)
-                .key("draw-annotations")
-                .checked(s.board_annotations.drawing())
-                .size(32.0, 32.0),
-        )
         .children(s.active_variation.map(|_| {
             IconButton::new(&RETURN)
                 .variant(IconButtonVariant::GhostMuted)
@@ -324,8 +296,31 @@ fn workspace(s: &State, k: &Kit, size: f32, compact: bool) -> El {
             s.avatar(if s.flipped { 0 } else { 1 }),
             &s.game.ratings[if s.flipped { 0 } else { 1 }],
             k,
-            size + 52.0,
-            compact,
+            size + 24.0,
+            (
+                compact,
+                Some(
+                    ui::mono(
+                        s.position_analysis().map_or_else(
+                            || "Aval. —".into(),
+                            |p| format!("Aval. {}", review_graph::score(p.cp)),
+                        ),
+                        13.0,
+                        k.c.text_base,
+                    )
+                    .key("evaluation-score")
+                    .role("status")
+                    .label(s.position_analysis().map_or_else(
+                        || "Avaliação indisponível".into(),
+                        |p| {
+                            format!(
+                                "Avaliação {}, positiva para as brancas",
+                                review_graph::score(p.cp)
+                            )
+                        },
+                    )),
+                ),
+            ),
         ))
         .child(
             row()
@@ -340,32 +335,10 @@ fn workspace(s: &State, k: &Kit, size: f32, compact: bool) -> El {
             s.avatar(if s.flipped { 1 } else { 0 }),
             &s.game.ratings[if s.flipped { 1 } else { 0 }],
             k,
-            size + 52.0,
-            compact,
+            size + 24.0,
+            (compact, None),
         ))
         .child(playback(s, k))
-        .children(s.board_annotations.drawing().then(|| {
-            row()
-                .gap(8.0)
-                .center_y()
-                .child(
-                    ui::label(
-                        if s.board_annotations.origin().is_some() {
-                            "Escolha o destino (ou a mesma casa para um círculo)"
-                        } else {
-                            "Escolha a casa inicial para desenhar"
-                        },
-                        12.0,
-                        k.c.text_muted,
-                    )
-                    .wrap()
-                    .max_w(size),
-                )
-                .child(
-                    ui::button("clear-annotations", "Limpar desenhos", k)
-                        .on_press(|s: &mut State| s.board_annotations.clear()),
-                )
-        }))
 }
 fn learning(s: &State, k: &Kit) -> El {
     let selected = match s.learning_side {

@@ -1,5 +1,4 @@
 use super::{Appearance, HistoryOperation, ImportSource, State};
-use crate::components::board::annotations::{Annotation, Brush};
 
 #[test]
 fn activating_missing_workspace_keeps_current_session_and_history_request() {
@@ -95,40 +94,4 @@ fn history_retry_keeps_the_failed_operation_and_cursor() {
     state.refresh_history();
     state.retry_history();
     assert_eq!(state.history_operation, Some(HistoryOperation::List));
-}
-
-#[test]
-fn annotations_belong_to_each_workspace_and_clear_on_navigation() {
-    let mut state = State::fixture();
-    let first = state.active_workspace.unwrap();
-    let config = state.workspace[0].config.clone();
-    state.sync_annotations();
-    let shape = Annotation {
-        from: 1,
-        to: 2,
-        brush: Brush::Green,
-    };
-    state.board_annotations.toggle(shape);
-    state.board_annotations.toggle_drawing();
-    state.board_annotations.select_square(3);
-    state.park_review();
-    state.reset_annotations();
-    state.register_review(config);
-    let second = state.active_workspace.unwrap();
-    state.activate_review(first);
-    assert_eq!(state.board_annotations.shapes(), &[shape]);
-    assert_eq!(state.board_annotations.origin(), Some(3));
-    state.activate_review(second);
-    assert!(state.board_annotations.shapes().is_empty());
-    assert_eq!(state.board_annotations.origin(), None);
-    state.go_to(1);
-    state.sync_annotations();
-    state.board_annotations.toggle(shape);
-    state.activate_review(first);
-    assert_eq!(state.board_annotations.shapes(), &[shape]);
-    state.activate_review(second);
-    assert_eq!(state.board_annotations.shapes(), &[shape]);
-    state.go_to(2);
-    state.sync_annotations();
-    assert!(state.board_annotations.shapes().is_empty());
 }

@@ -35,6 +35,11 @@ for path in paths:
         assert scrolls or (y >= -0.5 and y + h <= height + 0.5), (path.name, "unscrollable vertical overflow", element["path"], element["rect"])
     if "chessboard" in keyed:
         board = keyed["chessboard"]["rect"]
+        meter = keyed["evaluation-meter"]["rect"]
+        score = keyed["evaluation-score"]["rect"]
+        assert 12 <= meter[2] <= 16 and meter[2] < board[2] / 10, (path.name, "meter width", meter, board)
+        assert abs(meter[1] - board[1]) < 0.5 and abs(meter[3] - board[3]) < 0.5, (path.name, "meter alignment", meter, board)
+        assert score[2] >= 20 and score[3] >= 14 and score[1] + score[3] <= board[1], (path.name, "score placement", score, board)
         body = keyed["page-body"]["rect"]
         inspector = keyed.get("review-inspector", {}).get("rect")
         assert board[2] == board[3] and board[2] % 8 == 0
