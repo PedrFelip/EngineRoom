@@ -214,6 +214,9 @@ pub fn view(s: &State, k: &Kit, layout: Layout) -> El {
                     )
                     .key("pgn-drop-zone"),
             )
+            .child(if s.file_dialog.is_none() {
+                ui::label("Seletor de arquivos indisponível. Arraste um arquivo para a área acima ou cole o PGN.", 12.0, k.c.text_muted).wrap().w_full()
+            } else { el() })
             .child(s.import_error.as_ref().map_or_else(el, |error| {
                 ui::label(error, 12.0, k.c.danger.fg)
                     .role("alert")
@@ -355,7 +358,7 @@ pub fn view(s: &State, k: &Kit, layout: Layout) -> El {
                     ui::label("Buscando partidas…", 12.0, k.c.text_muted)
                         .wrap()
                         .w_full()
-                } else if s.chess_searched && s.chess_games.is_empty() {
+                } else if s.chess_searched && s.chess_games.is_empty() && s.import_error.is_none() {
                     ui::label(
                         "Nenhuma partida encontrada para este usuário.",
                         12.0,

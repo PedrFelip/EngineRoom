@@ -40,9 +40,33 @@ pub(crate) struct Annotation {
 #[derive(Clone, Debug, Default)]
 pub(crate) struct Annotations {
     shapes: Vec<Annotation>,
+    drawing: bool,
+    origin: Option<usize>,
 }
 
 impl Annotations {
+    pub(crate) fn drawing(&self) -> bool {
+        self.drawing
+    }
+    pub(crate) fn origin(&self) -> Option<usize> {
+        self.origin
+    }
+    pub(crate) fn toggle_drawing(&mut self) {
+        self.drawing = !self.drawing;
+        self.origin = None;
+    }
+    /// Two activations draw an arrow; activating the same square draws a circle.
+    pub(crate) fn select_square(&mut self, square: usize) {
+        if let Some(from) = self.origin.take() {
+            self.toggle(Annotation {
+                from,
+                to: square,
+                brush: Brush::Green,
+            });
+        } else {
+            self.origin = Some(square);
+        }
+    }
     pub(crate) fn shapes(&self) -> &[Annotation] {
         &self.shapes
     }
@@ -64,6 +88,7 @@ impl Annotations {
 
     pub(crate) fn clear(&mut self) {
         self.shapes.clear();
+        self.origin = None;
     }
 }
 
@@ -139,6 +164,62 @@ mod tests {
         rt.secondary_up(x, y);
         rt.frame(1.0 / 60.0);
         assert!(rt.state.board_annotations.shapes().is_empty());
+    }
+
+    #[test]
+    fn drawing_mode_toggles_arrows_and_circles() {
+        let mut drawings = Annotations::default();
+        drawings.toggle_drawing();
+        drawings.select_square(52);
+        assert_eq!(drawings.origin(), Some(52));
+        drawings.select_square(36);
+        assert_eq!(
+            drawings.shapes(),
+            &[Annotation {
+                from: 52,
+                to: 36,
+                brush: Brush::Green
+            }]
+        );
+        drawings.select_square(52);
+        drawings.select_square(36);
+        assert!(drawings.shapes().is_empty());
+        drawings.select_square(12);
+        drawings.select_square(12);
+        assert_eq!(drawings.shapes()[0].to, 12);
+        drawings.select_square(3);
+        drawings.toggle_drawing();
+        assert_eq!(drawings.origin(), None);
+    }
+
+    #[test]
+    fn drawing_controls_create_arrow_without_moving_a_piece() {
+        let mut rt = rune::App::new(crate::spec()).headless_runtime(
+            (720.0, 560.0),
+            rune::Env {
+                system_dark: true,
+                scale: 1.0,
+            },
+        );
+        rt.state = crate::state::State::fixture();
+        rt.state.page = crate::state::Page::Review;
+        rt.invalidate();
+        rt.frame(0.0);
+        for key in ["draw-annotations", "square-e2", "square-e4"] {
+            let (x, y) = rt.find(key).expect("drawing control is visible");
+            rt.pointer_down(x, y);
+            rt.pointer_up(x, y);
+            rt.frame(1.0 / 60.0);
+        }
+        assert_eq!(
+            rt.state.board_annotations.shapes(),
+            &[Annotation {
+                from: 52,
+                to: 36,
+                brush: Brush::Green
+            }]
+        );
+        assert!(rt.state.variations.is_empty());
     }
 
     #[test]

@@ -128,11 +128,19 @@ pub fn view(s: &State, k: &Kit, size: f32) -> El {
                     });
                 })
                 .on_press_tx(move |s: &mut State, tx| {
-                    s.click_square(index);
-                    crate::reveal_move(s, tx);
+                    if s.board_annotations.drawing() {
+                        s.board_annotations.select_square(index);
+                    } else {
+                        s.click_square(index);
+                        crate::reveal_move(s, tx);
+                    }
                 })
                 .on_drag(move |s: &mut State, d, tx| match d.phase {
-                    Phase::Up if !d.cancelled() && d.dx.hypot(d.dy) > 6.0 => {
+                    Phase::Up
+                        if !s.board_annotations.drawing()
+                            && !d.cancelled()
+                            && d.dx.hypot(d.dy) > 6.0 =>
+                    {
                         let to_file = file as i32 + (d.x / square_size).floor() as i32;
                         let to_rank = rank as i32 + (d.y / square_size).floor() as i32;
                         if (0..8).contains(&to_file) && (0..8).contains(&to_rank) {
@@ -147,7 +155,7 @@ pub fn view(s: &State, k: &Kit, size: f32) -> El {
             if last.is_some_and(|(from, to)| from == index || to == index) {
                 tile = tile.fill(oklch(0.75, 0.11, 92.0));
             }
-            if s.selected_square == Some(index) {
+            if s.selected_square == Some(index) || s.board_annotations.origin() == Some(index) {
                 tile = tile.border(3.0, k.c.bg_accent);
             }
             if let Some((body, lines, white)) = piece_icon {

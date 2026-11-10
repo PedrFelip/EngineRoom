@@ -91,16 +91,32 @@ pub fn view(s: &State, k: &Kit, layout: Layout) -> El {
                 .w_full(),
         );
     }
-    if s.bridge.is_some() && s.history.is_empty() && !s.history_loading {
+    if show_empty_history(
+        s.bridge.is_some(),
+        s.history.is_empty(),
+        s.history_loading,
+        s.history_error.is_some(),
+    ) {
         content = content.child(ui::label("Nenhuma revisão salva.", 12.0, k.c.text_muted));
     }
-    if !s.history_filter.text.trim().is_empty() && filtered.is_empty() && !s.history_loading {
+    if show_empty_search(
+        &s.history_filter.text,
+        s.history.is_empty(),
+        filtered.is_empty(),
+        s.history_loading,
+        s.history_error.is_some(),
+    ) {
         let message = if s.history_cursor.is_some() {
             "Nenhuma partida carregada corresponde à busca. Carregue mais para continuar buscando."
         } else {
             "Nenhuma partida corresponde à busca."
         };
         content = content.child(ui::label(message, 12.0, k.c.text_muted).wrap().w_full());
+    }
+    if s.history_error.is_some() && s.bridge.is_some() && !s.history_loading {
+        content = content.child(
+            ui::button("history-retry", "Tentar novamente", k).on_press(State::refresh_history),
+        );
     }
     if s.history_total > 0 {
         content = content.child(
@@ -255,4 +271,33 @@ fn accuracy(label: &str, value: f64, white: bool, k: &Kit) -> El {
             14.0,
             k.c.text_base,
         ))
+}
+
+fn show_empty_history(connected: bool, empty: bool, loading: bool, error: bool) -> bool {
+    connected && empty && !loading && !error
+}
+
+fn show_empty_search(
+    query: &str,
+    history_empty: bool,
+    filtered_empty: bool,
+    loading: bool,
+    error: bool,
+) -> bool {
+    !query.trim().is_empty() && !history_empty && filtered_empty && !loading && !error
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{show_empty_history, show_empty_search};
+
+    #[test]
+    fn empty_messages_do_not_mask_loading_or_errors() {
+        assert!(show_empty_history(true, true, false, false));
+        assert!(!show_empty_history(true, true, false, true));
+        assert!(!show_empty_history(true, true, true, false));
+        assert!(!show_empty_search("ana", true, true, false, false));
+        assert!(!show_empty_search("ana", false, true, false, true));
+        assert!(show_empty_search("ana", false, true, false, false));
+    }
 }
