@@ -139,6 +139,12 @@ pub struct State {
     pub chess_cursor: Option<engineroom_backend::imports::Cursor>,
     pub chess_warning: Option<String>,
     chess_request: u64,
+    pub engine_probe: crate::engine_probe::Status,
+    pub history_filter: TextEdit,
+    pub history_confirm_delete: Option<i64>,
+    pub history_delete_pending: bool,
+    pub history_delete_error: Option<String>,
+    pub history_focus_after_delete: bool,
     pub history: Vec<engineroom_backend::db::games::GameSummary>,
     pub history_cursor: Option<engineroom_backend::db::games::GameCursor>,
     pub history_total: i64,
@@ -159,6 +165,7 @@ pub struct State {
     pub selected_candidate: usize,
     pub analysis_settings_open: bool,
     pub review_sidebar: PaneState,
+    pub(crate) board_annotations: crate::components::board::annotations::Annotations,
     pub selected_square: Option<usize>,
     pub promotion_pending: Option<(usize, usize)>,
     pub variations: Vec<Variation>,
@@ -213,6 +220,12 @@ impl Default for State {
             chess_cursor: None,
             chess_warning: None,
             chess_request: 0,
+            engine_probe: crate::engine_probe::Status::Idle,
+            history_filter: TextEdit::new(""),
+            history_confirm_delete: None,
+            history_delete_pending: false,
+            history_delete_error: None,
+            history_focus_after_delete: false,
             history: Vec::new(),
             history_cursor: None,
             history_total: 0,
@@ -233,6 +246,7 @@ impl Default for State {
             selected_candidate: 0,
             analysis_settings_open: false,
             review_sidebar: PaneState::new(352.0).range(304.0, 392.0),
+            board_annotations: Default::default(),
             selected_square: None,
             promotion_pending: None,
             variations: Vec::new(),
@@ -493,6 +507,27 @@ impl State {
         }
         for event in data {
             match event {
+                crate::bridge::DataEvent::Probe(result) => {
+                    self.engine_probe = match result {
+                        Ok(name) => crate::engine_probe::Status::Success(name),
+                        Err(error) => crate::engine_probe::Status::Error(error),
+                    };
+                }
+                crate::bridge::DataEvent::Deleted(id, result) => {
+                    self.history_delete_pending = false;
+                    match result {
+                        Ok(()) => {
+                            self.history.retain(|game| game.id != id);
+                            self.history_total = self.history_total.saturating_sub(1);
+                            if self.history_confirm_delete == Some(id) {
+                                self.history_confirm_delete = None;
+                                self.history_focus_after_delete = true;
+                            }
+                            self.history_delete_error = None;
+                        }
+                        Err(error) => self.history_delete_error = Some(error),
+                    }
+                }
                 crate::bridge::DataEvent::Games(Ok(page), append) => {
                     self.apply_history_page(page, append);
                 }
@@ -907,15 +942,48 @@ impl State {
             }
         }
     }
-    pub fn history_delete(&mut self, id: i64) {
+    pub fn start_engine_probe(&mut self) {
+        if matches!(self.engine_probe, crate::engine_probe::Status::Running) {
+            return;
+        }
         if let Some(bridge) = &self.bridge {
-            match bridge.delete_game(id) {
-                Ok(()) => {
-                    self.history_loading = true;
-                    self.history_error = None;
-                }
-                Err(e) => self.history_error = Some(e),
+            self.engine_probe = crate::engine_probe::Status::Running;
+            bridge.start_probe();
+        } else {
+            self.engine_probe =
+                crate::engine_probe::Status::Error("Serviço de motor indisponível.".into());
+        }
+    }
+    pub fn request_history_delete(&mut self, id: i64) {
+        if !self.history_delete_pending {
+            self.history_confirm_delete = Some(id);
+            self.history_delete_error = None;
+        }
+    }
+    pub fn cancel_history_delete(&mut self) {
+        if !self.history_delete_pending {
+            self.history_confirm_delete = None;
+            self.history_delete_error = None;
+        }
+    }
+    pub fn confirm_history_delete(&mut self) {
+        if self.history_delete_pending {
+            return;
+        }
+        let Some(id) = self.history_confirm_delete else {
+            return;
+        };
+        let result = self
+            .bridge
+            .as_ref()
+            .ok_or_else(|| "Histórico indisponível".to_string())
+            .and_then(|bridge| bridge.delete_game(id));
+        match result {
+            Ok(()) => {
+                self.history_delete_pending = true;
+                self.history_delete_error = None;
             }
+            Err(error) => self.history_delete_error = Some(error),
         }
     }
     pub fn open_settings(&mut self) {
@@ -1047,11 +1115,8 @@ impl State {
         }
     }
     fn read_pgn_path(&mut self, path: std::path::PathBuf) {
-        if !path
-            .extension()
-            .is_some_and(|ext| ext.eq_ignore_ascii_case("pgn"))
-        {
-            self.import_error = Some("Escolha um arquivo com extensão .pgn.".into());
+        if !crate::file_dialog::accepts_pgn_path(&path) {
+            self.import_error = Some("Escolha um arquivo com extensão .pgn ou .txt.".into());
             return;
         }
         match self
@@ -1082,7 +1147,22 @@ impl State {
 
     pub fn go_to(&mut self, ply: usize) {
         self.promotion_pending = None;
+        let previous_ply = self.ply;
+        let was_mainline = self.active_variation.is_none();
         self.ply = ply.min(self.game.moves.len());
+        if was_mainline && self.bridge.is_some() {
+            if let Some(sound) = crate::audio::forward_sound(
+                previous_ply,
+                self.ply,
+                self.ply
+                    .checked_sub(1)
+                    .and_then(|i| self.game.moves.get(i))
+                    .map(String::as_str),
+                self.preferences.sound,
+            ) {
+                crate::audio::play(sound, self.preferences.volume);
+            }
+        }
         self.active_variation = None;
         self.playing = false;
         self.selected_square = None;
@@ -1357,6 +1437,7 @@ impl State {
         true
     }
     pub fn click_square(&mut self, index: usize) {
+        self.board_annotations.clear();
         if self.promotion_pending.is_some() {
             return;
         }

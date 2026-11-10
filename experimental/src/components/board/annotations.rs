@@ -110,6 +110,38 @@ mod tests {
     }
 
     #[test]
+    fn secondary_click_toggles_a_circle_without_moving_a_piece() {
+        let mut rt = rune::App::new(crate::spec()).headless_runtime(
+            (900.0, 700.0),
+            rune::Env {
+                system_dark: true,
+                scale: 1.0,
+            },
+        );
+        rt.state = crate::state::State::fixture();
+        rt.state.page = crate::state::Page::Review;
+        rt.invalidate();
+        rt.frame(0.0);
+        let (x, y) = rt.find("square-e2").expect("e2 is visible on the board");
+        rt.secondary_down(x, y);
+        rt.secondary_up(x, y);
+        rt.frame(1.0 / 60.0);
+        assert_eq!(
+            rt.state.board_annotations.shapes(),
+            &[Annotation {
+                from: 52,
+                to: 52,
+                brush: Brush::Green
+            }]
+        );
+        assert!(rt.state.variations.is_empty());
+        rt.secondary_down(x, y);
+        rt.secondary_up(x, y);
+        rt.frame(1.0 / 60.0);
+        assert!(rt.state.board_annotations.shapes().is_empty());
+    }
+
+    #[test]
     fn modifier_combinations_match_chessground() {
         assert_eq!(Brush::from_modifiers(false, false), Brush::Green);
         assert_eq!(Brush::from_modifiers(true, false), Brush::Red);

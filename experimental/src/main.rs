@@ -1,8 +1,10 @@
 //! EngineRoom's experimental native frontend, composed with Rune and OpenCode's kit.
+mod audio;
 mod avatar;
 mod bridge;
 mod components;
 mod desktop_paths;
+mod engine_probe;
 mod file_dialog;
 mod fixtures;
 mod game;
@@ -324,6 +326,10 @@ fn spec() -> AppSpec<State> {
                 s.active_variation.map(|i| s.variations[i].cursor),
             );
             let changed = s.tick(now) | s.poll_bridge();
+            if s.history_focus_after_delete {
+                s.history_focus_after_delete = false;
+                tx.focus("history-search", true);
+            }
             let after = (
                 s.active_variation,
                 s.active_variation.map(|i| s.variations[i].cursor),
@@ -337,6 +343,13 @@ fn spec() -> AppSpec<State> {
             changed
         }),
         on_key: Some(|s, key, tx| {
+            if s.page == Page::History
+                && s.history_confirm_delete.is_some()
+                && matches!(key.key, rune::Key::Escape)
+            {
+                s.cancel_history_delete();
+                return true;
+            }
             // Control is literal on every platform; cmd is also set with it on Linux/Windows.
             if s.page == Page::Review
                 && key.mods.ctrl

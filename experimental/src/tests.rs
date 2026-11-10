@@ -736,7 +736,13 @@ fn file_drop_zone_works_at_desktop_and_small_sizes() {
         rt.drop_files(vec!["game.txt".into()], Some(at));
         rt.frame(0.02);
         assert!(!rt.state.file_drag_over);
-        assert!(rt.state.import_error.as_deref().unwrap().contains(".pgn"));
+        assert!(
+            rt.state
+                .import_error
+                .as_deref()
+                .unwrap()
+                .contains("indisponível")
+        );
     }
 }
 
@@ -752,7 +758,7 @@ fn file_drop_without_pointer_position_reaches_import_screen() {
         rt.state
             .import_error
             .as_deref()
-            .is_some_and(|e| e.contains(".pgn"))
+            .is_some_and(|e| e.contains("indisponível"))
     );
 }
 
@@ -760,7 +766,13 @@ fn file_drop_without_pointer_position_reaches_import_screen() {
 fn dropped_files_require_one_pgn() {
     let mut state = State::default();
     state.drop_pgn_files(&["game.txt".into()]);
-    assert!(state.import_error.as_deref().unwrap().contains(".pgn"));
+    assert!(
+        state
+            .import_error
+            .as_deref()
+            .unwrap()
+            .contains("indisponível")
+    );
     state.drop_pgn_files(&["one.pgn".into(), "two.pgn".into()]);
     assert!(state.import_error.as_deref().unwrap().contains("apenas um"));
 }
@@ -982,4 +994,61 @@ fn review_shortcuts_work_from_inspector_and_respect_dialogs() {
     rt.frame(1.0 / 60.0);
     assert_eq!(rt.state.ply, ply, "dialog retains keyboard ownership");
     assert!(rt.state.flipped);
+}
+
+#[test]
+fn history_filter_and_delete_confirmation_handle_errors_and_escape() {
+    let mut rt = runtime();
+    rt.state.page = Page::History;
+    let mut game = summary(1);
+    game.white = "José".into();
+    rt.state.history.push(game);
+    rt.state.history_total = 1;
+    rt.state.history_filter.replace_text("JOSE");
+    rt.invalidate();
+    rt.frame(0.0);
+    assert!(
+        rt.find("delete-1").is_some(),
+        "accent-insensitive filter finds the player"
+    );
+    tap(&mut rt, "delete-1");
+    assert_eq!(rt.state.history_confirm_delete, Some(1));
+    tap(&mut rt, "history-delete-confirm");
+    assert!(rt.state.history_delete_error.is_some());
+    assert_eq!(rt.state.history_confirm_delete, Some(1));
+    rt.key(rune::KeyEvent {
+        key: rune::Key::Escape,
+        mods: Default::default(),
+    });
+    rt.frame(0.0);
+    assert_eq!(rt.state.history_confirm_delete, None);
+    rt.state.request_history_delete(1);
+    rt.state.history_delete_pending = true;
+    rt.key(rune::KeyEvent {
+        key: rune::Key::Escape,
+        mods: Default::default(),
+    });
+    rt.frame(0.0);
+    assert_eq!(
+        rt.state.history_confirm_delete,
+        Some(1),
+        "pending deletion cannot be cancelled"
+    );
+}
+
+#[test]
+fn text_file_drop_accepts_extension_and_rejects_other_formats() {
+    let mut state = State::default();
+    state.drop_pgn_files(&["game.TXT".into()]);
+    assert_eq!(
+        state.import_error.as_deref(),
+        Some("Serviço de importação indisponível.")
+    );
+    state.drop_pgn_files(&["game.pdf".into()]);
+    assert!(
+        state
+            .import_error
+            .as_deref()
+            .is_some_and(|error| error.contains(".txt"))
+    );
 }

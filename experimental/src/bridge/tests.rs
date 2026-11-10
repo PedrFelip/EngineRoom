@@ -268,6 +268,11 @@ fn storage_stats_reports_database_file_and_clears_data() {
     assert!(stats.games_bytes > 0, "clear_cache removed saved games");
 
     bridge.delete_game(id).expect("delete game");
+    assert!(matches!(
+        next_data(&bridge, &wake),
+        DataEvent::Deleted(_, Ok(()))
+    ));
+    bridge.list_games(None).expect("refresh games");
     let page = wait_games(&bridge, &wake, false);
     assert!(page.games.is_empty(), "deleted game still listed");
     assert_eq!(page.total, 0);
@@ -335,6 +340,11 @@ fn list_games_paginates_through_real_sqlite() {
     bridge
         .delete_game(second.games[0].id)
         .expect("delete last game");
+    assert!(matches!(
+        next_data(&bridge, &wake),
+        DataEvent::Deleted(_, Ok(()))
+    ));
+    bridge.list_games(None).expect("refresh games");
     let page = wait_games(&bridge, &wake, false);
     assert_eq!(page.total, 100);
     assert_eq!(page.games.len(), 100);

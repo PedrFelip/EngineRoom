@@ -175,9 +175,13 @@ pub fn view(s: &State, k: &Kit, layout: Layout) -> El {
                     )
                     .fill(k.c.bg_base)
                     .child(
-                        ui::label("Solte seu arquivo .pgn nesta área", 16.0, k.c.text_base)
-                            .wrap()
-                            .w_full(),
+                        ui::label(
+                            "Solte seu arquivo .pgn ou .txt nesta área",
+                            16.0,
+                            k.c.text_base,
+                        )
+                        .wrap()
+                        .w_full(),
                     )
                     .child(
                         ui::label(

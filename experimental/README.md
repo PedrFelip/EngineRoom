@@ -94,7 +94,7 @@ orienta layout, escopos de eventos, acessibilidade e testes headless.
 
 A análise nativa usa Stockfish e o SQLite experimental
 `engineroom-experimental/engineroom.db` no diretório de dados do usuário (no Linux,
-`$XDG_DATA_HOME`), separado do banco do aplicativo principal. Sons e áudio ainda não estão conectados, e o
+`$XDG_DATA_HOME`), separado do banco do aplicativo principal. Sons de navegação na linha principal usam os arquivos do aplicativo principal; o
 empacotamento/release do Rune segue pendente. A interface usa os resultados reais do backend, sem controles de simulação. Os cenários headless permanecem determinísticos e não abrem Stockfish nem banco.
 
 ## Layout responsivo
@@ -166,8 +166,7 @@ em `RUNE-LICENSE.txt`. O experimento segue GPL-3.0-or-later, como o EngineRoom.
 
 ## Estado WIP
 
-O frontend experimental ainda não está empacotado nem distribuído; som/áudio não
-está conectado e a paridade visual com o aplicativo principal continua em
+O frontend experimental ainda não está empacotado nem distribuído; a paridade visual com o aplicativo principal continua em
 andamento. A interface não expõe controles de demonstração: partidas analisadas usam
 Stockfish e o SQLite experimental. Fixtures de apresentação existem apenas nas cenas
 headless (`--scene`, `--snap`, `--tree`), que não abrem motor nem banco. Variações e

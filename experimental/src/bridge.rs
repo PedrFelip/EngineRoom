@@ -63,6 +63,8 @@ pub enum DataEvent {
         Result<engineroom_backend::db::games::GamePage, String>,
         bool,
     ),
+    Deleted(i64, Result<(), String>),
+    Probe(Result<Option<String>, String>),
     Storage(Result<engineroom_backend::db::stats::StorageStats, String>),
     Cleared(Result<(), String>, bool),
     Game(Result<Option<Box<ReviewConfig>>, String>, bool, u64),
@@ -80,6 +82,11 @@ pub struct Bridge {
     lifecycle: mpsc::Receiver<BridgeLifecycle>,
     files: mpsc::Receiver<Result<String, String>>,
     data: mpsc::Receiver<DataEvent>,
+    probe_cancel: tokio::sync::watch::Sender<bool>,
+    probe_task: std::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
+    probe_factory: Arc<dyn EngineFactory>,
+    probe_events: mpsc::Sender<DataEvent>,
+    probe_wake: Arc<dyn Fn() + Send + Sync>,
 }
 impl Bridge {
     pub fn new(wake: rune::Waker) -> Result<Self, String> {
@@ -163,7 +170,7 @@ impl Bridge {
                 shutdown.await;
             }
         });
-        let sessions = Arc::new(ReviewSessions::new(factory, repository, None));
+        let sessions = Arc::new(ReviewSessions::new(factory.clone(), repository, None));
         let (sender, events) = mpsc::channel();
         let (lifecycle_tx, lifecycle) = mpsc::channel();
         let (files_tx, files) = mpsc::channel();
@@ -171,6 +178,9 @@ impl Bridge {
         let (intents, mut receiver) = tokio::sync::mpsc::unbounded_channel();
         let generation = Arc::new(AtomicU64::new(0));
         let current_generation = generation.clone();
+        let probe_wake = wake.clone();
+        let probe_events = data_tx.clone();
+        let (probe_cancel, _) = tokio::sync::watch::channel(false);
         let actor = runtime.spawn(async move {
             let mut active: Option<String> = None;
             while let Some(intent) = receiver.recv().await {
@@ -274,15 +284,13 @@ impl Bridge {
                     }
                     Intent::DeleteGame(id) => {
                         let result = match &data_repo {
-                            Some(repo) => match repo.delete_game(id).await {
-                                Ok(()) => {
-                                    repo.list_games(100, None).await.map_err(|e| e.to_string())
-                                }
-                                Err(e) => Err(e.to_string()),
-                            },
+                            Some(repo) => repo
+                                .delete_game(id)
+                                .await
+                                .map_err(|error| error.to_string()),
                             None => Err("Histórico indisponível".into()),
                         };
-                        let _ = data_tx.send(DataEvent::Games(result, false));
+                        let _ = data_tx.send(DataEvent::Deleted(id, result));
                         wake();
                     }
                     Intent::StorageStats => {
@@ -358,6 +366,11 @@ impl Bridge {
             lifecycle,
             files,
             data,
+            probe_cancel,
+            probe_task: std::sync::Mutex::new(None),
+            probe_factory: factory,
+            probe_events,
+            probe_wake,
         })
     }
 
@@ -436,6 +449,21 @@ impl Bridge {
     pub fn delete_game(&self, id: i64) -> Result<(), String> {
         self.send(Intent::DeleteGame(id))
     }
+    pub fn start_probe(&self) {
+        let factory = self.probe_factory.clone();
+        let cancel = engineroom_backend::review::engine::Cancellation {
+            closed: self.probe_cancel.subscribe(),
+            revision: None,
+        };
+        let events = self.probe_events.clone();
+        let wake = self.probe_wake.clone();
+        let task = self.runtime.spawn(async move {
+            let result = crate::engine_probe::run(factory.as_ref(), &cancel).await;
+            let _ = events.send(DataEvent::Probe(result));
+            wake();
+        });
+        *self.probe_task.lock().expect("probe task lock") = Some(task);
+    }
     pub fn drain_data(&self) -> Vec<DataEvent> {
         self.data.try_iter().collect()
     }
@@ -480,6 +508,10 @@ fn publish_lifecycle(
 }
 impl Drop for Bridge {
     fn drop(&mut self) {
+        let _ = self.probe_cancel.send(true);
+        if let Some(task) = self.probe_task.get_mut().expect("probe task lock").take() {
+            let _ = self.runtime.block_on(task);
+        }
         self.import_intents.take();
         if let Some(actor) = self.import_actor.take() {
             let _ = self.runtime.block_on(actor);
