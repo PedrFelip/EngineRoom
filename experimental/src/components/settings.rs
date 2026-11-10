@@ -83,7 +83,7 @@ fn preferences(s: &State, k: &Kit) -> El {
                 .gap(8.0)
                 .child(ui::setting(
                     "Som ao avançar lance",
-                    "Preferência visual; áudio ainda não conectado.",
+                    "Toca um som ao avançar pela partida.",
                     sound,
                     k,
                 ))
@@ -138,7 +138,57 @@ fn analysis(s: &State, k: &Kit, layers: &mut Vec<El>) -> El {
                 ui::slider("threads","Threads do motor",(s.preferences.threads as f32-1.0)/7.0,|s|(s.preferences.threads as f32-1.0)/7.0,|s,v|s.preferences.threads=(1.0+v*7.0).round() as usize,k),k))
             .child(ui::rule(k)).child(ui::setting("Memória Hash",&format!("{} MB selecionados",s.preferences.hash_mb),
                 ui::slider("hash","Memória Hash",(s.preferences.hash_mb as f32-64.0)/960.0,|s|(s.preferences.hash_mb as f32-64.0)/960.0,|s,v|s.preferences.hash_mb=64+(v*15.0).round() as usize*64,k),k)),k))
+        .child(ui::section("Engine Stockfish", probe(s, k), k))
         .child(ui::label("As preferências de análise ao vivo são enviadas ao backend. As demais preferências são salvas em um arquivo local.",11.0,k.c.text_muted).wrap().w_full())
+}
+fn probe(s: &State, k: &Kit) -> El {
+    let running = matches!(s.engine_probe, crate::engine_probe::Status::Running);
+    let mut content = col()
+        .gap(10.0)
+        .child(
+            ui::label(
+                "Verifica se o Stockfish responde aos comandos UCI.",
+                12.0,
+                k.c.text_muted,
+            )
+            .wrap()
+            .w_full(),
+        )
+        .child(
+            Button::new(if running {
+                "Testando…"
+            } else {
+                "Testar engine"
+            })
+            .control_size(ControlSize::ExtraLarge)
+            .disabled(running || s.bridge.is_none())
+            .build(k)
+            .key("test-engine")
+            .on_press(|s: &mut State| s.start_engine_probe()),
+        );
+    match &s.engine_probe {
+        crate::engine_probe::Status::Success(name) => {
+            content = content.child(
+                ui::label(
+                    name.as_deref().unwrap_or("Engine respondeu (uciok)"),
+                    12.0,
+                    k.c.success.fg,
+                )
+                .wrap()
+                .w_full(),
+            );
+        }
+        crate::engine_probe::Status::Error(error) => {
+            content = content.child(
+                ui::label(error, 12.0, k.c.danger.fg)
+                    .role("alert")
+                    .wrap()
+                    .w_full(),
+            );
+        }
+        crate::engine_probe::Status::Idle | crate::engine_probe::Status::Running => {}
+    }
+    content
 }
 fn readable_bytes(value: u64) -> String {
     const KB: f64 = 1024.0;

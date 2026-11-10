@@ -4,11 +4,17 @@ use std::{
     fmt,
     future::Future,
     io,
-    path::PathBuf,
+    path::{Path, PathBuf},
     pin::Pin,
     sync::{Arc, mpsc},
     thread,
 };
+
+/// Returns whether a path has a supported PGN container extension.
+pub fn accepts_pgn_path(path: &Path) -> bool {
+    path.extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("pgn") || ext.eq_ignore_ascii_case("txt"))
+}
 
 /// Outcome of one selection; `None` means the user cancelled.
 pub type DialogResult = Result<Option<PathBuf>, DialogError>;
@@ -53,7 +59,7 @@ impl FileDialog {
         Self::with_picker(wake, || {
             Box::pin(async {
                 Ok(rfd::AsyncFileDialog::new()
-                    .add_filter("Chess games", &["pgn"])
+                    .add_filter("Chess games", &["pgn", "txt"])
                     .pick_file()
                     .await
                     .map(|file| file.path().to_owned()))
@@ -129,7 +135,17 @@ mod tests {
         time::{Duration, Instant},
     };
 
-    use super::{DialogError, DialogFuture, DialogResult, FileDialog};
+    use super::{DialogError, DialogFuture, DialogResult, FileDialog, accepts_pgn_path};
+
+    #[test]
+    fn accepts_only_supported_file_extensions() {
+        for path in ["game.pgn", "GAME.PGN", "game.txt", "GAME.TXT"] {
+            assert!(accepts_pgn_path(path.as_ref()), "{path}");
+        }
+        for path in ["game", "game.pgn.zip", "game.pdf"] {
+            assert!(!accepts_pgn_path(path.as_ref()), "{path}");
+        }
+    }
 
     /// Upper bound for worker wake-ups; keeps a broken worker from hanging the suite.
     const WAKE_TIMEOUT: Duration = Duration::from_secs(5);

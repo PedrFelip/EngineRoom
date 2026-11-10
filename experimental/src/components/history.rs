@@ -1,8 +1,11 @@
 //! Persisted reviews from the experimental database.
+#[path = "history_search.rs"]
+mod history_search;
+
 use super::ui;
 use crate::{layout::Layout, state::State};
 use rune::{El, col, el, row};
-use rune_kit::{Button, ButtonVariant, ControlSize, Kit};
+use rune_kit::{Button, ButtonVariant, ControlSize, Kit, TextInput};
 
 pub fn view(s: &State, k: &Kit, layout: Layout) -> El {
     let mut content = col().gap(16.0).child(ui::heading("Histórico", k)).child(
@@ -14,6 +17,21 @@ pub fn view(s: &State, k: &Kit, layout: Layout) -> El {
         .wrap()
         .w_full(),
     );
+    content = content.child(
+        TextInput::new(&s.history_filter)
+            .label("Buscar jogador nas partidas carregadas")
+            .placeholder("Nome de jogador")
+            .height(40.0)
+            .width(None)
+            .on_edit(|s: &mut State| &mut s.history_filter)
+            .build(k)
+            .key("history-search"),
+    );
+    let filtered: Vec<_> = s
+        .history
+        .iter()
+        .filter(|game| history_search::matches(&game.white, &game.black, &s.history_filter.text))
+        .collect();
     if s.history_loading {
         content = content.child(ui::label("Carregando histórico…", 12.0, k.c.text_muted));
     }
@@ -28,11 +46,20 @@ pub fn view(s: &State, k: &Kit, layout: Layout) -> El {
     if s.bridge.is_some() && s.history.is_empty() && !s.history_loading {
         content = content.child(ui::label("Nenhuma revisão salva.", 12.0, k.c.text_muted));
     }
+    if !s.history_filter.text.trim().is_empty() && filtered.is_empty() && !s.history_loading {
+        let message = if s.history_cursor.is_some() {
+            "Nenhuma partida carregada corresponde à busca. Carregue mais para continuar buscando."
+        } else {
+            "Nenhuma partida corresponde à busca."
+        };
+        content = content.child(ui::label(message, 12.0, k.c.text_muted).wrap().w_full());
+    }
     if s.history_total > 0 {
         content = content.child(
             ui::label(
                 format!(
-                    "Mostrando {} de {} revisões",
+                    "{} correspondentes entre {} de {} revisões carregadas",
+                    filtered.len(),
                     s.history.len(),
                     s.history_total
                 ),
@@ -42,7 +69,7 @@ pub fn view(s: &State, k: &Kit, layout: Layout) -> El {
             .key("history-count"),
         );
     }
-    for game in &s.history {
+    for game in filtered {
         let id = game.id;
         let analysis = match game.analysis_kind.as_str() {
             "auto-fast" => "Automático · Rápido".to_string(),
@@ -145,9 +172,56 @@ pub fn view(s: &State, k: &Kit, layout: Layout) -> El {
                             .control_size(ControlSize::Large)
                             .build(k)
                             .key(format!("delete-{id}"))
-                            .on_press(move |s: &mut State| s.history_delete(id)),
+                            .disabled(s.history_delete_pending)
+                            .on_press(move |s: &mut State| s.request_history_delete(id)),
                     ),
             );
+        let entry = if s.history_confirm_delete == Some(id) {
+            let mut confirmation = col()
+                .key(format!("history-confirm-{id}"))
+                .focus_return(format!("delete-{id}"))
+                .role("alertdialog")
+                .gap(8.0)
+                .child(ui::label(
+                    "Excluir esta revisão do histórico?",
+                    14.0,
+                    k.c.text_base,
+                ))
+                .child(ui::label(
+                    format!("{} × {}", game.white, game.black),
+                    12.0,
+                    k.c.text_muted,
+                ));
+            if let Some(error) = &s.history_delete_error {
+                confirmation =
+                    confirmation.child(ui::label(error, 12.0, k.c.danger.fg).role("alert").wrap());
+            }
+            confirmation = confirmation.child(
+                row()
+                    .gap(8.0)
+                    .child(
+                        ui::button("history-delete-cancel", "Cancelar", k)
+                            .autofocus()
+                            .disabled(s.history_delete_pending)
+                            .on_press(State::cancel_history_delete),
+                    )
+                    .child(
+                        Button::new(if s.history_delete_pending {
+                            "Excluindo…"
+                        } else {
+                            "Excluir revisão"
+                        })
+                        .variant(ButtonVariant::Danger)
+                        .disabled(s.history_delete_pending)
+                        .build(k)
+                        .key("history-delete-confirm")
+                        .on_press(State::confirm_history_delete),
+                    ),
+            );
+            entry.child(ui::group(confirmation, k))
+        } else {
+            entry
+        };
         content = content.child(ui::group(entry, k));
     }
     if s.history_cursor.is_some() {

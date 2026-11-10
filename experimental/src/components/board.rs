@@ -1,6 +1,9 @@
 //! Board and player tags. Position data comes from the validated PGN preview.
+pub(crate) mod annotations;
+
 use super::{pieces, review_feedback, ui::label};
 use crate::{review_data, state::State, variation};
+use annotations::{Annotation, Brush};
 use rune::{El, LineCap, Phase, Shape, col, el, icon, oklch, row};
 use rune_kit::Kit;
 use shakmaty::Position;
@@ -113,6 +116,17 @@ pub fn view(s: &State, k: &Kit, size: f32) -> El {
             tile = tile
                 .role("button")
                 .focusable(true)
+                .on_secondary_press(move |s: &mut State, _, tx| {
+                    let mods = tx.mods();
+                    s.board_annotations.toggle(Annotation {
+                        from: index,
+                        to: index,
+                        brush: Brush::from_modifiers(
+                            mods.shift || mods.ctrl,
+                            mods.alt || mods.logo,
+                        ),
+                    });
+                })
                 .on_press_tx(move |s: &mut State, tx| {
                     s.click_square(index);
                     crate::reveal_move(s, tx);
@@ -180,6 +194,65 @@ pub fn view(s: &State, k: &Kit, size: f32) -> El {
             line = line.child(tile);
         }
         board = board.child(line);
+    }
+    for (i, annotation) in s.board_annotations.shapes().iter().enumerate() {
+        let center = |index: usize| {
+            let index = if s.flipped { 63 - index } else { index };
+            [
+                (index % 8) as f32 * square_size + square_size / 2.0,
+                (index / 8) as f32 * square_size + square_size / 2.0,
+            ]
+        };
+        let start = center(annotation.from);
+        let end = center(annotation.to);
+        let color = annotation.brush.color();
+        let shape = if annotation.from == annotation.to {
+            let radius = square_size * 0.36;
+            let points: Vec<_> = (0..32)
+                .map(|step| {
+                    let angle = step as f32 * std::f32::consts::TAU / 32.0;
+                    [
+                        start[0] + radius * angle.cos(),
+                        start[1] + radius * angle.sin(),
+                    ]
+                })
+                .collect();
+            Shape::new().stroke_with(points, true, square_size * 0.08, LineCap::Round, color)
+        } else {
+            let dx = end[0] - start[0];
+            let dy = end[1] - start[1];
+            let len = dx.hypot(dy);
+            let (ux, uy) = (dx / len, dy / len);
+            let tip = square_size * 0.26;
+            let end = [
+                end[0] - ux * square_size * 0.18,
+                end[1] - uy * square_size * 0.18,
+            ];
+            Shape::new()
+                .line(start, end, square_size * 0.1, LineCap::Round, color)
+                .fill(
+                    vec![
+                        end,
+                        [
+                            end[0] - ux * tip - uy * tip * 0.6,
+                            end[1] - uy * tip + ux * tip * 0.6,
+                        ],
+                        [
+                            end[0] - ux * tip + uy * tip * 0.6,
+                            end[1] - uy * tip - ux * tip * 0.6,
+                        ],
+                    ],
+                    color,
+                )
+        };
+        board = board.child(
+            el().key(format!("user-annotation-{i}"))
+                .shape(shape)
+                .size(size, size)
+                .absolute(0.0, 0.0)
+                .inert()
+                .a11y_hidden(),
+        );
     }
     if s.preferences.live_engine {
         let colors = [
