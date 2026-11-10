@@ -42,17 +42,28 @@ pub fn view(s: &State, k: &Kit, layout: Layout) -> El {
             .key(format!("history-confirm-{id}"))
             .focus_return(format!("delete-{id}"))
             .role("alertdialog")
-            .gap(8.0)
+            .gap(10.0)
             .child(ui::label(
                 "Excluir esta revisão do histórico?",
-                14.0,
+                16.0,
                 k.c.text_base,
             ))
-            .child(ui::label(
-                format!("{} × {}", game.white, game.black),
-                12.0,
-                k.c.text_muted,
-            ));
+            .child(
+                ui::label(
+                    format!("{} × {}", game.white, game.black),
+                    14.0,
+                    k.c.text_base,
+                )
+                .wrap(),
+            )
+            .child(
+                ui::label(
+                    "A revisão salva será removida deste histórico.",
+                    12.0,
+                    k.c.text_muted,
+                )
+                .wrap(),
+            );
         if let Some(error) = &s.history_delete_error {
             confirmation =
                 confirmation.child(ui::label(error, 12.0, k.c.danger.fg).role("alert").wrap());
@@ -62,7 +73,10 @@ pub fn view(s: &State, k: &Kit, layout: Layout) -> El {
                 .flex_wrap()
                 .gap(8.0)
                 .child(
-                    ui::button("history-delete-cancel", "Cancelar", k)
+                    Button::new("Cancelar")
+                        .control_size(ControlSize::Large)
+                        .build(k)
+                        .key("history-delete-cancel")
                         .autofocus()
                         .disabled(s.history_delete_pending)
                         .on_press(State::cancel_history_delete),
@@ -73,6 +87,7 @@ pub fn view(s: &State, k: &Kit, layout: Layout) -> El {
                     } else {
                         "Excluir revisão"
                     })
+                    .control_size(ControlSize::Large)
                     .variant(ButtonVariant::Danger)
                     .disabled(s.history_delete_pending)
                     .build(k)
@@ -80,7 +95,7 @@ pub fn view(s: &State, k: &Kit, layout: Layout) -> El {
                     .on_press(State::confirm_history_delete),
                 ),
         );
-        content = content.child(ui::group(confirmation, k));
+        content = content.child(ui::group(confirmation, k).max_w(520.0));
     }
     if s.history_loading {
         content = content.child(ui::label("Carregando histórico…", 12.0, k.c.text_muted));
@@ -296,6 +311,114 @@ fn show_empty_search(
 #[cfg(test)]
 mod tests {
     use super::{show_empty_history, show_empty_search};
+
+    #[test]
+    fn confirmation_actions_remain_usable_at_supported_sizes() {
+        use crate::{spec, state::Page};
+        use rune::{Env, Key, KeyEvent};
+
+        for size in [(1920.0, 1080.0), (900.0, 700.0), (720.0, 560.0)] {
+            let mut rt = rune::App::new(spec()).headless_runtime(
+                size,
+                Env {
+                    system_dark: true,
+                    scale: 1.0,
+                },
+            );
+            rt.state.page = Page::History;
+            rt.state
+                .history
+                .push(engineroom_backend::db::games::GameSummary {
+                    id: 1,
+                    white: "José Silva".into(),
+                    black: "Ana Costa".into(),
+                    result: "1-0".into(),
+                    plies: 40,
+                    engine_tier: "custom".into(),
+                    mode: engineroom_backend::db::mode::Mode::Depth,
+                    analysis_kind: "manual".into(),
+                    depth: 20,
+                    multipv: 2,
+                    accuracy_white: 80.0,
+                    accuracy_black: 70.0,
+                    created_at: "2026-11-10".into(),
+                });
+            rt.state.history_total = 1;
+            rt.state.request_history_delete(1);
+            rt.invalidate();
+            rt.frame(0.0);
+            for name in ["history-delete-cancel", "history-delete-confirm"] {
+                let (x, y) = rt.find(name).expect("confirmation action exists");
+                assert!(
+                    x > 0.0 && x < size.0 && y > 0.0 && y < size.1,
+                    "{name} is visible at {size:?}: {x}, {y}"
+                );
+            }
+            rt.set_tab_visits_controls(true);
+            for _ in 0..100 {
+                if rt
+                    .elements()
+                    .iter()
+                    .any(|e| e.focused && e.key.as_deref() == Some("history-delete-confirm"))
+                {
+                    break;
+                }
+                rt.key(KeyEvent {
+                    key: Key::Tab,
+                    mods: Default::default(),
+                });
+                rt.frame(1.0 / 60.0);
+            }
+            assert!(
+                rt.elements()
+                    .iter()
+                    .any(|e| e.focused && e.key.as_deref() == Some("history-delete-confirm"))
+            );
+            rt.key(KeyEvent {
+                key: Key::Text(" ".into()),
+                mods: Default::default(),
+            });
+            rt.frame(0.0);
+            assert!(
+                rt.state.history_delete_error.is_some(),
+                "unavailable bridge reports an error"
+            );
+            rt.key(KeyEvent {
+                key: Key::Text(" ".into()),
+                mods: Default::default(),
+            });
+            rt.frame(0.0);
+            assert!(
+                rt.state.history_delete_error.is_some(),
+                "retry remains available"
+            );
+            rt.state.history_delete_pending = true;
+            rt.invalidate();
+            rt.frame(0.0);
+            rt.key(KeyEvent {
+                key: Key::Escape,
+                mods: Default::default(),
+            });
+            rt.frame(0.0);
+            assert_eq!(
+                rt.state.history_confirm_delete,
+                Some(1),
+                "pending deletion cannot be cancelled"
+            );
+            rt.state.history_delete_pending = false;
+            rt.invalidate();
+            rt.frame(0.0);
+            rt.key(KeyEvent {
+                key: Key::Escape,
+                mods: Default::default(),
+            });
+            rt.frame(0.0);
+            assert_eq!(
+                rt.state.history_confirm_delete, None,
+                "escape cancels after failure"
+            );
+        }
+    }
 
     #[test]
     fn empty_messages_do_not_mask_loading_or_errors() {

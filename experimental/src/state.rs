@@ -347,11 +347,9 @@ impl State {
         }
         changed
     }
-    #[expect(dead_code, reason = "component wiring is owned by the design work")]
     pub fn set_appearance(&mut self, appearance: Appearance) {
         self.preferences.appearance = appearance;
     }
-    #[expect(dead_code, reason = "component wiring is owned by the design work")]
     pub fn toggle_live_engine(&mut self) {
         self.preferences.live_engine = !self.preferences.live_engine;
     }
@@ -1081,7 +1079,6 @@ impl State {
         self.chess_request += 1;
         self.chess_loading = false;
     }
-    #[expect(dead_code, reason = "component wiring is owned by the design work")]
     pub fn select_import_source(&mut self, source: ImportSource) {
         self.cancel_chesscom();
         self.import_source = source;
@@ -1514,7 +1511,6 @@ impl State {
         self.playing = true;
         self.next_step = self.clock + 0.65;
     }
-    #[expect(dead_code, reason = "component wiring is owned by the design work")]
     pub fn toggle_playback(&mut self) {
         self.selected_square = None;
         self.selected_candidate = 0;

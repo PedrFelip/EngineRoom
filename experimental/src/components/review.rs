@@ -768,7 +768,7 @@ fn inspector(s: &State, k: &Kit, stacked: bool) -> El {
 fn engine_toggle(s: &State, k: &Kit) -> El {
     Switch::new(s.preferences.live_engine)
         .label("Linhas")
-        .on_toggle(|s: &mut State| s.preferences.live_engine = !s.preferences.live_engine)
+        .on_toggle(|s: &mut State| s.toggle_live_engine())
         .build(k)
         .key("review-engine-toggle")
 }

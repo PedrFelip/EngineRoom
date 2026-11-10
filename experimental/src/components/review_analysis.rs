@@ -150,7 +150,7 @@ pub fn dialog(s: &State, k: &Kit, layers: &mut Vec<El>) {
             Switch::new(s.preferences.live_engine)
                 .label("Ativar análise na revisão")
                 .hide_label()
-                .on_toggle(|s: &mut State| s.preferences.live_engine = !s.preferences.live_engine)
+                .on_toggle(|s: &mut State| s.toggle_live_engine())
                 .build(k)
                 .key("dialog-live-engine"),
             k,
