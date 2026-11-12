@@ -1,0 +1,11 @@
+[package]
+name = "engineroom-ui"
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+publish = false
+
+[dependencies]
+rune = { git = "https://github.com/anomalyco/rune", rev = "b726a4d152512e51821884506776c3bad6b11410", default-features = false }
+rune-kit = { git = "https://github.com/anomalyco/rune", rev = "b726a4d152512e51821884506776c3bad6b11410", default-features = false }
+rune-theme-opencode = { git = "https://github.com/anomalyco/rune", rev = "b726a4d152512e51821884506776c3bad6b11410" }

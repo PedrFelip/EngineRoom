@@ -18,11 +18,14 @@ Vulkan disponível, inclusive Mesa lavapipe para renderização headless.
 Usa componentes reais de `rune-kit`, com ícones, movimento e paleta de
 `rune-theme-opencode`. A tipografia usa **IBM Plex Sans** na interface e
 **IBM Plex Mono** no PGN e nos dados numéricos, com fontes embutidas. As três dependências Rune estão fixadas no mesmo commit
-`d03349e25189ce1edc8c26ada6bf6d4aac72c826`.
+`b726a4d152512e51821884506776c3bad6b11410`.
 A interface usa a paleta original do OpenCode nos temas claro e escuro,
 diretamente de `rune-theme-opencode`, incluindo superfícies, estados e elevações.
 
-O backend nativo está dividido nas crates deste workspace:
+O workspace separa a aplicação desktop, os componentes reutilizáveis e o backend nativo:
+
+- `crates/engineroom-rune`: aplicação desktop, estado, navegação e telas Rune.
+- `crates/engineroom-ui`: tema, fontes e primitivas de interface compartilháveis.
 
 - `crates/engineroom-domain`: tipos de análise, modo, transformações de xadrez, pontuação e perfis adaptativos.
 - `crates/engineroom-application`: portas de motor e repositório, pipeline, pool, sessões e normalização de revisões.
@@ -30,27 +33,27 @@ O backend nativo está dividido nas crates deste workspace:
 - `crates/engineroom-sqlite`: cache, histórico, migrações e estatísticas em SQLite.
 - `crates/engineroom-backend`: fachada de revisão e importações HTTP nativas.
 
-- `src/main.rs`: composição das telas, cenas headless e atalhos.
-- `src/state.rs`: navegação tipada, rascunho PGN, importações e estado da sessão.
-- `src/bridge.rs`: runtime Tokio, intenções, sessões, histórico, armazenamento e importações.
-- `src/review_session.rs`: identificação e sequência da sessão de análise.
-- `src/preferences.rs`: documento versionado, escrita atômica e limites validados.
-- `src/file_dialog.rs`: seletor nativo de arquivos sem bloquear a interface.
-- `src/desktop_paths.rs`: diretório experimental e resolução do Stockfish.
-- `src/theme.rs`: paleta OpenCode (claro/escuro), escala tipográfica e fontes IBM Plex.
-- `src/layout.rs`: medidas responsivas baseadas na área útil real do shell.
-- `src/game.rs`: validação local de PGN/FEN e posições para a prévia.
-- `src/components/ui.rs`: grupos, linhas de preferência, tipografia e slider acessível.
-- `src/components/shell.rs`: shell sem faixa superior, `Sidebar` e `SidebarRow` do kit.
-- `src/components/home.rs`: `TextArea`, perfis segmentados e importação/configuração.
-- `src/components/board.rs`: tabuleiro e identificação dos jogadores.
-- `src/components/review.rs`: layout, playback e momentos críticos da análise.
-- `src/components/review_{analysis,feedback,graph,summary}.rs`: painéis e gráficos da revisão.
-- `src/review_data.rs`: formatação de avaliações, classificações e linhas candidatas.
-- `src/fixtures.rs`: dados determinísticos usados somente por cenas headless e testes.
-- `src/variation.rs`: exploração de lances legais sem alterar a linha principal.
-- `src/components/history.rs`: histórico paginado do SQLite experimental.
-- `src/components/settings.rs`: Preferências, Análise e Armazenamento.
+- `crates/engineroom-rune/src/main.rs`: composição das telas, cenas headless e atalhos.
+- `crates/engineroom-rune/src/state.rs`: navegação tipada, rascunho PGN, importações e estado da sessão.
+- `crates/engineroom-rune/src/bridge.rs`: runtime Tokio, intenções, sessões, histórico, armazenamento e importações.
+- `crates/engineroom-rune/src/review_session.rs`: identificação e sequência da sessão de análise.
+- `crates/engineroom-rune/src/preferences.rs`: documento versionado, escrita atômica e limites validados.
+- `crates/engineroom-rune/src/file_dialog.rs`: seletor nativo de arquivos sem bloquear a interface.
+- `crates/engineroom-rune/src/desktop_paths.rs`: diretório experimental e resolução do Stockfish.
+- `crates/engineroom-ui/src/theme.rs`: paleta OpenCode (claro/escuro), escala tipográfica e fontes IBM Plex.
+- `crates/engineroom-rune/src/layout.rs`: medidas responsivas baseadas na área útil real do shell.
+- `crates/engineroom-rune/src/game.rs`: validação local de PGN/FEN e posições para a prévia.
+- `crates/engineroom-ui/src/primitives.rs`: grupos, linhas de preferência, tipografia e slider acessível.
+- `crates/engineroom-rune/src/components/shell.rs`: shell sem faixa superior, `Sidebar` e `SidebarRow` do kit.
+- `crates/engineroom-rune/src/components/home.rs`: `TextArea`, perfis segmentados e importação/configuração.
+- `crates/engineroom-rune/src/components/board.rs`: tabuleiro e identificação dos jogadores.
+- `crates/engineroom-rune/src/components/review.rs`: layout, playback e momentos críticos da análise.
+- `crates/engineroom-rune/src/components/review_{analysis,feedback,graph,summary}.rs`: painéis e gráficos da revisão.
+- `crates/engineroom-rune/src/review_data.rs`: formatação de avaliações, classificações e linhas candidatas.
+- `crates/engineroom-rune/src/fixtures.rs`: dados determinísticos usados somente por cenas headless e testes.
+- `crates/engineroom-rune/src/variation.rs`: exploração de lances legais sem alterar a linha principal.
+- `crates/engineroom-rune/src/components/history.rs`: histórico paginado do SQLite experimental.
+- `crates/engineroom-rune/src/components/settings.rs`: Preferências, Análise e Armazenamento.
 
 Referências visuais: [Settings](https://github.com/anomalyco/rune/blob/dev/demo/settings-dark.png)
 e [OpenCode](https://github.com/anomalyco/rune/tree/dev/demo/opencode).
@@ -124,7 +127,7 @@ rolagem e clique nos controles inferiores em janelas pequenas.
 ```sh
 cargo fmt --check
 cargo clippy --all-targets --all-features -- -D warnings
-cargo test
+cargo test --workspace
 ./scripts/check-headless.sh
 ./scripts/check-responsive.sh
 ```
@@ -188,3 +191,9 @@ mostrada ao iniciar análise, sem impedir a abertura do aplicativo ou do histór
 O histórico carrega páginas de até 100 revisões com "Carregar mais"; reabrir,
 reanalisar e excluir usam o banco experimental. As preferências ficam no
 `preferences.json` ao lado do banco. Os cenários headless mantêm fixtures determinísticas e não abrem o motor nem o banco.
+
+Para reproduzir a medição Strobe da cena de revisão headless e consultar suas
+limitações, veja [strobe-study.md](strobe-study.md).
+
+Para cenários Strobe com uma partida histórica, Stockfish real, cache SQLite
+isolado e abertura da janela nativa, veja [real-game-strobe.md](real-game-strobe.md).

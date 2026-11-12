@@ -1,0 +1,6 @@
+{
+  "dependencies": {},
+  "devDependencies": {
+    "@hona/strobe": "0.32.0"
+  }
+}
