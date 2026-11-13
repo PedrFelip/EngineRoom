@@ -74,6 +74,32 @@ jobs:
       - run: cargo test --locked
         working-directory: app/src-tauri
 
+  rune:
+    name: Rune experiment
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - name: Install Rune headless dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libxkbcommon-dev libwayland-dev libx11-dev mesa-vulkan-drivers vulkan-tools
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: experimental -> target
+          cache-on-failure: true
+      - run: cargo fmt --check
+        working-directory: experimental
+      - run: cargo clippy --all-targets --all-features -- -D warnings
+        working-directory: experimental
+      - run: cargo test --workspace --locked
+        working-directory: experimental
+      - run: ./scripts/check-headless.sh && ./scripts/check-responsive.sh
+        working-directory: experimental
+
   automation:
     name: Release automation
     runs-on: ubuntu-22.04
