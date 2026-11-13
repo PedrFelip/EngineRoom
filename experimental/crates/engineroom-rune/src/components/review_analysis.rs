@@ -10,7 +10,7 @@ static PLAY: Icon = Icon {
     view: 16.0,
     body: concat!(
         "<g fill=\"currentColor\" stroke=\"none\">",
-        include_str!("../../assets/triangle-right-16.svg"),
+        include_str!("../../../../assets/triangle-right-16.svg"),
         "</g>"
     ),
 };
@@ -19,7 +19,7 @@ static CHECK: Icon = Icon {
     view: 16.0,
     body: concat!(
         "<g fill=\"currentColor\" stroke=\"none\">",
-        include_str!("../../assets/check-16.svg"),
+        include_str!("../../../../assets/check-16.svg"),
         "</g>"
     ),
 };
@@ -195,7 +195,7 @@ pub fn dialog(s: &State, k: &Kit, layers: &mut Vec<El>) {
         .child(ui::setting(
             "Tempo de busca",
             &format!("{} s", s.preferences.search_seconds),
-            ui::integer_slider(
+            ui::integer_slider::<State>(
                 "dialog-time",
                 "Tempo de busca",
                 s.preferences.search_seconds,
@@ -214,7 +214,7 @@ pub fn dialog(s: &State, k: &Kit, layers: &mut Vec<El>) {
         .child(ui::setting(
             "Threads",
             &format!("{} threads", s.preferences.threads),
-            ui::integer_slider(
+            ui::integer_slider::<State>(
                 "dialog-threads",
                 "Threads",
                 s.preferences.threads,
@@ -241,7 +241,7 @@ pub fn dialog(s: &State, k: &Kit, layers: &mut Vec<El>) {
         .child(ui::setting(
             "Memória Hash",
             &format!("{} MB", s.preferences.hash_mb),
-            ui::slider(
+            ui::slider::<State>(
                 "dialog-memory",
                 "Memória",
                 (s.preferences.hash_mb as f32 - 16.0) / 1008.0,

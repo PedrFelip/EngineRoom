@@ -6,7 +6,7 @@ pub static PLUS: Icon = Icon {
     view: 16.0,
     body: concat!(
         "<g fill=\"currentColor\" stroke=\"none\">",
-        include_str!("../../assets/plus-16.svg"),
+        include_str!("../../../../assets/plus-16.svg"),
         "</g>"
     ),
 };
@@ -15,7 +15,7 @@ pub static HISTORY: Icon = Icon {
     view: 16.0,
     body: concat!(
         "<g fill=\"currentColor\" stroke=\"none\">",
-        include_str!("../../assets/history-16.svg"),
+        include_str!("../../../../assets/history-16.svg"),
         "</g>"
     ),
 };
@@ -24,7 +24,7 @@ pub static GEAR: Icon = Icon {
     view: 16.0,
     body: concat!(
         "<g fill=\"currentColor\" stroke=\"none\">",
-        include_str!("../../assets/gear-16.svg"),
+        include_str!("../../../../assets/gear-16.svg"),
         "</g>"
     ),
 };
@@ -33,7 +33,7 @@ pub static CLOSE: Icon = Icon {
     view: 16.0,
     body: concat!(
         "<g fill=\"currentColor\" stroke=\"none\">",
-        include_str!("../../assets/x-16.svg"),
+        include_str!("../../../../assets/x-16.svg"),
         "</g>"
     ),
 };
@@ -42,7 +42,7 @@ pub static SESSION: Icon = Icon {
     view: 16.0,
     body: concat!(
         "<g fill=\"currentColor\" stroke=\"none\">",
-        include_str!("../../assets/book-16.svg"),
+        include_str!("../../../../assets/book-16.svg"),
         "</g>"
     ),
 };
@@ -51,7 +51,7 @@ pub static TRASH: Icon = Icon {
     view: 16.0,
     body: concat!(
         "<g fill=\"currentColor\" stroke=\"none\">",
-        include_str!("../../assets/trash-16.svg"),
+        include_str!("../../../../assets/trash-16.svg"),
         "</g>"
     ),
 };
@@ -60,7 +60,7 @@ pub static STAR: Icon = Icon {
     view: 16.0,
     body: concat!(
         "<g fill=\"currentColor\" stroke=\"none\">",
-        include_str!("../../assets/star-fill-16.svg"),
+        include_str!("../../../../assets/star-fill-16.svg"),
         "</g>"
     ),
 };
@@ -69,7 +69,7 @@ pub static PAUSE: Icon = Icon {
     view: 16.0,
     body: concat!(
         "<g fill=\"currentColor\" stroke=\"none\">",
-        include_str!("../../assets/pause-16.svg"),
+        include_str!("../../../../assets/pause-16.svg"),
         "</g>"
     ),
 };
@@ -78,7 +78,7 @@ pub static RETURN: Icon = Icon {
     view: 16.0,
     body: concat!(
         "<g fill=\"currentColor\" stroke=\"none\">",
-        include_str!("../../assets/reply-16.svg"),
+        include_str!("../../../../assets/reply-16.svg"),
         "</g>"
     ),
 };
@@ -87,7 +87,7 @@ pub static PLAY: Icon = Icon {
     view: 16.0,
     body: concat!(
         "<g fill=\"currentColor\" stroke=\"none\">",
-        include_str!("../../assets/triangle-right-16.svg"),
+        include_str!("../../../../assets/triangle-right-16.svg"),
         "</g>"
     ),
 };
@@ -96,7 +96,7 @@ pub static CHECK: Icon = Icon {
     view: 16.0,
     body: concat!(
         "<g fill=\"currentColor\" stroke=\"none\">",
-        include_str!("../../assets/check-16.svg"),
+        include_str!("../../../../assets/check-16.svg"),
         "</g>"
     ),
 };
@@ -105,7 +105,7 @@ pub static LEFT: Icon = Icon {
     view: 16.0,
     body: concat!(
         "<g fill=\"currentColor\" stroke=\"none\">",
-        include_str!("../../assets/chevron-left-16.svg"),
+        include_str!("../../../../assets/chevron-left-16.svg"),
         "</g>"
     ),
 };
@@ -114,7 +114,7 @@ pub static RIGHT: Icon = Icon {
     view: 16.0,
     body: concat!(
         "<g fill=\"currentColor\" stroke=\"none\">",
-        include_str!("../../assets/chevron-right-16.svg"),
+        include_str!("../../../../assets/chevron-right-16.svg"),
         "</g>"
     ),
 };
@@ -123,7 +123,7 @@ pub static SIDEBAR_COLLAPSE: Icon = Icon {
     view: 16.0,
     body: concat!(
         "<g fill=\"currentColor\" stroke=\"none\">",
-        include_str!("../../assets/sidebar-collapse-16.svg"),
+        include_str!("../../../../assets/sidebar-collapse-16.svg"),
         "</g>"
     ),
 };
@@ -132,7 +132,7 @@ pub static SIDEBAR_EXPAND: Icon = Icon {
     view: 16.0,
     body: concat!(
         "<g fill=\"currentColor\" stroke=\"none\">",
-        include_str!("../../assets/sidebar-expand-16.svg"),
+        include_str!("../../../../assets/sidebar-expand-16.svg"),
         "</g>"
     ),
 };

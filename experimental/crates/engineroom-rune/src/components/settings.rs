@@ -39,7 +39,7 @@ fn preferences(s: &State, k: &Kit) -> El {
         |s| s.preferences.sound = !s.preferences.sound,
         k,
     );
-    let volume = ui::slider(
+    let volume = ui::slider::<State>(
         "volume",
         "Volume do som",
         s.preferences.volume,
@@ -175,7 +175,7 @@ fn analysis(s: &State, k: &Kit, layers: &mut Vec<El>) -> El {
                 .child(ui::setting(
                     "Threads",
                     &format!("{} threads selecionadas", s.preferences.threads),
-                    ui::slider(
+                    ui::slider::<State>(
                         "threads",
                         "Threads do motor",
                         (s.preferences.threads as f32 - 1.0) / 7.0,
@@ -189,7 +189,7 @@ fn analysis(s: &State, k: &Kit, layers: &mut Vec<El>) -> El {
                 .child(ui::setting(
                     "Memória Hash",
                     &format!("{} MB selecionados", s.preferences.hash_mb),
-                    ui::slider(
+                    ui::slider::<State>(
                         "hash",
                         "Memória Hash",
                         (s.preferences.hash_mb as f32 - 64.0) / 960.0,
@@ -458,6 +458,7 @@ pub fn view(s: &State, k: &Kit, layout: Layout, layers: &mut Vec<El>) -> El {
                     .w_full()
             }))
             .child(content),
-        layout,
+        layout.padding(),
+        800.0,
     )
 }

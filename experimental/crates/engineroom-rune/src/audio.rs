@@ -34,8 +34,8 @@ pub fn play(sound: Sound, volume: f32) {
     let volume = volume.clamp(0.0, 1.0);
     thread::spawn(move || {
         let bytes: &'static [u8] = match sound {
-            Sound::Move => include_bytes!("../../app/public/sounds/Move.mp3"),
-            Sound::Capture => include_bytes!("../../app/public/sounds/Capture.mp3"),
+            Sound::Move => include_bytes!("../../../../app/public/sounds/Move.mp3"),
+            Sound::Capture => include_bytes!("../../../../app/public/sounds/Capture.mp3"),
         };
         let Ok((_stream, handle)) = rodio::OutputStream::try_default() else {
             return;

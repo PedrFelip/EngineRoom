@@ -31,10 +31,15 @@ pub fn stockfish_path() -> io::Result<PathBuf> {
             .map(PathBuf::from)
             .as_deref(),
         &executable,
-        Path::new(env!("CARGO_MANIFEST_DIR")),
+        &workspace_root(),
         cfg!(debug_assertions),
         cfg!(windows),
     )
+}
+
+/// Returns the experimental workspace root from this crate's manifest directory.
+pub(crate) fn workspace_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
 
 fn resolve_stockfish(
@@ -78,15 +83,7 @@ fn resolve_stockfish(
 /// Resolution scans deterministic names instead of guessing a triple, so a
 /// locally downloaded binary keeps working regardless of the host triple.
 fn dev_sidecar(manifest: &Path, windows: bool) -> io::Result<PathBuf> {
-    let directory = manifest
-        .parent()
-        .ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "manifest has no parent directory",
-            )
-        })?
-        .join("app/src-tauri/binaries");
+    let directory = manifest.join("../app/src-tauri/binaries");
     let missing = |directory: &Path| {
         io::Error::new(
             io::ErrorKind::NotFound,

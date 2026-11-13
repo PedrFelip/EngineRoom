@@ -488,4 +488,6 @@ fn main() {
     rune::run(spec());
 }
 #[cfg(test)]
+mod perf_headless;
+#[cfg(test)]
 mod tests;

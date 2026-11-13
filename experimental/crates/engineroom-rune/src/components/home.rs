@@ -495,7 +495,7 @@ pub fn view(s: &State, k: &Kit, layout: Layout) -> El {
             .wrap()
             .w_full(),
     );
-    ui::page(content, layout)
+    ui::page(content, layout.padding(), 800.0)
 }
 
 pub fn configure(s: &State, k: &Kit, layout: Layout) -> El {
@@ -548,7 +548,7 @@ pub fn configure(s: &State, k: &Kit, layout: Layout) -> El {
             settings = settings.child(ui::setting(
                 "Tempo por posição",
                 &format!("{} segundos", s.preferences.search_seconds),
-                ui::integer_slider(
+                ui::integer_slider::<State>(
                     "manual-time",
                     "Tempo por posição",
                     s.preferences.search_seconds,
@@ -563,7 +563,7 @@ pub fn configure(s: &State, k: &Kit, layout: Layout) -> El {
             settings = settings.child(ui::setting(
                 "Profundidade",
                 &format!("{} níveis", s.depth),
-                ui::integer_slider(
+                ui::integer_slider::<State>(
                     "depth",
                     "Profundidade",
                     s.depth,
@@ -578,7 +578,7 @@ pub fn configure(s: &State, k: &Kit, layout: Layout) -> El {
         settings = settings.child(ui::setting(
             "Linhas candidatas",
             &s.preferences.lines.to_string(),
-            ui::integer_slider(
+            ui::integer_slider::<State>(
                 "manual-lines",
                 "Linhas candidatas",
                 s.preferences.lines,
@@ -659,6 +659,7 @@ pub fn configure(s: &State, k: &Kit, layout: Layout) -> El {
                     ),
             )
             .child(el().h(8.0)),
-        layout,
+        layout.padding(),
+        800.0,
     )
 }

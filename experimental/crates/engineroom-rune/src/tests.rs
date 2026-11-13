@@ -357,7 +357,7 @@ fn evaluation_layout_stays_aligned_for_scores_and_orientation() {
     rt.set_viewport((900.0, 700.0), 1.0);
     for (ply, expected) in [
         (11, "Avaliação +1.42, vantagem das brancas"),
-        (12, "Avaliação -0.88, vantagem das pretas"),
+        (12, "Avaliação −0.88, vantagem das pretas"),
     ] {
         rt.state.go_to(ply);
         for flipped in [false, true] {

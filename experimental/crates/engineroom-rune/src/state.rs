@@ -774,12 +774,11 @@ impl State {
             return None;
         }
 
-        let class = self
-            .real_result
-            .as_ref()?
-            .moves
-            .iter()
-            .find(|m| m.played.ply == ply)?
+        let moves = &self.real_result.as_ref()?.moves;
+        let class = moves
+            .get(ply - 1)
+            .filter(|m| m.played.ply == ply)
+            .or_else(|| moves.iter().find(|m| m.played.ply == ply))?
             .classification;
         Some(display_classification(class))
     }
@@ -1377,14 +1376,30 @@ impl State {
             *slot = Some(classification);
         }
     }
+    fn current_mainline_ply(&self) -> Option<usize> {
+        match self.active_variation {
+            None => Some(self.ply),
+            Some(index) => {
+                let variation = &self.variations[index];
+                (variation.cursor == 0).then_some(variation.root_ply)
+            }
+        }
+    }
+    fn original_analysis(
+        &self,
+        fen: &str,
+        mainline_ply: Option<usize>,
+    ) -> Option<&engineroom_backend::review::types::PositionAnalysis> {
+        let positions = &self.real_result.as_ref()?.positions;
+        mainline_ply
+            .and_then(|ply| positions.get(ply).filter(|p| p.ply == ply && p.fen == fen))
+            .or_else(|| positions.iter().find(|p| p.fen == fen))
+    }
     fn analysis_for_fen(
         &self,
         fen: &str,
     ) -> Option<&engineroom_backend::review::types::PositionAnalysis> {
-        let original = self
-            .real_result
-            .as_ref()
-            .and_then(|result| result.positions.iter().find(|p| p.fen == fen));
+        let original = self.original_analysis(fen, None);
         let live = self.live_positions.get(fen);
         match (original, live) {
             (Some(a), Some(b)) => Some(if prefer_incoming(a, b) { b } else { a }),
@@ -1396,7 +1411,13 @@ impl State {
     pub fn position_analysis(
         &self,
     ) -> Option<&engineroom_backend::review::types::PositionAnalysis> {
-        self.analysis_for_fen(&engineroom_backend::review::core::fen(self.position()))
+        let fen = engineroom_backend::review::core::fen(self.position());
+        let original = self.original_analysis(&fen, self.current_mainline_ply());
+        match (original, self.live_positions.get(&fen)) {
+            (Some(a), Some(b)) => Some(if prefer_incoming(a, b) { b } else { a }),
+            (Some(a), None) => Some(a),
+            (None, live) => live,
+        }
     }
     pub fn displayed_classification(&self) -> Option<review_data::Classification> {
         if let Some((i, cursor)) = self.visible_variation_cursor() {
@@ -1414,12 +1435,9 @@ impl State {
         }
     }
     pub fn candidates(&self) -> Vec<review_data::Candidate> {
-        use shakmaty::{CastlingMode, san::SanPlus, uci::UciMove};
+        use shakmaty::{san::SanPlus, uci::UciMove};
         let fen = engineroom_backend::review::core::fen(self.position());
-        let original = self
-            .real_result
-            .as_ref()
-            .and_then(|result| result.positions.iter().find(|p| p.fen == fen));
+        let original = self.original_analysis(&fen, self.current_mainline_ply());
         let live = self.live_positions.get(&fen);
         let analysis = match (original, live) {
             (Some(a), Some(b)) if (b.lines.len(), b.depth) > (a.lines.len(), a.depth) => Some(b),
@@ -1447,7 +1465,6 @@ impl State {
                             );
                             moves.push(m);
                         }
-                        let _ = CastlingMode::Standard;
                         review_data::Candidate {
                             moves,
                             san,
@@ -1696,6 +1713,46 @@ mod council_regressions {
             state.variations[0].classifications[0],
             Some(engineroom_backend::review::types::Classification::Bom)
         );
+    }
+    #[test]
+    fn mainline_repeated_fen_uses_its_ply_and_live_candidate_policy() {
+        let mut state = State::fixture();
+        state.game.positions[1] = state.game.positions[0].clone();
+        let positions = &mut state.real_result.as_mut().unwrap().positions;
+        positions[1].fen = positions[0].fen.clone();
+        positions[0].cp = 10;
+        positions[1].cp = 42;
+        positions[1].lines[0].cp = 42;
+        state.ply = 1;
+        assert_eq!(state.position_analysis().unwrap().cp, 42);
+        assert_eq!(state.candidates()[0].cp, 42);
+        let mut live = state.real_result.as_ref().unwrap().positions[1].clone();
+        live.depth += 1;
+        live.cp = 99;
+        live.lines[0].cp = 99;
+        state.live_positions.insert(live.fen.clone(), live);
+        assert_eq!(state.position_analysis().unwrap().cp, 99);
+        assert_eq!(state.candidates()[0].cp, 99);
+        state
+            .variations
+            .push(Variation::new(1, state.position().clone()));
+        state.active_variation = Some(0);
+        state.live_positions.clear();
+        assert_eq!(state.position_analysis().unwrap().cp, 42);
+        assert_eq!(state.candidates()[0].cp, 42);
+    }
+
+    #[test]
+    fn classification_lookup_handles_non_sequential_results() {
+        let mut state = State::fixture();
+        let moves = &mut state.real_result.as_mut().unwrap().moves;
+        moves.swap(0, 1);
+        assert_eq!(
+            state.classification(1),
+            Some(review_data::Classification::Book)
+        );
+        assert_eq!(state.classification(0), None);
+        assert_eq!(state.classification(usize::MAX), None);
     }
     #[test]
     fn playback_depth_does_not_hide_requested_candidate_lines() {

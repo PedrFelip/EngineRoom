@@ -541,7 +541,7 @@ mod tests {
     #[test]
     fn score_distinguishes_advantage_and_mate() {
         assert_eq!(score(142), "+1.42");
-        assert_eq!(score(-142), "-1.42");
+        assert_eq!(score(-142), "−1.42");
         assert_eq!(score(0), "+0.00");
         assert_eq!(score(99_997), "+M3");
         assert_eq!(score(-99_997), "−M3");
@@ -576,7 +576,7 @@ mod tests {
             white_cp: -142,
             preliminary: false,
         };
-        assert_eq!(black.value(), "-1.42");
+        assert_eq!(black.value(), "−1.42");
         assert_eq!(black.visible_status(), "Pretas");
         assert_eq!(
             black.accessible_label(),

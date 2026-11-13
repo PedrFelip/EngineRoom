@@ -495,7 +495,7 @@ fn engine_path() -> PathBuf {
 /// Unvalidated engine candidate used when [`crate::desktop_paths::stockfish_path`] fails.
 fn engine_fallback(override_path: Option<PathBuf>) -> PathBuf {
     override_path
-        .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/stockfish"))
+        .unwrap_or_else(|| crate::desktop_paths::workspace_root().join("resources/stockfish"))
 }
 
 fn publish_lifecycle(

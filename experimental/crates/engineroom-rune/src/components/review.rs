@@ -17,7 +17,7 @@ static SIDEBAR_EXPAND: Icon = Icon {
     view: 16.0,
     body: concat!(
         "<g fill=\"currentColor\" stroke=\"none\">",
-        include_str!("../../assets/sidebar-expand-16.svg"),
+        include_str!("../../../../../../assets/sidebar-expand-16.svg"),
         "</g>"
     ),
 };
@@ -26,7 +26,7 @@ static SIDEBAR_COLLAPSE: Icon = Icon {
     view: 16.0,
     body: concat!(
         "<g fill=\"currentColor\" stroke=\"none\">",
-        include_str!("../../assets/sidebar-collapse-16.svg"),
+        include_str!("../../../../../../assets/sidebar-collapse-16.svg"),
         "</g>"
     ),
 };
@@ -118,11 +118,27 @@ macro_rules! octicon {
         };
     };
 }
-octicon!(FIRST, "../../assets/move-to-start-16.svg", "move-to-start");
-octicon!(PREVIOUS, "../../assets/chevron-left-16.svg", "chevron-left");
-octicon!(NEXT, "../../assets/chevron-right-16.svg", "chevron-right");
-octicon!(LAST, "../../assets/move-to-end-16.svg", "move-to-end");
-octicon!(FLIP, "../../assets/arrow-switch-16.svg", "arrow-switch");
+octicon!(
+    FIRST,
+    "../../../../assets/move-to-start-16.svg",
+    "move-to-start"
+);
+octicon!(
+    PREVIOUS,
+    "../../../../assets/chevron-left-16.svg",
+    "chevron-left"
+);
+octicon!(
+    NEXT,
+    "../../../../assets/chevron-right-16.svg",
+    "chevron-right"
+);
+octicon!(LAST, "../../../../assets/move-to-end-16.svg", "move-to-end");
+octicon!(
+    FLIP,
+    "../../../../assets/arrow-switch-16.svg",
+    "arrow-switch"
+);
 
 fn playback(s: &State, k: &Kit) -> El {
     let (position, total) = s.active_variation.map_or((s.ply, s.game.moves.len()), |i| {

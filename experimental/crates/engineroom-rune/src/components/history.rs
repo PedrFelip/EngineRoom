@@ -273,7 +273,7 @@ pub fn view(s: &State, k: &Kit, layout: Layout) -> El {
                 .on_press(State::next_history),
         );
     }
-    ui::page(content, layout)
+    ui::page(content, layout.padding(), 800.0)
 }
 
 fn accuracy(label: &str, value: f64, white: bool, k: &Kit) -> El {
