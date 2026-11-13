@@ -1,12 +1,11 @@
 //! Native Rune desktop shell with a resizable sidebar.
-use super::ui;
+use super::{icons, ui};
 use crate::state::{Page, State};
 use rune::{Color, Cursor, Cx, Drag, El, Phase, col, el, row};
 use rune_kit::{
     ControlSize, IconButton, IconButtonVariant, Kit,
-    shell::{SIDEBAR, Sidebar, SidebarRow, SidebarSection},
+    shell::{Sidebar, SidebarRow, SidebarSection},
 };
-use rune_theme_opencode::icons;
 fn sidebar(s: &State, k: &Kit) -> El {
     let nav = |page: Page, key: &str, title: &str, icon: &'static rune::Icon| {
         SidebarRow::new(title)
@@ -36,7 +35,7 @@ fn sidebar(s: &State, k: &Kit) -> El {
         };
         sessions = sessions.row(
             SidebarRow::new(&entry.title)
-                .icon(&icons::BRANCH)
+                .icon(&icons::SESSION)
                 .subtitle(status)
                 .selected(active && s.page == Page::Review)
                 .height(48.0)
@@ -48,7 +47,7 @@ fn sidebar(s: &State, k: &Kit) -> El {
                         .label("Ações da sessão")
                         .focus_group()
                         .child(
-                            IconButton::new(k.glyph.close)
+                            IconButton::new(&icons::CLOSE)
                                 .variant(IconButtonVariant::GhostMuted)
                                 .control_size(ControlSize::Small)
                                 .label(format!("Fechar sessão {}", entry.title))
@@ -96,13 +95,13 @@ fn sidebar(s: &State, k: &Kit) -> El {
                     Page::History,
                     "history-nav",
                     "Histórico",
-                    &icons::FOLDER,
+                    &icons::HISTORY,
                 )),
         )
         .section(sessions)
         .footer(
             SidebarRow::new("Configurações")
-                .icon(&icons::SETTINGS_GEAR)
+                .icon(&icons::GEAR)
                 .selected(s.page == Page::Settings)
                 .height(36.0)
                 .on_select(|s: &mut State, _| s.open_settings())
@@ -139,20 +138,24 @@ fn toggle(open: bool, k: &Kit) -> El {
     } else {
         "Abrir barra lateral"
     };
-    IconButton::new(&SIDEBAR)
-        .variant(IconButtonVariant::GhostMuted)
-        .control_size(ControlSize::Large)
-        .label(label)
-        .help(label)
-        .shortcut(if cfg!(target_os = "macos") {
-            "⌘B"
-        } else {
-            "Ctrl+B"
-        })
-        .expanded(open)
-        .build(k)
-        .key("sidebar-toggle")
-        .on_press(|s: &mut State| s.sidebar.toggle())
+    IconButton::new(if open {
+        &icons::SIDEBAR_COLLAPSE
+    } else {
+        &icons::SIDEBAR_EXPAND
+    })
+    .variant(IconButtonVariant::GhostMuted)
+    .control_size(ControlSize::Large)
+    .label(label)
+    .help(label)
+    .shortcut(if cfg!(target_os = "macos") {
+        "⌘B"
+    } else {
+        "Ctrl+B"
+    })
+    .expanded(open)
+    .build(k)
+    .key("sidebar-toggle")
+    .on_press(|s: &mut State| s.sidebar.toggle())
 }
 pub fn view(s: &State, cx: &mut Cx<State>, main: El, trailing: Option<El>, k: &Kit) -> El {
     let open = s.sidebar.is_open();
@@ -232,7 +235,7 @@ pub fn view(s: &State, cx: &mut Cx<State>, main: El, trailing: Option<El>, k: &K
                     .on_press(|s: &mut State| s.navigate(Page::Home)),
                 )
                 .child(
-                    rail_button(&icons::FOLDER, "Histórico", s.page == Page::History, k)
+                    rail_button(&icons::HISTORY, "Histórico", s.page == Page::History, k)
                         .key("rail-history")
                         .on_press(|s: &mut State| s.navigate(Page::History)),
                 )
@@ -241,7 +244,7 @@ pub fn view(s: &State, cx: &mut Cx<State>, main: El, trailing: Option<El>, k: &K
                         .or_else(|| s.workspace.last().map(|entry| entry.key))
                         .map(|key| {
                             rail_button(
-                                &icons::BRANCH,
+                                &icons::SESSION,
                                 "Abrir última sessão",
                                 s.page == Page::Review,
                                 k,
@@ -251,14 +254,9 @@ pub fn view(s: &State, cx: &mut Cx<State>, main: El, trailing: Option<El>, k: &K
                         }),
                 )
                 .child(
-                    rail_button(
-                        &icons::SETTINGS_GEAR,
-                        "Configurações",
-                        s.page == Page::Settings,
-                        k,
-                    )
-                    .key("rail-settings")
-                    .on_press(|s: &mut State| s.open_settings()),
+                    rail_button(&icons::GEAR, "Configurações", s.page == Page::Settings, k)
+                        .key("rail-settings")
+                        .on_press(|s: &mut State| s.open_settings()),
                 ),
         );
     }

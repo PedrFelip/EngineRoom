@@ -5,14 +5,8 @@ use crate::{
     layout::Layout,
     state::{ImportSource, Page, Profile, State},
 };
-use rune::{El, Icon, ScrollSpec, col, el, row};
+use rune::{El, ScrollSpec, col, el, row};
 use rune_kit::{Button, ButtonVariant, ControlSize, Kit, SegmentedControl, TextArea, TextInput};
-
-static CHEVRON_LEFT: Icon = Icon {
-    name: "chevron-left",
-    view: 20.0,
-    body: r#"<path d="M12 15L7 10L12 5" stroke="currentColor" stroke-linecap="square"/>"#,
-};
 
 fn steps(configure: bool, k: &Kit) -> El {
     row()
@@ -137,7 +131,7 @@ pub fn view(s: &State, k: &Kit, layout: Layout) -> El {
                     .center_y()
                     .child(
                         Button::new("Continuar")
-                            .icon(&rune_theme_opencode::icons::CHEVRON_RIGHT)
+                            .icon(&super::icons::RIGHT)
                             .control_size(ControlSize::ExtraLarge)
                             .variant(ButtonVariant::Contrast)
                             .disabled(s.pgn.text.trim().is_empty())
@@ -651,7 +645,7 @@ pub fn configure(s: &State, k: &Kit, layout: Layout) -> El {
                 row()
                     .justify_between()
                     .child(
-                        ui::button_icon("import-back", "Voltar", &CHEVRON_LEFT, k)
+                        ui::button_icon("import-back", "Voltar", &super::icons::LEFT, k)
                             .on_press(|s: &mut State| s.navigate(Page::Home)),
                     )
                     .child(

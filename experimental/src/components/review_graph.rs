@@ -101,6 +101,171 @@ fn phases(mut shape: Shape, count: usize, width: f32, height: f32, color: Color)
     shape
 }
 
+/// Height of the position-level evaluation strip above the board.
+const EVALUATION_STRIP_HEIGHT: f32 = 17.0;
+/// Reserved value width keeps the baseline and the neighbouring status stable.
+const EVALUATION_VALUE_WIDTH: f32 = 60.0;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Advantage {
+    White,
+    Black,
+    Equal,
+}
+
+impl Advantage {
+    fn of(cp: i32) -> Self {
+        match cp.cmp(&0) {
+            std::cmp::Ordering::Greater => Self::White,
+            std::cmp::Ordering::Less => Self::Black,
+            std::cmp::Ordering::Equal => Self::Equal,
+        }
+    }
+
+    fn visible(self) -> &'static str {
+        match self {
+            Self::White => "Brancas",
+            Self::Black => "Pretas",
+            Self::Equal => "Equilíbrio",
+        }
+    }
+
+    fn sentence(self) -> &'static str {
+        match self {
+            Self::White => "vantagem das brancas",
+            Self::Black => "vantagem das pretas",
+            Self::Equal => "posição equilibrada",
+        }
+    }
+}
+
+/// Score presentation for the current position, always from White's perspective.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Evaluation {
+    Scored { white_cp: i32, preliminary: bool },
+    Loading,
+    Unavailable,
+}
+
+impl Evaluation {
+    pub fn value(self) -> String {
+        self.score_value().unwrap_or_else(|| "—".into())
+    }
+
+    pub fn visible_status(self) -> String {
+        match self {
+            Self::Scored {
+                white_cp,
+                preliminary,
+            } => {
+                let side = Advantage::of(white_cp).visible();
+                if preliminary {
+                    format!("{side} · preliminar")
+                } else {
+                    side.into()
+                }
+            }
+            Self::Loading => "em andamento".into(),
+            Self::Unavailable => "indisponível".into(),
+        }
+    }
+
+    pub fn accessible_label(self) -> String {
+        match self {
+            Self::Scored {
+                white_cp,
+                preliminary,
+            } => {
+                let prefix = if preliminary {
+                    "Avaliação preliminar"
+                } else {
+                    "Avaliação"
+                };
+                format!(
+                    "{prefix} {}, {}",
+                    score(white_cp),
+                    Advantage::of(white_cp).sentence()
+                )
+            }
+            Self::Loading => "Avaliação em andamento".into(),
+            Self::Unavailable => "Avaliação indisponível".into(),
+        }
+    }
+
+    pub fn score_value(self) -> Option<String> {
+        match self {
+            Self::Scored { white_cp, .. } => Some(score(white_cp)),
+            Self::Loading | Self::Unavailable => None,
+        }
+    }
+}
+
+/// Normalize a side-to-move engine score to White's perspective.
+fn white_cp(fen: &str, cp: i32) -> i32 {
+    if fen.split_whitespace().nth(1) == Some("b") {
+        cp.saturating_neg()
+    } else {
+        cp
+    }
+}
+
+pub fn evaluation(s: &State) -> Evaluation {
+    let Some(analysis) = s.position_analysis() else {
+        return if s.real_progress.is_some() || s.live_running {
+            Evaluation::Loading
+        } else {
+            Evaluation::Unavailable
+        };
+    };
+    let preliminary = s.real_progress.is_some()
+        || analysis
+            .search
+            .as_ref()
+            .is_some_and(|search| search.purpose == "playback");
+    Evaluation::Scored {
+        white_cp: white_cp(&analysis.fen, analysis.cp),
+        preliminary,
+    }
+}
+
+/// Compact, position-level score strip that sits directly above the board.
+pub fn readout(s: &State, k: &Kit, size: f32) -> El {
+    let evaluation = evaluation(s);
+    let status = evaluation.visible_status();
+    row()
+        .key("evaluation-readout")
+        .w(size + 24.0)
+        .h(EVALUATION_STRIP_HEIGHT)
+        .center_y()
+        .child(el().w(24.0))
+        .child(
+            row()
+                .key("evaluation-position")
+                .w(size)
+                .h(EVALUATION_STRIP_HEIGHT)
+                .center_y()
+                .gap(8.0)
+                .child(
+                    ui::label("Avaliação", 12.0, k.c.text_muted)
+                        .key("evaluation-label")
+                        .w(56.0),
+                )
+                .child(
+                    ui::mono(evaluation.value(), 13.0, k.c.text_base)
+                        .key("evaluation-score")
+                        .role("status")
+                        .label(evaluation.accessible_label())
+                        .w(EVALUATION_VALUE_WIDTH),
+                )
+                .child(el().grow(1.0))
+                .child(
+                    ui::label(status, 12.0, k.c.text_muted)
+                        .key("evaluation-status")
+                        .truncate(),
+                ),
+        )
+}
+
 pub fn score(cp: i32) -> String {
     if cp.unsigned_abs() >= 90_000 {
         format!(
@@ -114,10 +279,8 @@ pub fn score(cp: i32) -> String {
 }
 
 pub fn meter(s: &State, _k: &Kit, size: f32) -> El {
-    let value = s.position_analysis().map_or(50.0, |p| p.win_pct as f32);
-    let label = s
-        .position_analysis()
-        .map_or_else(|| "—".into(), |p| score(p.cp));
+    let evaluation = evaluation(s);
+    let value = s.position_analysis().map_or(0.0, |p| p.win_pct as f32);
     const PAD: f32 = 1.0;
     const W: f32 = 14.0;
     let track_w = W - PAD * 2.0;
@@ -134,14 +297,62 @@ pub fn meter(s: &State, _k: &Kit, size: f32) -> El {
     let shell_top = if dark { "#303033" } else { "#eeeeef" };
     let shell_bottom = if dark { "#202022" } else { "#fafafa" };
     let shell_border = if dark { "#414145" } else { "#d4d4d8" };
-    let meter =
-        el().key("evaluation-meter")
-            .role("meter")
-            .label(if s.position_analysis().is_some() {
-                format!("Avaliação {label}")
-            } else {
-                "Avaliação indisponível".to_string()
-            });
+    let meter = el()
+        .key("evaluation-meter")
+        .role("meter")
+        .label("Barra de avaliação");
+    let mut track = el()
+        .size(track_w, track_h)
+        .absolute(PAD, PAD)
+        .linear_gradient(
+            std::f32::consts::FRAC_PI_2,
+            [
+                (0.0, rune::color::hex("#18181b").unwrap()),
+                (1.0, rune::color::hex("#29292e").unwrap()),
+            ],
+        )
+        .clip_rounded(3.0)
+        .child(
+            el().size(6.0, 1.0)
+                .absolute((track_w - 6.0) / 2.0, track_h / 2.0 - 0.5)
+                .fill(rune::color::hex("#8c8c8c").unwrap().alpha(0.4))
+                .a11y_hidden(),
+        );
+    // Without a settled score the rail stays neutral instead of implying a
+    // 50/50 position, and the advantage marker is omitted.
+    if matches!(evaluation, Evaluation::Scored { .. }) {
+        track = track
+            .child(
+                el().size(track_w, white_h)
+                    .absolute(0.0, white_top)
+                    .linear_gradient(
+                        std::f32::consts::FRAC_PI_2,
+                        [
+                            (0.0, rune::color::hex("#e1e1de").unwrap()),
+                            (1.0, rune::color::hex("#f5f5f4").unwrap()),
+                        ],
+                    )
+                    .a11y_hidden(),
+            )
+            .child(
+                el().size(track_w, 2.0)
+                    .absolute(0.0, marker_top)
+                    .fill(rune::color::hex("#a1a19b").unwrap())
+                    .a11y_hidden(),
+            )
+            .child(
+                el().size(track_w, 1.0)
+                    .absolute(0.0, (marker_top - 1.0).max(0.0))
+                    .fill(Color::WHITE.alpha(0.25))
+                    .a11y_hidden(),
+            )
+            .child(
+                el().size(track_w, 1.0)
+                    .absolute(0.0, (marker_top + 2.0).min(track_h - 1.0))
+                    .fill(Color::BLACK.alpha(0.20))
+                    .a11y_hidden(),
+            );
+    }
     meter
         .size(W, size)
         .radius(4.0)
@@ -150,54 +361,7 @@ pub fn meter(s: &State, _k: &Kit, size: f32) -> El {
             rune::color::hex(shell_bottom).unwrap(),
         )
         .border(1.0, rune::color::hex(shell_border).unwrap())
-        .child(
-            el().size(track_w, track_h)
-                .absolute(PAD, PAD)
-                .linear_gradient(
-                    std::f32::consts::FRAC_PI_2,
-                    [
-                        (0.0, rune::color::hex("#18181b").unwrap()),
-                        (1.0, rune::color::hex("#29292e").unwrap()),
-                    ],
-                )
-                .clip_rounded(3.0)
-                .child(
-                    el().size(track_w, white_h)
-                        .absolute(0.0, white_top)
-                        .linear_gradient(
-                            std::f32::consts::FRAC_PI_2,
-                            [
-                                (0.0, rune::color::hex("#e1e1de").unwrap()),
-                                (1.0, rune::color::hex("#f5f5f4").unwrap()),
-                            ],
-                        )
-                        .a11y_hidden(),
-                )
-                .child(
-                    el().size(6.0, 1.0)
-                        .absolute((track_w - 6.0) / 2.0, track_h / 2.0 - 0.5)
-                        .fill(rune::color::hex("#8c8c8c").unwrap().alpha(0.4))
-                        .a11y_hidden(),
-                )
-                .child(
-                    el().size(track_w, 2.0)
-                        .absolute(0.0, marker_top)
-                        .fill(rune::color::hex("#a1a19b").unwrap())
-                        .a11y_hidden(),
-                )
-                .child(
-                    el().size(track_w, 1.0)
-                        .absolute(0.0, (marker_top - 1.0).max(0.0))
-                        .fill(Color::WHITE.alpha(0.25))
-                        .a11y_hidden(),
-                )
-                .child(
-                    el().size(track_w, 1.0)
-                        .absolute(0.0, (marker_top + 2.0).min(track_h - 1.0))
-                        .fill(Color::BLACK.alpha(0.20))
-                        .a11y_hidden(),
-                ),
-        )
+        .child(track)
 }
 
 pub fn chart(s: &State, k: &Kit) -> El {
@@ -324,7 +488,7 @@ pub fn chart(s: &State, k: &Kit) -> El {
                         s.real_result
                             .as_ref()
                             .and_then(|r| r.positions.get(s.ply))
-                            .map_or_else(|| "—".into(), |p| review_data::eval(p.cp))
+                            .map_or_else(|| "—".into(), |p| score(white_cp(&p.fen, p.cp)))
                     },
                     13.0,
                     k.c.text_base,
@@ -372,14 +536,83 @@ pub fn chart(s: &State, k: &Kit) -> El {
 
 #[cfg(test)]
 mod tests {
-    use super::{score, smooth};
+    use super::{Evaluation, score, smooth, white_cp};
 
     #[test]
     fn score_distinguishes_advantage_and_mate() {
         assert_eq!(score(142), "+1.42");
         assert_eq!(score(-142), "-1.42");
+        assert_eq!(score(0), "+0.00");
         assert_eq!(score(99_997), "+M3");
         assert_eq!(score(-99_997), "−M3");
+    }
+
+    #[test]
+    fn evaluation_is_always_reported_from_whites_perspective() {
+        let fen = "8/8/8/8/8/8/8/K6k w - - 0 1";
+        assert_eq!(white_cp(fen, -142), -142);
+        assert_eq!(white_cp("8/8/8/8/8/8/8/K6k b - - 0 1", -142), 142);
+        assert_eq!(
+            white_cp("malformed", 88),
+            88,
+            "an unknown side keeps the score rather than inventing one"
+        );
+    }
+
+    #[test]
+    fn evaluation_states_distinguish_value_advantage_and_progress() {
+        let white = Evaluation::Scored {
+            white_cp: 142,
+            preliminary: false,
+        };
+        assert_eq!(white.value(), "+1.42");
+        assert_eq!(white.visible_status(), "Brancas");
+        assert_eq!(
+            white.accessible_label(),
+            "Avaliação +1.42, vantagem das brancas"
+        );
+
+        let black = Evaluation::Scored {
+            white_cp: -142,
+            preliminary: false,
+        };
+        assert_eq!(black.value(), "-1.42");
+        assert_eq!(black.visible_status(), "Pretas");
+        assert_eq!(
+            black.accessible_label(),
+            "Avaliação -1.42, vantagem das pretas"
+        );
+
+        let mate = Evaluation::Scored {
+            white_cp: -99_997,
+            preliminary: true,
+        };
+        assert_eq!(mate.value(), "−M3");
+        assert_eq!(mate.visible_status(), "Pretas · preliminar");
+        assert_eq!(
+            mate.accessible_label(),
+            "Avaliação preliminar −M3, vantagem das pretas"
+        );
+
+        let equal = Evaluation::Scored {
+            white_cp: 0,
+            preliminary: false,
+        };
+        assert_eq!(equal.visible_status(), "Equilíbrio");
+
+        for evaluation in [Evaluation::Loading, Evaluation::Unavailable] {
+            assert_eq!(evaluation.value(), "—");
+            assert!(evaluation.score_value().is_none());
+        }
+        assert_eq!(Evaluation::Loading.visible_status(), "em andamento");
+        assert_eq!(
+            Evaluation::Loading.accessible_label(),
+            "Avaliação em andamento"
+        );
+        assert_eq!(
+            Evaluation::Unavailable.accessible_label(),
+            "Avaliação indisponível"
+        );
     }
 
     #[test]

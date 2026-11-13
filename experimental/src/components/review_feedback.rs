@@ -2,11 +2,11 @@
 use super::ui;
 use crate::{review_data::Classification, state::State};
 use rune::{Color, El, col, icon, row};
-use rune_kit::{Kit, glyphs};
+use rune_kit::Kit;
 pub fn badge(class: Classification) -> El {
     let glyph = match class {
-        Classification::Best => icon(&glyphs::STAR_FILLED, 14.0).color(Color::BLACK),
-        Classification::Good => icon(&glyphs::CHECK_SMALL, 14.0).color(Color::BLACK),
+        Classification::Best => icon(&super::icons::STAR, 14.0).color(Color::BLACK),
+        Classification::Good => icon(&super::icons::CHECK, 14.0).color(Color::BLACK),
         _ => ui::mono(class.glyph(), 12.0, Color::BLACK),
     };
     row()

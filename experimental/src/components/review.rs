@@ -105,12 +105,6 @@ fn resize_grip(s: &State) -> El {
         })
 }
 
-static RETURN: Icon = Icon {
-    name: "return-mainline",
-    view: 20.0,
-    body: r#"<path d="M7 5L3 9L7 13M3 9H12C15 9 17 11 17 14V15" stroke="currentColor" stroke-linecap="square"/>"#,
-};
-
 macro_rules! octicon {
     ($name:ident, $file:literal, $label:literal) => {
         static $name: Icon = Icon {
@@ -129,16 +123,6 @@ octicon!(PREVIOUS, "../../assets/chevron-left-16.svg", "chevron-left");
 octicon!(NEXT, "../../assets/chevron-right-16.svg", "chevron-right");
 octicon!(LAST, "../../assets/move-to-end-16.svg", "move-to-end");
 octicon!(FLIP, "../../assets/arrow-switch-16.svg", "arrow-switch");
-static PLAY: Icon = Icon {
-    name: "play-variation",
-    view: 16.0,
-    body: "<path fill=\"currentColor\" d=\"M4 2v12l10-6z\"/>",
-};
-static PAUSE: Icon = Icon {
-    name: "pause-variation",
-    view: 16.0,
-    body: "<path fill=\"currentColor\" d=\"M4 2h3v12H4zM9 2h3v12H9z\"/>",
-};
 
 fn playback(s: &State, k: &Kit) -> El {
     let (position, total) = s.active_variation.map_or((s.ply, s.game.moves.len()), |i| {
@@ -250,7 +234,7 @@ fn playback(s: &State, k: &Kit) -> El {
                 .size(32.0, 32.0),
         )
         .children(s.active_variation.map(|_| {
-            IconButton::new(&RETURN)
+            IconButton::new(&super::icons::RETURN)
                 .variant(IconButtonVariant::GhostMuted)
                 .control_size(ControlSize::Large)
                 .label("Voltar à partida")
@@ -265,17 +249,21 @@ fn playback(s: &State, k: &Kit) -> El {
                 .size(32.0, 32.0)
         }))
         .children(s.active_variation.map(|_| {
-            IconButton::new(if s.playing { &PAUSE } else { &PLAY })
-                .variant(IconButtonVariant::GhostMuted)
-                .control_size(ControlSize::Large)
-                .label(if s.playing { "Pausar" } else { "Reproduzir" })
-                .on_press_tx(|s: &mut State, tx| {
-                    s.toggle_playback();
-                    tx.wake_after(std::time::Duration::from_millis(50));
-                })
-                .build(k)
-                .key("pause-variation")
-                .size(32.0, 32.0)
+            IconButton::new(if s.playing {
+                &super::icons::PAUSE
+            } else {
+                &super::icons::PLAY
+            })
+            .variant(IconButtonVariant::GhostMuted)
+            .control_size(ControlSize::Large)
+            .label(if s.playing { "Pausar" } else { "Reproduzir" })
+            .on_press_tx(|s: &mut State, tx| {
+                s.toggle_playback();
+                tx.wake_after(std::time::Duration::from_millis(50));
+            })
+            .build(k)
+            .key("pause-variation")
+            .size(32.0, 32.0)
         }))
 }
 fn workspace(s: &State, k: &Kit, size: f32, compact: bool) -> El {
@@ -288,8 +276,8 @@ fn workspace(s: &State, k: &Kit, size: f32, compact: bool) -> El {
         .key("board-workspace")
         .w_full()
         .items_center()
-        .gap(if compact { 6.0 } else { 8.0 })
-        .py(if compact { 8.0 } else { 12.0 })
+        .gap(4.0)
+        .py(if compact { 2.0 } else { 8.0 })
         .child(board::player(
             top.0,
             top.1,
@@ -297,37 +285,21 @@ fn workspace(s: &State, k: &Kit, size: f32, compact: bool) -> El {
             &s.game.ratings[if s.flipped { 0 } else { 1 }],
             k,
             size + 24.0,
-            (
-                compact,
-                Some(
-                    ui::mono(
-                        s.position_analysis().map_or_else(
-                            || "Aval. —".into(),
-                            |p| format!("Aval. {}", review_graph::score(p.cp)),
-                        ),
-                        13.0,
-                        k.c.text_base,
-                    )
-                    .key("evaluation-score")
-                    .role("status")
-                    .label(s.position_analysis().map_or_else(
-                        || "Avaliação indisponível".into(),
-                        |p| {
-                            format!(
-                                "Avaliação {}, positiva para as brancas",
-                                review_graph::score(p.cp)
-                            )
-                        },
-                    )),
-                ),
-            ),
+            compact,
         ))
         .child(
-            row()
-                .gap(10.0)
-                .items_start()
-                .child(review_graph::meter(s, k, size))
-                .child(board::view(s, k, size)),
+            col()
+                .key("position-evaluation")
+                .items_center()
+                .gap(0.0)
+                .child(review_graph::readout(s, k, size))
+                .child(
+                    row()
+                        .gap(10.0)
+                        .items_start()
+                        .child(review_graph::meter(s, k, size))
+                        .child(board::view(s, k, size)),
+                ),
         )
         .child(board::player(
             bottom.0,
@@ -336,7 +308,7 @@ fn workspace(s: &State, k: &Kit, size: f32, compact: bool) -> El {
             &s.game.ratings[if s.flipped { 1 } else { 0 }],
             k,
             size + 24.0,
-            (compact, None),
+            compact,
         ))
         .child(playback(s, k))
 }

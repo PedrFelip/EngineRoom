@@ -18,3 +18,5 @@ Fonte: https://github.com/primer/octicons/tree/main/icons
 Board navigation uses Primer Octicons `move-to-start`, `chevron-left`,
 `chevron-right`, `move-to-end`, and `arrow-switch` (16 px), sourced from
 https://github.com/primer/octicons/tree/main/icons. MIT license in OCTICONS-LICENSE.txt.
+
+Additional interface icons are Primer Octicons, sourced from https://github.com/primer/octicons/tree/main/icons and distributed under the included MIT license.

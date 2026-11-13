@@ -154,6 +154,226 @@ fn resizing_reflows_the_board_without_resetting_navigation() {
 }
 
 #[test]
+fn evaluation_layout_stays_aligned_for_scores_and_orientation() {
+    #[derive(Clone, Copy)]
+    enum Case {
+        Scored { cp: i32, preliminary: bool },
+        Loading,
+        Unavailable,
+    }
+
+    fn find<'a>(node: &'a serde_json::Value, key: &str) -> Option<&'a serde_json::Value> {
+        if node["key"] == key {
+            return Some(node);
+        }
+        node["children"]
+            .as_array()?
+            .iter()
+            .find_map(|child| find(child, key))
+    }
+    fn overlaps(a: [f32; 4], b: [f32; 4]) -> bool {
+        a[0] < b[0] + b[2] && a[0] + a[2] > b[0] && a[1] < b[1] + b[3] && a[1] + a[3] > b[1]
+    }
+
+    let mut rt = runtime();
+    tap(&mut rt, "session-1");
+    let original_positions = rt
+        .state
+        .real_result
+        .as_ref()
+        .expect("fixture result")
+        .positions
+        .clone();
+    let original = original_positions[0].clone();
+    let cases = [
+        Case::Scored {
+            cp: 142,
+            preliminary: false,
+        },
+        Case::Scored {
+            cp: -142,
+            preliminary: false,
+        },
+        Case::Scored {
+            cp: 99_997,
+            preliminary: false,
+        },
+        Case::Scored {
+            cp: -99_997,
+            preliminary: false,
+        },
+        Case::Scored {
+            cp: 142,
+            preliminary: true,
+        },
+        Case::Loading,
+        Case::Unavailable,
+    ];
+    for size in [(720.0, 560.0), (900.0, 700.0), (1920.0, 1080.0)] {
+        rt.set_viewport(size, 1.0);
+        for flipped in [false, true] {
+            let mut first_board = None;
+            let mut first_score_y = None;
+            for case in cases {
+                rt.state.flipped = flipped;
+                rt.state.real_progress = None;
+                rt.state.live_running = false;
+                {
+                    let result = rt.state.real_result.as_mut().expect("fixture result");
+                    match case {
+                        Case::Scored { cp, preliminary } => {
+                            let mut position = original.clone();
+                            position.cp = cp;
+                            position.search =
+                                preliminary.then(|| engineroom_backend::review::types::Search {
+                                    purpose: "playback".into(),
+                                    movetime_ms: 500,
+                                    multipv: 1,
+                                });
+                            result.positions[0] = position;
+                        }
+                        Case::Loading => {
+                            result.positions.remove(0);
+                            rt.state.real_progress = Some((1, 17));
+                        }
+                        Case::Unavailable => {
+                            result.positions.remove(0);
+                        }
+                    }
+                }
+                rt.invalidate();
+                rt.frame(0.0);
+                let rect = |key: &str| rt.presented(key).expect(key).0;
+                let board = rect("chessboard");
+                if let Some(first) = first_board {
+                    assert_eq!(board, first, "score must not shift board at {size:?}");
+                } else {
+                    first_board = Some(board);
+                }
+                let meter = rect("evaluation-meter");
+                let score = rect("evaluation-score");
+                let readout = rect("evaluation-readout");
+                let position = rect("evaluation-position");
+                assert!((12.0..=16.0).contains(&meter[2]), "meter width {size:?}");
+                assert!(
+                    (meter[1] - board[1]).abs() < 0.5 && (meter[3] - board[3]).abs() < 0.5,
+                    "meter edges {size:?}"
+                );
+                assert!(
+                    (board[0] - meter[0] - meter[2] - 10.0).abs() < 0.5,
+                    "meter gap {size:?}"
+                );
+                assert!(
+                    (position[0] - board[0]).abs() < 0.5 && (position[2] - board[2]).abs() < 0.5,
+                    "evaluation strip aligns with board at {size:?}: {position:?} {board:?}"
+                );
+                assert!(
+                    readout[3] >= 17.0 && readout[1] + readout[3] <= board[1] + 0.5,
+                    "readout sits above board at {size:?}: {readout:?} {board:?}"
+                );
+                assert!(
+                    (score[2] - 60.0).abs() < 0.5
+                        && score[3] >= 14.0
+                        && score[1] + score[3] <= board[1],
+                    "score bounds {size:?}: {score:?}"
+                );
+                assert!(
+                    score[0] >= board[0] && score[0] + score[2] <= board[0] + board[2],
+                    "score fits inside board width {size:?}"
+                );
+                let first_y = *first_score_y.get_or_insert(score[1]);
+                assert!(
+                    (score[1] - first_y).abs() < 0.5,
+                    "score baseline moves between states at {size:?}"
+                );
+                let label = rect("evaluation-label");
+                let status = rect("evaluation-status");
+                assert!(!overlaps(score, label), "label overlaps score at {size:?}");
+                assert!(
+                    !overlaps(score, status),
+                    "status overlaps score at {size:?}"
+                );
+                assert!(
+                    status[0] + status[2] <= board[0] + board[2] + 0.5,
+                    "status stays inside board width {size:?}"
+                );
+                let tree = rt.accessibility_json();
+                let expected = match case {
+                    Case::Scored { cp, preliminary } => {
+                        let score = crate::components::review_graph::score(cp);
+                        let side = if cp > 0 {
+                            "vantagem das brancas"
+                        } else {
+                            "vantagem das pretas"
+                        };
+                        format!(
+                            "{} {score}, {side}",
+                            if preliminary {
+                                "Avaliação preliminar"
+                            } else {
+                                "Avaliação"
+                            }
+                        )
+                    }
+                    Case::Loading => "Avaliação em andamento".into(),
+                    Case::Unavailable => "Avaliação indisponível".into(),
+                };
+                let label = find(&tree, "evaluation-score").expect("accessible score")["name"]
+                    .as_str()
+                    .expect("score label");
+                assert_eq!(label, expected, "{size:?} {flipped}");
+                let meter_label =
+                    find(&tree, "evaluation-meter").expect("accessible meter")["name"]
+                        .as_str()
+                        .expect("meter label");
+                assert_eq!(
+                    meter_label, "Barra de avaliação",
+                    "the meter must not repeat the score label at {size:?} {flipped}"
+                );
+                let visible_status = find(&tree, "evaluation-status").expect("status")["name"]
+                    .as_str()
+                    .expect("status label");
+                match case {
+                    Case::Scored { cp, preliminary } => {
+                        let side = if cp > 0 { "Brancas" } else { "Pretas" };
+                        assert!(visible_status.starts_with(side), "{visible_status}");
+                        assert_eq!(preliminary, visible_status.contains("preliminar"));
+                    }
+                    Case::Loading => assert_eq!(visible_status, "em andamento"),
+                    Case::Unavailable => assert_eq!(visible_status, "indisponível"),
+                }
+                rt.state
+                    .real_result
+                    .as_mut()
+                    .expect("fixture result")
+                    .positions = original_positions.clone();
+                rt.state.real_progress = None;
+                rt.state.live_running = false;
+            }
+        }
+    }
+    // The fixture's black-to-move positions keep their raw side-to-move score;
+    // presentation must still report White's perspective when the board flips.
+    rt.set_viewport((900.0, 700.0), 1.0);
+    for (ply, expected) in [
+        (11, "Avaliação +1.42, vantagem das brancas"),
+        (12, "Avaliação -0.88, vantagem das pretas"),
+    ] {
+        rt.state.go_to(ply);
+        for flipped in [false, true] {
+            rt.state.flipped = flipped;
+            rt.invalidate();
+            rt.frame(0.0);
+            let tree = rt.accessibility_json();
+            let label = find(&tree, "evaluation-score").expect("accessible score")["name"]
+                .as_str()
+                .expect("score label");
+            assert_eq!(label, expected, "ply {ply}, flipped {flipped}");
+        }
+    }
+}
+
+#[test]
 fn board_lines_follow_toggle_and_variation_feedback_is_visible() {
     let mut rt = runtime();
     rt.state.page = Page::Review;

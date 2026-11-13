@@ -285,7 +285,7 @@ pub fn player(
     rating: &Option<String>,
     k: &Kit,
     size: f32,
-    (compact, score): (bool, Option<El>),
+    compact: bool,
 ) -> El {
     let avatar_size = if compact { 32.0 } else { 40.0 };
     let fallback = name
@@ -321,6 +321,5 @@ pub fn player(
                 .map_or_else(el, |rating| label(rating, 12.0, k.c.text_base)),
         )
         .child(el().grow(1.0))
-        .children(score)
         .child(label(side, 10.0, k.c.text_muted))
 }

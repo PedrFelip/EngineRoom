@@ -46,7 +46,7 @@ impl Layout {
             } else {
                 0.0
             };
-        // These are the rendered player rows, coordinates, playback, gaps, and padding.
+        // Player rows, the position evaluation strip, coordinates, playback, gaps, and padding.
         let workspace = if self.compact_height() { 154.0 } else { 184.0 };
         let chrome = self.header_height() + if toolbar { 36.0 } else { 0.0 } + 1.0;
         (width

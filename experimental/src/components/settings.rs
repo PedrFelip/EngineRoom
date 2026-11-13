@@ -282,7 +282,7 @@ fn storage_action(key: &str, title: &str, disabled: bool, k: &Kit) -> El {
 }
 fn storage_destructive(key: &str, title: &str, disabled: bool, k: &Kit) -> El {
     Button::new(title)
-        .icon(&rune_theme_opencode::icons::TRASH)
+        .icon(&super::icons::TRASH)
         .control_size(ControlSize::ExtraLarge)
         .disabled(disabled)
         .build(k)
@@ -389,7 +389,7 @@ fn storage(s: &State, k: &Kit) -> El {
                         )
                         .child(
                             Button::new("Apagar histórico")
-                                .icon(&rune_theme_opencode::icons::TRASH)
+                                .icon(&super::icons::TRASH)
                                 .variant(ButtonVariant::Danger)
                                 .control_size(ControlSize::ExtraLarge)
                                 .disabled(disabled)

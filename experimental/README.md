@@ -15,12 +15,12 @@ Vulkan disponível, inclusive Mesa lavapipe para renderização headless.
 
 ## Componentes e estrutura
 
-Usa componentes reais de `rune-kit`, com ícones, movimento e paleta de
+Usa componentes reais de `rune-kit`, com ícones, movimento e estilos de
 `rune-theme-opencode`. A tipografia usa **IBM Plex Sans** na interface e
 **IBM Plex Mono** no PGN e nos dados numéricos, com fontes embutidas. As três dependências Rune estão fixadas no mesmo commit
-`d03349e25189ce1edc8c26ada6bf6d4aac72c826`.
-A interface usa a paleta original do OpenCode nos temas claro e escuro,
-diretamente de `rune-theme-opencode`, incluindo superfícies, estados e elevações.
+`b726a4d152512e51821884506776c3bad6b11410`.
+A interface adapta as superfícies e cores semânticas à paleta neutra e quente
+do aplicativo principal, mantendo os estados e elevações do kit nos temas claro e escuro.
 
 O backend nativo está dividido nas crates deste workspace:
 
@@ -37,7 +37,7 @@ O backend nativo está dividido nas crates deste workspace:
 - `src/preferences.rs`: documento versionado, escrita atômica e limites validados.
 - `src/file_dialog.rs`: seletor nativo de arquivos sem bloquear a interface.
 - `src/desktop_paths.rs`: diretório experimental e resolução do Stockfish.
-- `src/theme.rs`: paleta OpenCode (claro/escuro), escala tipográfica e fontes IBM Plex.
+- `src/theme.rs`: paleta adaptada do EngineRoom (claro/escuro), escala tipográfica e fontes IBM Plex.
 - `src/layout.rs`: medidas responsivas baseadas na área útil real do shell.
 - `src/game.rs`: validação local de PGN/FEN e posições para a prévia.
 - `src/components/ui.rs`: grupos, linhas de preferência, tipografia e slider acessível.

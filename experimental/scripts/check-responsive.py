@@ -37,9 +37,20 @@ for path in paths:
         board = keyed["chessboard"]["rect"]
         meter = keyed["evaluation-meter"]["rect"]
         score = keyed["evaluation-score"]["rect"]
+        readout = keyed["evaluation-readout"]["rect"]
+        position = keyed["evaluation-position"]["rect"]
         assert 12 <= meter[2] <= 16 and meter[2] < board[2] / 10, (path.name, "meter width", meter, board)
         assert abs(meter[1] - board[1]) < 0.5 and abs(meter[3] - board[3]) < 0.5, (path.name, "meter alignment", meter, board)
+        assert abs(board[0] - meter[0] - meter[2] - 10) < 0.5, (path.name, "meter gap", meter, board)
+        assert abs(position[0] - board[0]) < 0.5 and abs(position[2] - board[2]) < 0.5, (path.name, "evaluation strip alignment", position, board)
+        assert readout[3] >= 16 and readout[1] + readout[3] <= board[1] + 0.5, (path.name, "evaluation strip placement", readout, board)
         assert score[2] >= 20 and score[3] >= 14 and score[1] + score[3] <= board[1], (path.name, "score placement", score, board)
+        assert score[0] >= board[0] and score[0] + score[2] <= board[0] + board[2], (path.name, "score horizontal alignment", score, board)
+        for element in elements:
+            if element.get("text") and element.get("key") not in ("evaluation-score", "evaluation-label", "evaluation-status"):
+                x, y, w, h = element["rect"]
+                overlap = x < score[0] + score[2] and x + w > score[0] and y < score[1] + score[3] and y + h > score[1]
+                assert not overlap, (path.name, "score overlaps text", element.get("text"), element["rect"], score)
         body = keyed["page-body"]["rect"]
         inspector = keyed.get("review-inspector", {}).get("rect")
         assert board[2] == board[3] and board[2] % 8 == 0

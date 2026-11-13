@@ -2,6 +2,7 @@
 pub mod board;
 pub mod history;
 pub mod home;
+pub mod icons;
 pub mod pieces;
 pub mod review;
 pub mod review_analysis;

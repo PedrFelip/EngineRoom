@@ -59,7 +59,8 @@ impl Classification {
     }
 }
 pub fn eval(cp: i32) -> String {
-    format!("{:+.2}", cp as f32 / 100.0)
+    // Keep the true minus sign consistent with mate notation (`−M3`).
+    format!("{:+.2}", cp as f32 / 100.0).replacen('-', "−", 1)
 }
 #[derive(Clone)]
 pub struct Candidate {

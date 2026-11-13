@@ -175,6 +175,37 @@ fn spec() -> AppSpec<State> {
                 *s = State::fixture();
                 s.page = Page::Review
             }),
+            ("review-negative", |s| {
+                *s = State::fixture();
+                s.page = Page::Review;
+                s.go_to(12);
+            }),
+            ("review-mate", |s| {
+                *s = State::fixture();
+                s.page = Page::Review;
+                s.real_result.as_mut().expect("fixture result").positions[0].cp = 99_997;
+            }),
+            ("review-flipped", |s| {
+                *s = State::fixture();
+                s.page = Page::Review;
+                s.flipped = true;
+            }),
+            ("review-preliminary", |s| {
+                *s = State::fixture();
+                s.page = Page::Review;
+                s.real_result.as_mut().expect("fixture result").positions[0].search =
+                    Some(engineroom_backend::review::types::Search {
+                        purpose: "playback".into(),
+                        movetime_ms: 500,
+                        multipv: 1,
+                    });
+            }),
+            ("review-loading", |s| {
+                *s = State::fixture();
+                s.page = Page::Review;
+                s.real_result = None;
+                s.real_progress = Some((5, 17));
+            }),
             ("review-variation-feedback", |s| {
                 *s = State::fixture();
                 s.page = Page::Review;
