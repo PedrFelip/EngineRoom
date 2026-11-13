@@ -41,6 +41,10 @@
       "libdrm*.so*",
       "libvulkan.so*",
       "libvulkan_*.so*"
+    ],
+    "libs": [
+      "libxkbcommon-x11.so*",
+      "libxcb-xkb.so*"
     ]
   },
   "name": "engineroom-rune"
