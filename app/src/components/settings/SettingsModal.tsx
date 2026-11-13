@@ -1,18 +1,23 @@
-import { Check, CircleAlert, Cpu, Database, Palette, X } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
-import { runUi } from '../../lib/effect/ui-runtime'
-import { type ProbeResult, probeEngine } from '../../lib/engine'
-import { clearGames } from '../../lib/games'
 import {
-  clearCache,
-  formatBytes,
-  getStorageStats,
-  type StorageStats,
-} from '../../lib/storage'
+  Check,
+  CircleAlert,
+  Cpu,
+  Database,
+  Info,
+  Palette,
+  X,
+} from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { useStore } from 'zustand'
+import { version } from '../../../package.json'
+import { formatBytes } from '../../lib/storage'
+import { updatesStore } from '../../lib/updates-store'
 import { useModalFocus } from '../../lib/use-modal-focus'
+import { Button } from '../ui/button'
 import { SegmentedControl } from '../ui/segmented-control'
 import ReviewEngineSettings from './ReviewEngineSettings'
 import SettingsPreferences from './SettingsPreferences'
+import { useSettingsController } from './use-settings-controller'
 
 interface Props {
   open: boolean
@@ -28,33 +33,23 @@ export default function SettingsModal({
   onClose,
   onGamesCleared,
 }: Props) {
+  const appInfo = useStore(updatesStore, (state) => state.info)
   const [section, setSection] = useState('preferences')
   const dialogRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
-  const [testing, setTesting] = useState(false)
-  const [result, setResult] = useState<ProbeResult | null>(null)
-  const [stats, setStats] = useState<StorageStats | null>(null)
+  const {
+    testing,
+    result,
+    stats,
+    acting,
+    storageError,
+    test,
+    runClearCache,
+    runClearGames,
+  } = useSettingsController(isOpen, onGamesCleared, () =>
+    setConfirmTarget(null),
+  )
   const [confirmTarget, setConfirmTarget] = useState<ConfirmTarget | null>(null)
-  const [acting, setActing] = useState(false)
-  const [storageError, setStorageError] = useState<string | null>(null)
-  const probeController = useRef<AbortController | null>(null)
-
-  useEffect(() => {
-    if (!isOpen) return
-    const controller = new AbortController()
-    setStorageError(null)
-    runUi(getStorageStats(), controller.signal)
-      .then((s) => !controller.signal.aborted && setStats(s))
-      .catch((e) => {
-        if (controller.signal.aborted) return
-        console.warn('Falha ao ler armazenamento:', e)
-        setStorageError('Não foi possível ler o tamanho.')
-      })
-    return () => {
-      controller.abort()
-      probeController.current?.abort()
-    }
-  }, [isOpen])
 
   const cancelRef = useRef<HTMLButtonElement>(null)
   const clearCacheRef = useRef<HTMLButtonElement>(null)
@@ -72,8 +67,6 @@ export default function SettingsModal({
   useEffect(() => {
     if (!isOpen) return
     setConfirmTarget(null)
-    setResult(null)
-    setStats(null)
   }, [isOpen])
 
   useEffect(() => {
@@ -88,66 +81,6 @@ export default function SettingsModal({
   }, [confirmTarget, isOpen])
 
   if (!isOpen) return null
-
-  async function test() {
-    const controller = new AbortController()
-    probeController.current?.abort()
-    probeController.current = controller
-    setTesting(true)
-    setResult(null)
-    try {
-      const res = await runUi(probeEngine(), controller.signal)
-      if (!controller.signal.aborted) setResult(res)
-    } catch (error) {
-      if (!controller.signal.aborted) {
-        setResult({ ok: false, name: null, error: String(error) })
-      }
-    } finally {
-      if (probeController.current === controller) {
-        probeController.current = null
-        setTesting(false)
-      }
-    }
-  }
-
-  async function refreshStats() {
-    try {
-      setStats(await runUi(getStorageStats()))
-    } catch (e) {
-      console.warn('Falha ao reler armazenamento:', e)
-    }
-  }
-
-  async function runClearCache() {
-    setActing(true)
-    try {
-      await runUi(clearCache())
-      await refreshStats()
-      setStorageError(null)
-    } catch (e) {
-      console.warn('Falha ao limpar cache:', e)
-      setStorageError('Falha ao limpar o cache.')
-    } finally {
-      setActing(false)
-      setConfirmTarget(null)
-    }
-  }
-
-  async function runClearGames() {
-    setActing(true)
-    try {
-      await runUi(clearGames())
-      await refreshStats()
-      onGamesCleared?.()
-      setStorageError(null)
-    } catch (e) {
-      console.warn('Falha ao limpar histórico:', e)
-      setStorageError('Falha ao limpar o histórico.')
-    } finally {
-      setActing(false)
-      setConfirmTarget(null)
-    }
-  }
 
   return (
     <div className='fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4'>
@@ -190,14 +123,15 @@ export default function SettingsModal({
               Ajustes salvos automaticamente neste computador.
             </p>
           </div>
-          <button
+          <Button
             type='button'
             onClick={requestClose}
-            className='rounded-md p-1.5 text-ink-dim transition hover:bg-panel-3 hover:text-ink'
+            variant='ghost'
+            size='icon'
             aria-label='Fechar'
           >
             <X size={18} strokeWidth={2} aria-hidden='true' />
-          </button>
+          </Button>
         </div>
 
         <div className='shrink-0 border-b border-edge-soft px-3 py-2 sm:px-5'>
@@ -218,6 +152,12 @@ export default function SettingsModal({
                 label: 'Análise',
                 icon: Cpu,
                 controls: 'settings-analysis settings-engine',
+              },
+              {
+                id: 'about',
+                label: 'Sobre',
+                icon: Info,
+                controls: 'settings-about',
               },
               {
                 id: 'storage',
@@ -269,14 +209,14 @@ export default function SettingsModal({
             </div>
 
             <div className='mt-3 flex flex-wrap items-center gap-3'>
-              <button
+              <Button
                 type='button'
                 onClick={test}
                 disabled={testing}
-                className='rounded-lg border border-edge bg-panel-2 px-4 py-2 text-sm font-medium text-ink transition hover:bg-panel-3 disabled:opacity-60'
+                variant='outline'
               >
                 {testing ? 'Testando…' : 'Testar engine'}
-              </button>
+              </Button>
 
               {result && (
                 <span
@@ -298,6 +238,31 @@ export default function SettingsModal({
                     : (result.error ?? 'Falhou')}
                 </span>
               )}
+            </div>
+          </section>
+
+          <section
+            id='settings-about'
+            aria-labelledby='settings-about-title'
+            hidden={section !== 'about'}
+          >
+            <div className='px-1 py-2'>
+              <div className='flex items-baseline gap-3'>
+                <h3
+                  id='settings-about-title'
+                  className='text-lg font-semibold text-ink'
+                >
+                  EngineRoom
+                </h3>
+                <span className='text-xs text-ink-faint'>
+                  v{appInfo?.currentVersion ?? version}
+                </span>
+              </div>
+              <p className='mt-2 max-w-sm text-sm leading-relaxed text-ink-dim'>
+                Revise suas partidas de xadrez com o Stockfish 19, direto no seu
+                computador.
+              </p>
+              <p className='mt-4 text-xs text-ink-faint'>GPL-3.0-or-later</p>
             </div>
           </section>
 
@@ -342,16 +307,17 @@ export default function SettingsModal({
                       : 'Apagar todo o histórico de partidas? Esta ação não pode ser desfeita.'}
                   </p>
                   <div className='mt-2 flex justify-end gap-2'>
-                    <button
+                    <Button
                       type='button'
                       ref={cancelRef}
                       onClick={() => setConfirmTarget(null)}
                       disabled={acting}
-                      className='rounded-md border border-edge bg-panel-2 px-3 py-1 font-medium text-ink-dim transition hover:bg-panel-3 hover:text-ink disabled:opacity-60'
+                      variant='outline'
+                      size='sm'
                     >
                       Cancelar
-                    </button>
-                    <button
+                    </Button>
+                    <Button
                       type='button'
                       onClick={
                         confirmTarget === 'cache'
@@ -359,34 +325,37 @@ export default function SettingsModal({
                           : runClearGames
                       }
                       disabled={acting}
-                      className='rounded-md bg-blunder px-3 py-1 font-semibold text-bg transition hover:bg-blunder-strong disabled:opacity-60'
+                      variant='destructive'
+                      size='sm'
                     >
                       {acting ? 'Limpando…' : 'Confirmar'}
-                    </button>
+                    </Button>
                   </div>
                 </div>
               )}
 
               {!confirmTarget && (
                 <div className='mt-3 flex flex-wrap gap-2'>
-                  <button
+                  <Button
                     type='button'
                     ref={clearCacheRef}
                     onClick={() => setConfirmTarget('cache')}
                     disabled={acting}
-                    className='rounded-md border border-edge bg-panel-2 px-3 py-1.5 text-xs font-medium text-ink-dim transition hover:bg-blunder/15 hover:text-blunder disabled:opacity-60'
+                    variant='destructive'
+                    size='sm'
                   >
                     Limpar cache
-                  </button>
-                  <button
+                  </Button>
+                  <Button
                     type='button'
                     ref={clearGamesRef}
                     onClick={() => setConfirmTarget('games')}
                     disabled={acting}
-                    className='rounded-md border border-edge bg-panel-2 px-3 py-1.5 text-xs font-medium text-ink-dim transition hover:bg-blunder/15 hover:text-blunder disabled:opacity-60'
+                    variant='destructive'
+                    size='sm'
                   >
                     Limpar histórico
-                  </button>
+                  </Button>
                 </div>
               )}
             </div>
@@ -394,13 +363,9 @@ export default function SettingsModal({
         </div>
 
         <div className='flex shrink-0 justify-end border-t border-edge-soft px-5 py-3'>
-          <button
-            type='button'
-            onClick={requestClose}
-            className='rounded-lg bg-brand px-5 py-2 text-sm font-semibold text-bg transition hover:bg-brand-strong'
-          >
+          <Button type='button' onClick={requestClose} variant='default'>
             Concluído
-          </button>
+          </Button>
         </div>
       </div>
     </div>

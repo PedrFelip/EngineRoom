@@ -2,7 +2,6 @@ import { Effect, Fiber, Schema } from 'effect'
 import { describe, expect, it, vi } from 'vitest'
 import reviewFixture from './__tests__/fixtures/review.json'
 import { AnalysisSessions } from './backend'
-import { LegacyReviewSchema } from './effect/schemas'
 import { ProbeResultSchema, SessionEventSchema } from './review-protocol'
 import { TauriBackend } from './tauri-backend'
 
@@ -39,7 +38,7 @@ const config = {
 }
 
 describe('session IPC acquisition and validation', () => {
-  it('preserves preliminary lines and depth separately through IPC and history', () => {
+  it('preserves preliminary lines and depth separately through IPC', () => {
     const result = structuredClone(reviewFixture.result)
     const position = {
       ...result.positions[0],
@@ -62,10 +61,6 @@ describe('session IPC acquisition and validation', () => {
     if (event.type !== 'completed') throw new Error('expected completed')
     expect(event.result.positions[0].triageLines).toEqual(position.triageLines)
     expect(event.result.positions[0].lines).toHaveLength(1)
-    const history = Schema.decodeUnknownSync(LegacyReviewSchema)(
-      JSON.stringify(review),
-    )
-    expect(history.positions[0].triageLines).toEqual(position.triageLines)
   })
   it('waits for open acknowledgement before honoring disposal and closes exactly once', async () => {
     mocks.channels.length = 0

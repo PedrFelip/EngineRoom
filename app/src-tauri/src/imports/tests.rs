@@ -1,7 +1,7 @@
 use super::chess_com::*;
 use serde_json::{json, Value};
 use std::{collections::VecDeque, sync::Mutex, time::Duration};
-use tokio::sync::watch;
+use tokio::{sync::watch, time::Instant};
 
 const PGN: &str = "[White \"PGN White\"]\n[Black \"PGN Black\"]\n[WhiteElo \"1200\"]\n[Result \"1-0\"]\n\n1. e4 e5 2. Nf3 Nc6 1-0";
 
@@ -175,6 +175,79 @@ async fn preserves_partial_results_and_retries_the_failed_month() {
     let cursor = result.next_cursor.unwrap();
     assert_eq!(cursor.month, 8);
     assert!(cursor.before.is_none());
+}
+
+#[tokio::test]
+async fn final_deadline_keeps_a_completed_page_and_resumes_without_duplicates() {
+    let http = FakeHttp::new(vec![
+        index(&["09"]),
+        bytes(json!({"games": [game(2), game(1)]})),
+    ]);
+    let completed = run(&http, None, Limits::default()).await.unwrap();
+    assert_eq!(completed.items.len(), 2);
+    let cursor = Cursor {
+        username: "test-player".into(),
+        year: 2026,
+        month: 9,
+        before: Some(Before {
+            end_time: 1_700_000_001,
+            url: game(1)["url"].as_str().unwrap().into(),
+        }),
+    };
+    let (_tx, cancel) = watch::channel(false);
+    // `Instant::now()` is already at or past this deadline, so the final check
+    // deterministically observes a timeout after the scan finished.
+    let partial = complete(completed, &cancel, Instant::now(), Some(cursor)).unwrap();
+    assert_eq!(partial.items.len(), 2);
+    assert_eq!(partial.stop_reason, StopReason::Error);
+    assert_eq!(partial.warning.as_ref().unwrap().code, ErrorCode::Timeout);
+    let next = partial.next_cursor.unwrap();
+    assert_eq!(next.month, 9);
+    assert!(next.before.is_some());
+
+    let http = FakeHttp::new(vec![
+        index(&["09"]),
+        bytes(json!({"games": [game(2), game(1)]})),
+    ]);
+    let resumed = run(&http, Some(next), Limits::default()).await.unwrap();
+    assert!(resumed.items.is_empty());
+    assert_eq!(resumed.stop_reason, StopReason::Exhausted);
+    assert!(resumed.next_cursor.is_none());
+}
+
+#[tokio::test]
+async fn final_check_still_honors_cancellation_and_empty_results() {
+    let http = FakeHttp::new(vec![index(&["09"]), bytes(json!({"games": [game(1)]}))]);
+    let completed = run(&http, None, Limits::default()).await.unwrap();
+    let cursor = Cursor {
+        username: "test-player".into(),
+        year: 2026,
+        month: 9,
+        before: None,
+    };
+    let (tx, cancel) = watch::channel(false);
+    tx.send_replace(true);
+    let error = complete(
+        completed,
+        &cancel,
+        Instant::now() + Duration::from_secs(30),
+        Some(cursor),
+    )
+    .unwrap_err();
+    assert_eq!(error.code, ErrorCode::Cancelled);
+
+    let (_tx, cancel) = watch::channel(false);
+    let empty = SearchResult {
+        items: vec![],
+        next_cursor: None,
+        archives_read: 0,
+        skipped_invalid: 0,
+        skipped_unsupported: 0,
+        stop_reason: StopReason::Exhausted,
+        warning: None,
+    };
+    let error = complete(empty, &cancel, Instant::now(), None).unwrap_err();
+    assert_eq!(error.code, ErrorCode::Timeout);
 }
 
 #[tokio::test]

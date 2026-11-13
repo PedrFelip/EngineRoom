@@ -1,0 +1,49 @@
+.segmented-control {
+  position: relative;
+  isolation: isolate;
+  box-shadow: inset 0 2px 5px rgb(0 0 0 / 12%);
+}
+
+.segmented-button {
+  position: relative;
+  z-index: 1;
+  color: var(--ink-dim);
+  border: 1px solid transparent;
+  transition: none;
+}
+
+.segmented-button:not(:disabled):not([aria-pressed='true']):hover {
+  color: var(--ink);
+}
+
+.segmented-button[aria-pressed='true'] {
+  border: 1px solid color-mix(in srgb, var(--brand) 45%, var(--edge));
+  border-radius: 0.75rem;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--brand) 22%, var(--panel-3)),
+    color-mix(in srgb, var(--brand) 10%, var(--panel-2))
+  );
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 16%),
+    0 3px 6px rgb(0 0 0 / 22%),
+    0 0 12px color-mix(in srgb, var(--brand) 10%, transparent);
+  color: var(--ink);
+}
+
+.segmented-button[aria-pressed='true'] svg {
+  color: var(--brand);
+}
+
+.segmented-control:disabled {
+  opacity: 0.5;
+}
+
+.segmented-button:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: -2px;
+}
+
+@media (pointer: coarse) {
+  .segmented-button { min-height: 2.75rem; min-width: 2.75rem; }
+}

@@ -23,6 +23,7 @@ import type { RemoteGame } from '../lib/chess-com-import'
 import { useChessComImport } from '../lib/use-chess-com-import'
 import { Badge } from './ui/badge'
 import { Button } from './ui/button'
+import { Input } from './ui/input'
 
 const timeClasses: Record<string, string> = {
   bullet: 'Bullet',
@@ -103,7 +104,8 @@ export default function ChessComImporter({
                 className='shrink-0 text-muted-foreground'
                 aria-hidden='true'
               />
-              <input
+              <Input
+                embedded
                 id={`${id}-username`}
                 value={state.username}
                 onChange={(event) => {
@@ -115,7 +117,7 @@ export default function ChessComImporter({
                 spellCheck={false}
                 maxLength={50}
                 placeholder='Seu nome de usuário'
-                className='h-10 w-full min-w-0 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground'
+                className='h-10 w-full'
               />
             </div>
             <Button

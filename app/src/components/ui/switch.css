@@ -1,0 +1,33 @@
+.ui-switch {
+  --switch-thumb-size: 18px;
+  --switch-travel: 16px;
+  width: 40px;
+  height: 24px;
+  box-shadow: inset 0 1px 3px rgb(0 0 0 / 20%);
+  transition: background-color 160ms ease, box-shadow 160ms ease;
+}
+
+.ui-switch[data-size='sm'] {
+  --switch-thumb-size: 16px;
+  --switch-travel: 10px;
+  width: 32px;
+}
+
+.ui-switch > [data-slot='switch-thumb'] {
+  width: var(--switch-thumb-size);
+  height: var(--switch-thumb-size);
+  transform: translateX(0);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 25%), inset 0 1px 0 rgb(255 255 255 / 22%);
+  transition: transform 160ms ease;
+}
+
+.ui-switch > [data-state='checked'] {
+  transform: translateX(var(--switch-travel));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-switch,
+  .ui-switch > [data-slot='switch-thumb'] {
+    transition: none;
+  }
+}

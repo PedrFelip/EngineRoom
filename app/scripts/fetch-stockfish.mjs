@@ -10,15 +10,14 @@
  * The repo does not commit the binaries (see src-tauri/.gitignore), so every
  * developer / CI run fetches the right one for their platform.
  */
-import { execFileSync, execSync } from "node:child_process";
-import { copyFileSync, createWriteStream, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
+import { execFile, execFileSync } from "node:child_process";
+import { chmodSync, copyFileSync, createWriteStream, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { pipeline } from "node:stream/promises";
-import { exec as execCb } from "node:child_process";
 import { promisify } from "node:util";
 import { pathToFileURL } from "node:url";
-const exec = promisify(execCb);
+const execFileAsync = promisify(execFile);
 
 const BINARIES_DIR = resolve(process.cwd(), "src-tauri/binaries");
 const SF_TAG = "sf_19";
@@ -51,9 +50,9 @@ export function assetFor(target) {
 
 function hostTuple() {
   try {
-    return execSync("rustc --print host-tuple").toString().trim();
+    return execFileSync("rustc", ["--print", "host-tuple"]).toString().trim();
   } catch {
-    const v = execSync("rustc -Vv").toString();
+    const v = execFileSync("rustc", ["-Vv"]).toString();
     return (v.match(/host:\s*(\S+)/) || [])[1];
   }
 }
@@ -65,18 +64,44 @@ async function download(url, dest) {
   await pipeline(res.body, createWriteStream(dest));
 }
 
-async function extractTar(archivePath, outDir) {
-  await exec(`tar -xf "${archivePath}" -C "${outDir}"`);
+export async function extractTar(archivePath, outDir) {
+  await execFileAsync("tar", ["-xf", archivePath, "-C", outDir]);
 }
 
-async function extractZip(archivePath, outDir) {
+async function expandArchiveWithPowerShell(archivePath, outDir) {
+  // Pass paths through the environment so PowerShell never parses them as code.
+  await execFileAsync(
+    "powershell",
+    [
+      "-NoLogo",
+      "-NoProfile",
+      "-NonInteractive",
+      "-Command",
+      "Expand-Archive -LiteralPath $env:ENGINEROOM_ARCHIVE -DestinationPath $env:ENGINEROOM_OUT -Force",
+    ],
+    {
+      env: {
+        ...process.env,
+        ENGINEROOM_ARCHIVE: archivePath,
+        ENGINEROOM_OUT: outDir,
+      },
+    },
+  );
+}
+
+export async function extractZip(archivePath, outDir) {
   // `unzip` is available on most systems (incl. Git Bash on Windows).
   try {
-    await exec(`unzip -o -q "${archivePath}" -d "${outDir}"`);
+    await execFileAsync("unzip", ["-o", "-q", archivePath, "-d", outDir]);
   } catch {
     // Fallback to PowerShell Expand-Archive (Windows without unzip).
-    await exec(`powershell -NoProfile -Command "Expand-Archive -LiteralPath '${archivePath}' -DestinationPath '${outDir}' -Force"`);
+    await expandArchiveWithPowerShell(archivePath, outDir);
   }
+}
+
+/** Mark a staged sidecar executable without shell interpolation. */
+export function markExecutable(path) {
+  chmodSync(path, 0o755);
 }
 
 /** Find the actual stockfish executable inside the extracted dir. */
@@ -143,12 +168,12 @@ async function main() {
     const bin = findBinary(extractDir, expectedName);
     if (!bin) throw new Error("Binário do Stockfish não encontrado no pacote extraído.");
 
-    if (!ext) await exec(`chmod +x "${bin}"`);
+    if (!ext) markExecutable(bin);
     if (!hasExpectedVersion(bin)) {
       throw new Error("O pacote baixado não identificou Stockfish 19 via UCI.");
     }
     copyFileSync(bin, stagedPath);
-    if (!ext) await exec(`chmod +x "${stagedPath}"`);
+    if (!ext) markExecutable(stagedPath);
     renameSync(stagedPath, finalPath);
 
     console.log("✓ Stockfish 19 instalado em:", finalPath);

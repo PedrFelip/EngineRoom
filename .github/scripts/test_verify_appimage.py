@@ -4,7 +4,7 @@ import tempfile
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "app/scripts"))
-from verify_appimage import smoke_test, validate_appdir
+from verify_appimage import MEDIA_PLUGINS, media_warnings, smoke_test, validate_appdir
 
 
 class AppImageInventoryTests(unittest.TestCase):
@@ -13,6 +13,9 @@ class AppImageInventoryTests(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.appdir = Path(self.tmp.name)
         (self.appdir / "AppRun").write_text("#!/bin/sh\nexit 0\n")
+        self.library("usr/lib/gstreamer1.0/gstreamer-1.0/gst-plugin-scanner")
+        for plugin in MEDIA_PLUGINS:
+            self.library("usr/lib/gstreamer-1.0/" + plugin)
 
     def library(self, relative):
         path = self.appdir / relative
@@ -56,6 +59,20 @@ class AppImageInventoryTests(unittest.TestCase):
         (self.appdir / "AppRun").unlink()
         with self.assertRaisesRegex(ValueError, "missing AppRun"):
             validate_appdir(self.appdir)
+
+    def test_missing_media_plugin_is_rejected(self):
+        (self.appdir / "usr/lib/gstreamer-1.0/libgstmpg123.so").unlink()
+        with self.assertRaisesRegex(ValueError, "libgstmpg123.so"):
+            validate_appdir(self.appdir)
+
+    def test_missing_scanner_is_rejected(self):
+        (self.appdir / "usr/lib/gstreamer1.0/gstreamer-1.0/gst-plugin-scanner").unlink()
+        with self.assertRaisesRegex(ValueError, "gst-plugin-scanner"):
+            validate_appdir(self.appdir)
+
+    def test_media_warnings_are_detected(self):
+        self.assertTrue(media_warnings("GStreamer element autoaudiosink not found"))
+        self.assertFalse(media_warnings("GStreamer initialized"))
 
     def test_startup_failure_blocks_smoke_check(self):
         apprun = self.appdir / "AppRun"

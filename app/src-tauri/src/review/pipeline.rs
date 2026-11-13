@@ -256,7 +256,10 @@ impl Pipeline {
         Ok(analysis)
     }
     pub fn set_detected_resources(&mut self, threads: u32, memory_mb: u32) {
-        self.detected = Some((threads.div_ceil(3).max(1), hash_mb(memory_mb)));
+        self.detected = Some((
+            threads.div_ceil(thread_core_divisor()).max(1),
+            hash_mb(memory_mb),
+        ));
     }
     pub async fn live(
         &mut self,
@@ -334,4 +337,16 @@ pub(super) async fn cancellable<T>(
     cancel: &Cancellation,
 ) -> Result<T> {
     tokio::select! { _ = cancel.cancelled() => Err(ReviewError::cancelled()), result = task => result }
+}
+
+fn thread_core_divisor() -> u32 {
+    static DIVISOR: std::sync::LazyLock<u32> = std::sync::LazyLock::new(|| {
+        serde_json::from_str::<serde_json::Value>(include_str!("engine-policy.json"))
+            .expect("engine policy must be valid JSON")["threadCoreDivisor"]
+            .as_u64()
+            .and_then(|value| u32::try_from(value).ok())
+            .filter(|value| *value > 0)
+            .expect("engine policy threadCoreDivisor must be a positive u32")
+    });
+    *DIVISOR
 }

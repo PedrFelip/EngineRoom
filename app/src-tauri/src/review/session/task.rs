@@ -1,9 +1,10 @@
 //! Review execution, latest live intent and acknowledged teardown.
 use super::Session;
 use crate::review::{
+    core,
     engine::Cancellation,
     pipeline::{hash_mb, Pipeline},
-    repository::normalize,
+    repository::{normalize, validate_game},
     types::{Envelope, Event, Progress, ReviewConfig, ReviewError, ReviewErrorCode},
 };
 use tokio::sync::watch;
@@ -41,6 +42,11 @@ pub(super) async fn run_session(
         serde_json::to_value(initial)
             .map_err(|e| ReviewError::new(ReviewErrorCode::InvalidPayload, "session.restore", e))
             .and_then(normalize)
+            .and_then(|review| {
+                let game = core::extract(&config.pgn)?;
+                validate_game(&review, &game)?;
+                Ok(review)
+            })
     } else {
         publish(
             None,

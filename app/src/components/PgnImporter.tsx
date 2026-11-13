@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import ChessComImporter from './ChessComImporter'
 import { Badge } from './ui/badge'
 import { SegmentedControl } from './ui/segmented-control'
+import { Textarea } from './ui/textarea'
 
 interface Props {
   value: string
@@ -129,7 +130,7 @@ export default function PgnImporter({
                 if (file) void handleFile(file)
               }}
               onClick={() => inputRef.current?.click()}
-              className={`home-dropzone flex w-full cursor-pointer flex-col items-center justify-center rounded-[var(--control-radius)] border border-dashed px-4 py-6 text-center outline-none transition focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg sm:px-6 sm:py-6 ${
+              className={`flex w-full cursor-pointer flex-col items-center justify-center rounded-xl border border-dashed px-4 py-6 text-center outline-none transition focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg sm:px-6 sm:py-6 ${
                 dragActive
                   ? 'border-brand bg-brand/10'
                   : 'border-edge bg-panel-2/40 hover:border-ink-faint hover:bg-panel-2/70'
@@ -174,7 +175,7 @@ export default function PgnImporter({
           <ChessComImporter active={active} onImport={onImport ?? onChange} />
         ) : (
           <div className='relative'>
-            <textarea
+            <Textarea
               value={value}
               onChange={(e) => {
                 setFileName(null)
@@ -186,7 +187,7 @@ export default function PgnImporter({
               placeholder={
                 '[Event "Partida amistosa"]\n[White "Magnus Carlsen"]\n[Black "Hikaru Nakamura"]\n\n1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6 5. O-O Be7 *'
               }
-              className='h-36 w-full resize-y rounded-[var(--control-radius)] border border-edge bg-panel-2/40 p-3 font-mono text-[13px] leading-relaxed text-ink outline-none transition-[border-color,box-shadow] placeholder:text-ink-faint focus:border-brand focus:ring-2 focus:ring-brand/25'
+              className='h-36 font-mono text-[13px] leading-relaxed'
             />
             {value && (
               <span className='absolute bottom-2.5 right-3 rounded bg-panel-3/80 px-1.5 py-0.5 font-mono text-[10px] text-ink-faint'>

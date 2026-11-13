@@ -1,4 +1,5 @@
 import { Archive, Blocks, FilePlus2, Settings } from 'lucide-react'
+import UpdateButton from '../UpdateButton'
 import { Button } from '../ui/button'
 
 interface Props {
@@ -54,6 +55,7 @@ export default function HomeHeader({
           <span className='sr-only sm:hidden'>Histórico</span>
         </button>
         <span aria-hidden='true' className='mx-1 h-5 w-px bg-edge' />
+        <UpdateButton />
         <Button
           onClick={onOpenSettings}
           variant='ghost'

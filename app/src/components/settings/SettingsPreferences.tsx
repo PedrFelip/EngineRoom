@@ -2,6 +2,7 @@ import { Moon, Palette, Sun, Volume2 } from 'lucide-react'
 import type { CSSProperties } from 'react'
 import type { Theme } from '../../lib/settings'
 import { useSettings } from '../../lib/settings-context'
+import { SwitchField } from '../ui/switch-field'
 
 export default function SettingsPreferences() {
   const settings = useSettings(({ settings }) => ({
@@ -59,23 +60,12 @@ export default function SettingsPreferences() {
           Som
         </h3>
         <div className='rounded-2xl border border-edge-soft bg-panel-2/40 p-4'>
-          <label className='flex cursor-pointer items-center justify-between gap-3'>
-            <span className='min-w-0 flex-1'>
-              <span className='block text-sm font-medium text-ink'>
-                Som ao avançar lance
-              </span>
-              <span className='block text-xs text-ink-faint'>
-                Toca ao navegar para a próxima jogada (não ao voltar).
-              </span>
-            </span>
-            <input
-              type='checkbox'
-              checked={settings.soundEnabled}
-              onChange={(e) => setSoundEnabled(e.target.checked)}
-              className='h-4 w-4 accent-[var(--brand)]'
-              aria-label='Ativar som de movimentação'
-            />
-          </label>
+          <SwitchField
+            label='Som ao avançar lance'
+            description='Toca ao navegar para a próxima jogada (não ao voltar).'
+            checked={settings.soundEnabled}
+            onCheckedChange={setSoundEnabled}
+          />
           <label
             className={`mt-3 flex items-center gap-2 sm:gap-3 ${
               settings.soundEnabled ? '' : 'cursor-not-allowed opacity-50'

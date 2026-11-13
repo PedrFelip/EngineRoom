@@ -50,7 +50,8 @@ export function useChessComImport(
         if (!cancelled) return owner.current?.start()
       })
     } else {
-      owner.current?.cancel()
+      // Deactivation is implicit: a later reactivation may resume this search.
+      owner.current?.suspend()
     }
     return () => {
       cancelled = true

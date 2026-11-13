@@ -7,7 +7,7 @@ import {
   selectSourceFen,
   selectSourcePosition,
 } from './review-selectors'
-import { createReviewStore } from './review-store'
+import { createReviewStore, selectActiveVariation } from './review-store'
 
 const existingResult = () =>
   Schema.decodeUnknownSync(ReviewResultSchema)(reviewFixture.result)
@@ -21,7 +21,7 @@ describe('posição anterior de uma variação', () => {
     store.makeMove('d2', 'd4')
     expect(selectSourcePosition(store.getState())).toBe(result.positions[0])
 
-    const parent = store.getState().variation?.roots[0]
+    const parent = selectActiveVariation(store.getState())?.roots[0]
     if (!parent) throw new Error('Pai esperado')
     store.makeMove('d7', 'd5')
     expect(selectSourceFen(store.getState())).toBe(parent.fen)

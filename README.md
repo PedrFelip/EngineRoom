@@ -42,8 +42,23 @@ carregadas, e as configurações são organizadas por seção.
 
 **Atalhos na revisão:** `←` / `→` para o lance anterior ou seguinte;
 `Shift+←` / `Shift+→` para o erro ou blunder anterior ou seguinte;
-`Home` / `End` para o início ou fim da partida. A interface tem temas claro
+`Home` / `End` para o início ou fim da partida; `F` para virar o tabuleiro.
+A interface tem temas claro
 e escuro.
+
+## Atualizações
+
+O EngineRoom verifica novas versões uma vez ao iniciar. O ícone de download
+junto de Configurações aparece somente quando há uma atualização disponível.
+Um clique no ícone baixa, instala e reinicia o app, sem confirmação adicional.
+O download é validado por assinatura e o app aguarda a limpeza dos processos
+antes de reiniciar. No Linux, use o AppImage em um local com permissão de escrita;
+no Windows, o instalador pode solicitar permissão do sistema.
+A verificação exige internet; falhas não impedem a análise local.
+As versões de desenvolvimento não consultam atualizações.
+
+Em **Configurações → Sobre**, consulte a versão instalada, a descrição do app
+e sua licença.
 
 ## Rodar o projeto
 

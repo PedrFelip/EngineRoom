@@ -17,7 +17,7 @@ function fixture({ draft = true, assets, tagSha = sha, tag = 'v1.0.0' } = {}) {
   const calls = [];
   const outputs = {};
   const release = { id: 1, tag_name: tag, target_commitish: sha, draft };
-  const installers = assets || ['linux.AppImage', 'setup.exe', 'setup.msi'].map(name => ({ name, size: 100, state: 'uploaded' }));
+  const installers = assets || ['linux.AppImage', 'setup.exe', 'setup.msi', 'linux.AppImage.sig', 'setup.exe.sig', 'setup.msi.sig', 'latest.json'].map(name => ({ name, size: 100, state: 'uploaded' }));
   const github = {
     rest: {
       repos: {
@@ -204,5 +204,15 @@ test('synchronization keeps the PR but fails on conflicts or a moving main', asy
     f.github.rest.pulls.get = async () => ({ data: pr({ head: { ref: 'main', sha: 'c'.repeat(40) }, ...overrides }) });
     await assert.rejects(syncDevelop(f), /conflitos|main mudou/);
     assert.deepEqual(f.calls.map(([type]) => type), ['pr']);
+  }
+});
+
+test('unsigned or incomplete updater releases stay as drafts', async () => {
+  for (const missing of ['linux.AppImage.sig', 'setup.exe.sig', 'setup.msi.sig', 'latest.json']) {
+    const assets = ['linux.AppImage', 'setup.exe', 'setup.msi', 'linux.AppImage.sig', 'setup.exe.sig', 'setup.msi.sig', 'latest.json']
+      .filter(name => name !== missing).map(name => ({ name, size: 100, state: 'uploaded' }));
+    const f = fixture({ assets });
+    await assert.rejects(publish(f, '1', 'v1.0.0', sha), /Assinatura|Manifest/);
+    assert.equal(f.release.draft, true);
   }
 });

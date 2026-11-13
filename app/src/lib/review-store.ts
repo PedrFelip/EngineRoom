@@ -38,9 +38,19 @@ export interface ReviewVariation {
 export interface ReviewStoreSnapshot {
   result: ReviewResult | null
   currentPly: number
-  variation: ReviewVariation | null
+  selectedVariationId: string | null
   variations: ReviewVariation[]
   liveAnalysis: LiveAnalysisState
+}
+
+export function selectActiveVariation(
+  snapshot: ReviewStoreSnapshot,
+): ReviewVariation | null {
+  return (
+    snapshot.variations.find(
+      (item) => item.id === snapshot.selectedVariationId,
+    ) ?? null
+  )
 }
 
 export interface ReviewStore {
@@ -80,7 +90,7 @@ export function createReviewStore(): ReviewStore {
   const state = createStore<ReviewStoreSnapshot>(() => ({
     result: null,
     currentPly: 0,
-    variation: null,
+    selectedVariationId: null,
     variations: [],
     liveAnalysis: {
       fen: null,
@@ -129,7 +139,7 @@ export function createReviewStore(): ReviewStore {
     const exists = saved.some((item) => item.id === variation.id)
     commit({
       currentPly: variation.basePly,
-      variation,
+      selectedVariationId: variation.id,
       variations: exists
         ? saved.map((item) => (item.id === variation.id ? variation : item))
         : [...saved, variation],
@@ -145,7 +155,7 @@ export function createReviewStore(): ReviewStore {
       commit({
         result,
         currentPly: result.moves.length,
-        variation: null,
+        selectedVariationId: null,
         variations: [],
       })
     },
@@ -154,12 +164,12 @@ export function createReviewStore(): ReviewStore {
       const total = snapshot.result?.moves.length ?? 0
       commit({
         currentPly: Math.max(0, Math.min(total, ply)),
-        variation: null,
+        selectedVariationId: null,
       })
     },
     next() {
       const snapshot = state.getState()
-      const variation = snapshot.variation
+      const variation = selectActiveVariation(snapshot)
       if (variation) {
         const next = childrenAtPath(variation.roots, variation.path)[0]
         if (!next) return
@@ -175,13 +185,14 @@ export function createReviewStore(): ReviewStore {
     },
     prev() {
       const snapshot = state.getState()
-      if (snapshot.variation) {
-        if (snapshot.variation.path.length === 0) {
-          commit({ variation: null })
+      const variation = selectActiveVariation(snapshot)
+      if (variation) {
+        if (variation.path.length === 0) {
+          commit({ selectedVariationId: null })
         } else {
           const nextVariation = {
-            ...snapshot.variation,
-            path: snapshot.variation.path.slice(0, -1),
+            ...variation,
+            path: variation.path.slice(0, -1),
           }
           commitVariation(nextVariation)
         }
@@ -195,41 +206,41 @@ export function createReviewStore(): ReviewStore {
       if (!moves) return
       const ply = nextCriticalPly(moves, snapshot.currentPly)
       if (ply === null) return
-      commit({ currentPly: ply, variation: null })
+      commit({ currentPly: ply, selectedVariationId: null })
     },
     prevCritical() {
       const snapshot = state.getState()
       const moves = snapshot.result?.moves
       if (!moves) return
       const onCriticalBranch =
-        snapshot.variation !== null &&
+        selectActiveVariation(snapshot) !== null &&
         moves.some(
           (move) =>
             move.ply === snapshot.currentPly && isCritical(move.classification),
         )
       if (onCriticalBranch) {
-        commit({ variation: null })
+        commit({ selectedVariationId: null })
         return
       }
       const ply = previousCriticalPly(moves, snapshot.currentPly)
       if (ply === null) return
-      commit({ currentPly: ply, variation: null })
+      commit({ currentPly: ply, selectedVariationId: null })
     },
     first() {
-      commit({ currentPly: 0, variation: null })
+      commit({ currentPly: 0, selectedVariationId: null })
     },
     last() {
       const snapshot = state.getState()
       commit({
         currentPly: snapshot.result?.moves.length ?? 0,
-        variation: null,
+        selectedVariationId: null,
       })
     },
     makeMove(from, to, promotion = 'q') {
       const snapshot = state.getState()
       const result = snapshot.result
       if (!result) return false
-      const variation = snapshot.variation
+      const variation = selectActiveVariation(snapshot)
       const basePly = variation?.basePly ?? snapshot.currentPly
       const current = variation
         ? nodeAtPath(variation.roots, variation.path)
@@ -277,7 +288,7 @@ export function createReviewStore(): ReviewStore {
     exploreLine(pv) {
       const snapshot = state.getState()
       const result = snapshot.result
-      const active = snapshot.variation
+      const active = selectActiveVariation(snapshot)
       const basePly = active?.basePly ?? snapshot.currentPly
       const activeNode = active ? nodeAtPath(active.roots, active.path) : null
       const fen = activeNode?.fen ?? result?.positions[basePly]?.fen
@@ -346,7 +357,7 @@ export function createReviewStore(): ReviewStore {
       commitVariation(nextVariation)
     },
     exitVariation() {
-      commit({ variation: null })
+      commit({ selectedVariationId: null })
     },
     cancelLiveAnalysis() {
       const liveAnalysis = state.getState().liveAnalysis
@@ -400,11 +411,7 @@ export function createReviewStore(): ReviewStore {
         ...variation,
         roots: updateNodeClassification(variation.roots, nodeId, value),
       }))
-      const variation = snapshot.variation
-        ? (variations.find((item) => item.id === snapshot.variation?.id) ??
-          null)
-        : null
-      commit({ variations, variation })
+      commit({ variations })
     },
   }
 }

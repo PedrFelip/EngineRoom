@@ -13,15 +13,56 @@
 //! com `reached_depth >= P`; um pedido de time T só é servido por entries de
 //! time com `source_value >= T`. `lines_json` guarda as linhas candidatas no
 //! formato do frontend (`[{multipv, cp, pv, san, depth}]`).
+//!
+//! A PK `(fen, reached_depth, multipv)` coalesce entries. Numa colisão, uma
+//! entry de time com orçamento maior preserva sua proveniência contra uma
+//! busca mais fraca (depth ou time menor), desde que o payload existente
+//! continue consistente; rows corrompidas podem ser reparadas pela entry nova.
 
 use crate::db::{mode::Mode, DbState};
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 
 /// `INSERT OR REPLACE` compartilhado entre [`Cache::store`] e
 /// [`Cache::store_many`] — a PK `(fen, reached_depth, multipv)` coalesce.
 const INSERT_SQL: &str = "INSERT OR REPLACE INTO position_cache
     (fen, reached_depth, multipv, source_mode, source_value, cp, lines_json)
     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)";
+
+/// Lê a entry que colidiria com a PK antes de decidir se ela pode ser trocada.
+const EXISTING_SQL: &str = "SELECT source_mode, source_value, cp, lines_json
+    FROM position_cache
+    WHERE fen = ?1 AND reached_depth = ?2 AND multipv = ?3";
+
+/// `true` quando uma colisão trocaria uma proveniência de time mais longa por
+/// uma busca mais fraca: depth não carrega orçamento de tempo, e um time menor
+/// cobre menos pedidos. Orçamentos iguais ou maiores podem atualizar a row.
+fn weakens_timed_provenance(existing: &str, existing_value: i64, mode: Mode, value: u32) -> bool {
+    match (existing, mode) {
+        ("time", Mode::Depth) => true,
+        ("time", Mode::Time) => existing_value > i64::from(value),
+        _ => false,
+    }
+}
+
+/// Only preserve a timed row that can serve its advertised coverage and depth.
+fn payload_is_consistent(
+    fen: &str,
+    multipv: u32,
+    reached_depth: u32,
+    cp: i32,
+    lines_json: &str,
+) -> bool {
+    let hit = CachedPosition {
+        cp,
+        lines_json: lines_json.to_owned(),
+        reached_depth,
+    };
+    crate::review::repository::shape(hit, fen, multipv).is_some_and(|raw| {
+        raw.lines
+            .iter()
+            .all(|line| line.depth.unwrap_or(reached_depth) >= reached_depth)
+    })
+}
 
 /// Avaliação cacheada de uma posição. A chave (fen, reached_depth, multipv) é
 /// conhecida por quem consulta, então só o payload volta — incluindo
@@ -57,21 +98,31 @@ impl<'a> Cache<'a> {
         Self { conn }
     }
 
-    /// SQL da consulta covering por modo; os parâmetros (fen, value, multipv)
-    /// são idênticos nos dois modos, bindados em ?1, ?2, ?3.
+    /// SQL das entries covering por modo; os parâmetros (fen, value, multipv)
+    /// são idênticos nos dois modos, bindados em ?1, ?2, ?3. A ordem primária
+    /// preserva a cobertura (entry mais rasa em depth; menor orçamento em
+    /// time); os desempates só tornam a escolha determinística.
     fn lookup_sql(mode: Mode) -> &'static str {
         match mode {
             Mode::Time => {
                 "SELECT cp, lines_json, reached_depth FROM position_cache
                  WHERE fen = ?1 AND source_mode = 'time' AND source_value >= ?2 AND multipv >= ?3
-                 ORDER BY source_value ASC LIMIT 1"
+                 ORDER BY source_value ASC, reached_depth ASC, multipv ASC"
             }
             Mode::Depth => {
                 "SELECT cp, lines_json, reached_depth FROM position_cache
                  WHERE fen = ?1 AND reached_depth >= ?2 AND multipv >= ?3
-                 ORDER BY reached_depth ASC LIMIT 1"
+                 ORDER BY reached_depth ASC, multipv ASC, source_value ASC"
             }
         }
+    }
+
+    fn read_hit(row: &rusqlite::Row<'_>) -> rusqlite::Result<CachedPosition> {
+        Ok(CachedPosition {
+            cp: row.get(0)?,
+            lines_json: row.get(1)?,
+            reached_depth: row.get(2)?,
+        })
     }
 
     /// Executa a consulta covering num statement já preparado para o modo,
@@ -84,13 +135,26 @@ impl<'a> Cache<'a> {
     ) -> rusqlite::Result<Option<CachedPosition>> {
         let mut rows = stmt.query(rusqlite::params![fen, value, multipv])?;
         match rows.next()? {
-            Some(row) => Ok(Some(CachedPosition {
-                cp: row.get(0)?,
-                lines_json: row.get(1)?,
-                reached_depth: row.get(2)?,
-            })),
+            Some(row) => Ok(Some(Self::read_hit(row)?)),
             None => Ok(None),
         }
+    }
+
+    /// Todas as rows covering na ordem da consulta. O adapter percorre a lista
+    /// até a primeira que sobrevive à validação de payload e profundidades;
+    /// corrupção vira miss local, erro real do SQLite continua fatal.
+    fn query_candidates_with_stmt(
+        stmt: &mut rusqlite::Statement<'_>,
+        fen: &str,
+        value: u32,
+        multipv: u32,
+    ) -> rusqlite::Result<Vec<CachedPosition>> {
+        let mut rows = stmt.query(rusqlite::params![fen, value, multipv])?;
+        let mut hits = Vec::new();
+        while let Some(row) = rows.next()? {
+            hits.push(Self::read_hit(row)?);
+        }
+        Ok(hits)
     }
 
     /// Consulta covering: um pedido de depth P é coberto por qualquer entry com
@@ -125,6 +189,36 @@ impl<'a> Cache<'a> {
             .collect()
     }
 
+    /// Todas as rows covering de uma posição, na ordem de [`Cache::lookup`].
+    /// Usada pelo adapter para validar candidatos em sequência e só então
+    /// escolher a primeira entry utilizável.
+    #[cfg(test)]
+    pub fn lookup_candidates(
+        &self,
+        fen: &str,
+        mode: Mode,
+        value: u32,
+        multipv: u32,
+    ) -> rusqlite::Result<Vec<CachedPosition>> {
+        let mut stmt = self.conn.prepare(Self::lookup_sql(mode))?;
+        Self::query_candidates_with_stmt(&mut stmt, fen, value, multipv)
+    }
+
+    /// Versão em lote de [`Cache::lookup_candidates`]: um `Vec` por fen, na
+    /// mesma ordem de entrada e com o statement preparado uma única vez.
+    pub fn lookup_bulk_candidates(
+        &self,
+        fens: &[String],
+        mode: Mode,
+        value: u32,
+        multipv: u32,
+    ) -> rusqlite::Result<Vec<Vec<CachedPosition>>> {
+        let mut stmt = self.conn.prepare(Self::lookup_sql(mode))?;
+        fens.iter()
+            .map(|fen| Self::query_candidates_with_stmt(&mut stmt, fen, value, multipv))
+            .collect()
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn store(
         &self,
@@ -136,11 +230,13 @@ impl<'a> Cache<'a> {
         cp: i32,
         lines_json: &str,
     ) -> rusqlite::Result<()> {
-        self.conn.execute(
-            INSERT_SQL,
-            rusqlite::params![fen, reached_depth, multipv, mode, value, cp, lines_json],
-        )?;
-        Ok(())
+        let entry = CachedPositionPut {
+            fen: fen.to_owned(),
+            reached_depth,
+            cp,
+            lines_json: lines_json.to_owned(),
+        };
+        self.store_rows(std::iter::once((&entry, multipv)), mode, value)
     }
 
     /// Grava N entries numa única transação, com o statement preparado uma vez.
@@ -179,8 +275,35 @@ impl<'a> Cache<'a> {
     ) -> rusqlite::Result<()> {
         let tx = self.conn.unchecked_transaction()?;
         {
+            let mut existing = tx.prepare(EXISTING_SQL)?;
             let mut stmt = tx.prepare(INSERT_SQL)?;
             for (entry, multipv) in entries {
+                let current = existing
+                    .query_row(
+                        rusqlite::params![entry.fen, entry.reached_depth, multipv],
+                        |row| {
+                            Ok((
+                                row.get::<_, String>(0)?,
+                                row.get::<_, i64>(1)?,
+                                row.get::<_, i32>(2)?,
+                                row.get::<_, String>(3)?,
+                            ))
+                        },
+                    )
+                    .optional()?;
+                if let Some((current_mode, current_value, cp, lines_json)) = current {
+                    if weakens_timed_provenance(&current_mode, current_value, mode, value)
+                        && payload_is_consistent(
+                            &entry.fen,
+                            multipv,
+                            entry.reached_depth,
+                            cp,
+                            &lines_json,
+                        )
+                    {
+                        continue;
+                    }
+                }
                 stmt.execute(rusqlite::params![
                     entry.fen,
                     entry.reached_depth,

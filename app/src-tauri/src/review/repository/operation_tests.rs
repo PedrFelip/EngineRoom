@@ -194,16 +194,224 @@ fn history_conversion_preserves_metadata_fallback_and_decode_errors() {
         review_json,
     };
     let json = serde_json::to_string(&review).unwrap();
+    let mut custom_stored = stored(config.pgn.clone(), json.clone());
+    let custom_depth = (engine_policy().min_depth..=engine_policy().max_depth)
+        .find(|depth| {
+            engine_policy()
+                .tiers
+                .iter()
+                .all(|tier| tier.depth != *depth)
+        })
+        .unwrap();
+    custom_stored.summary.depth = custom_depth;
+    let custom = review_config(custom_stored).unwrap();
+    assert_eq!(custom.engine.depth, custom_depth);
+    assert_eq!(custom.engine.label, engine_policy().custom_label);
+    let mut timed_stored = stored(config.pgn.clone(), json.clone());
+    timed_stored.summary.mode = Mode::Time;
+    timed_stored.summary.depth = 1000;
+    let timed = review_config(timed_stored).unwrap();
+    assert_eq!(timed.engine.depth, engine_policy().default_depth);
+    assert_eq!(timed.movetime_ms, Some(1000));
     let current = review_config(stored(config.pgn, json.clone())).unwrap();
     assert_eq!(current.meta.white, "Alice");
     assert_eq!(
         serde_json::to_value(current.initial_result.unwrap()).unwrap(),
         serde_json::to_value(&review).unwrap()
     );
-    let fallback = review_config(stored("1. e5".into(), json)).unwrap();
-    assert_eq!(fallback.meta.white, "Legacy white");
-    assert_eq!(fallback.meta.black, "Legacy black");
+    let fallback = review_config(stored("1. e5".into(), json));
+    assert!(fallback.is_err());
     let error = review_config(stored("1. e4".into(), "{".into())).unwrap_err();
     assert_eq!(error.code, ReviewErrorCode::InvalidPayload);
     assert_eq!(error.operation, "games.decode");
+}
+
+fn raw_line(multipv: u32, cp: i32, depth: u32) -> crate::review::types::RawLine {
+    crate::review::types::RawLine {
+        unstable: false,
+        multipv,
+        cp,
+        pv: vec!["e2e4".into()],
+        san: None,
+        depth: Some(depth),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn store_candidate<R: tauri::Runtime>(
+    app: &tauri::App<R>,
+    fen: &str,
+    mode: Mode,
+    value: u32,
+    reached_depth: u32,
+    multipv: u32,
+    cp: i32,
+    lines: &[crate::review::types::RawLine],
+) {
+    let state = app.state::<DbState>();
+    let conn = state.0.lock().unwrap();
+    Cache::new(&conn)
+        .store(
+            fen,
+            mode,
+            value,
+            multipv,
+            reached_depth,
+            cp,
+            &serde_json::to_string(lines).unwrap(),
+        )
+        .unwrap();
+}
+
+#[tokio::test]
+async fn lookup_selects_first_valid_covering_candidate_and_rejects_all_invalid() {
+    let app = tauri::test::mock_builder()
+        .build(tauri::test::mock_context(tauri::test::noop_assets()))
+        .unwrap();
+    app.manage(DbState(std::sync::Mutex::new(
+        crate::db::open_memory().unwrap(),
+    )));
+    let repo = SqliteRepository::new(app.handle().clone());
+    let lines = |cp, depth, multipv| {
+        (1..=multipv)
+            .map(|slot| raw_line(slot, cp, depth))
+            .collect::<Vec<_>>()
+    };
+
+    // Corrupt shallower row, valid deeper row: the second candidate wins.
+    let corrupt = core::fen(&shakmaty::Chess::default());
+    store_candidate(
+        &app,
+        &corrupt,
+        Mode::Depth,
+        20,
+        20,
+        2,
+        40,
+        &lines(40, 20, 2),
+    );
+    {
+        let state = app.state::<DbState>();
+        let conn = state.0.lock().unwrap();
+        conn.execute(
+            "UPDATE position_cache SET lines_json = 'broken' WHERE reached_depth = 20",
+            [],
+        )
+        .unwrap();
+    }
+    store_candidate(
+        &app,
+        &corrupt,
+        Mode::Depth,
+        20,
+        30,
+        2,
+        60,
+        &lines(60, 30, 2),
+    );
+    let hit = repo
+        .lookup(std::slice::from_ref(&corrupt), Mode::Depth, 20, 2)
+        .await
+        .unwrap()[0]
+        .clone()
+        .unwrap();
+    assert_eq!(hit.cp, 60);
+    assert_eq!(hit.depth, 30);
+
+    // Incomplete shallower row (advertises more lines than it stores).
+    let incomplete = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1";
+    store_candidate(
+        &app,
+        incomplete,
+        Mode::Depth,
+        20,
+        20,
+        3,
+        40,
+        &lines(40, 20, 1),
+    );
+    store_candidate(
+        &app,
+        incomplete,
+        Mode::Depth,
+        20,
+        30,
+        2,
+        60,
+        &lines(60, 30, 2),
+    );
+    let hit = repo
+        .lookup(&[incomplete.into()], Mode::Depth, 20, 2)
+        .await
+        .unwrap()[0]
+        .clone()
+        .unwrap();
+    assert_eq!(hit.cp, 60, "candidato incompleto é ignorado");
+
+    // Insufficient per-line depth in the shallower row.
+    let shallow = "rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2";
+    store_candidate(&app, shallow, Mode::Depth, 20, 20, 2, 40, &lines(40, 10, 2));
+    store_candidate(&app, shallow, Mode::Depth, 20, 30, 2, 60, &lines(60, 30, 2));
+    let hit = repo
+        .lookup(&[shallow.into()], Mode::Depth, 20, 2)
+        .await
+        .unwrap()[0]
+        .clone()
+        .unwrap();
+    assert_eq!(hit.cp, 60, "profundidade insuficiente é ignorada");
+
+    // Time ordering follows the smaller covering budget first, then falls back.
+    let timed = "rnbqkbnr/pppppppp/8/8/3P4/8/PPP1PPPP/RNBQKBNR b KQkq - 0 1";
+    store_candidate(&app, timed, Mode::Time, 1000, 20, 2, 40, &lines(40, 20, 1));
+    store_candidate(&app, timed, Mode::Time, 2000, 25, 2, 60, &lines(60, 25, 2));
+    let hit = repo
+        .lookup(&[timed.into()], Mode::Time, 1000, 2)
+        .await
+        .unwrap()[0]
+        .clone()
+        .unwrap();
+    assert_eq!(hit.cp, 60, "candidato de tempo incompleto é ignorado");
+
+    // All candidates invalid: the position is a miss, not an error.
+    let invalid = "rnbqkbnr/pppppppp/8/8/3P4/8/PPP1PPPP/RNBQKBNR w KQkq - 0 2";
+    store_candidate(&app, invalid, Mode::Depth, 20, 20, 2, 40, &lines(40, 20, 1));
+    store_candidate(&app, invalid, Mode::Depth, 20, 30, 2, 60, &lines(60, 10, 2));
+    assert!(repo
+        .lookup(&[invalid.into()], Mode::Depth, 20, 2)
+        .await
+        .unwrap()[0]
+        .is_none());
+}
+
+#[test]
+fn restored_engine_uses_bundled_policy_for_presets_bounds_and_custom_depth() {
+    let policy = engine_policy();
+    for tier in &policy.tiers {
+        let restored = restored_engine(Mode::Depth, tier.depth);
+        assert_eq!(restored.id, tier.id);
+        assert_eq!(restored.label, tier.label);
+        assert_eq!(restored.hint, tier.hint);
+    }
+    assert_eq!(restored_engine(Mode::Depth, 0).depth, policy.min_depth);
+    assert_eq!(
+        restored_engine(Mode::Depth, u32::MAX).depth,
+        policy.max_depth
+    );
+    assert_eq!(
+        restored_engine(Mode::Time, 1234).depth,
+        policy.default_depth
+    );
+    let custom_depth = (policy.min_depth..=policy.max_depth)
+        .find(|depth| policy.tiers.iter().all(|tier| tier.depth != *depth))
+        .expect("policy must offer a custom depth for this test");
+    let custom = restored_engine(Mode::Depth, custom_depth);
+    assert_eq!(custom.id, "custom");
+    assert_eq!(custom.label, policy.custom_label);
+    assert_eq!(
+        custom.hint,
+        format!(
+            "{}{custom_depth}{}",
+            policy.custom_hint_prefix, policy.custom_hint_suffix
+        )
+    );
 }

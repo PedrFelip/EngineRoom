@@ -110,7 +110,7 @@ jobs:
         if: matrix.platform == 'ubuntu-22.04'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-alsa
 
       - uses: actions/setup-python@v5
         if: matrix.platform == 'ubuntu-22.04'
@@ -167,11 +167,13 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: app
           args: ${{ matrix.args }} -- --locked
 
-      - name: Verify AppImage host graphics compatibility
+      - name: Verify AppImage graphics and media inventory
         if: matrix.platform == 'ubuntu-22.04'
         run: python3 app/scripts/verify_appimage.py app/src-tauri/target/release/bundle/appimage/*.AppImage
 
@@ -191,7 +193,7 @@ jobs:
           RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
         run: |
           shopt -s nullglob
-          installers=(app/src-tauri/target/release/bundle/{appimage/*.AppImage,nsis/*.exe,msi/*.msi})
+          installers=(app/src-tauri/target/release/bundle/{appimage/*.AppImage,appimage/*.AppImage.sig,nsis/*.exe,nsis/*.exe.sig,msi/*.msi,msi/*.msi.sig})
           test "${#installers[@]}" -gt 0
           gh release upload "$RELEASE_TAG" "${installers[@]}" --clobber
 
@@ -238,6 +240,20 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Generate feed from signed installers
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+          RELEASE_REPOSITORY: ${{ github.repository }}
+        run: |
+          mkdir -p updater-signatures
+          gh release download "$RELEASE_TAG" --pattern '*.sig' --dir updater-signatures
+          gh release view "$RELEASE_TAG" --json tagName,body,createdAt,assets > updater-release.json
+          python .github/scripts/updater_manifest.py --release updater-release.json --signatures updater-signatures --output latest.json --repository "$RELEASE_REPOSITORY" --tag "$RELEASE_TAG"
+          gh release upload "$RELEASE_TAG" latest.json --clobber
       - name: Publish only with all installers present
         uses: actions/github-script@v7
         env:

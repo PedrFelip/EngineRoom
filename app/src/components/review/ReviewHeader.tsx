@@ -38,7 +38,7 @@ export default function ReviewHeader({
         <h1
           ref={titleRef}
           tabIndex={-1}
-          className='scroll-mt-24 truncate rounded text-xl font-semibold tracking-tight text-ink focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-brand sm:text-2xl'
+          className='navigation-focus-target scroll-mt-24 truncate rounded text-xl font-semibold tracking-tight text-ink sm:text-2xl'
         >
           {config.meta.white} <span className='text-ink-faint'>vs</span>{' '}
           {config.meta.black}
