@@ -85,7 +85,7 @@ jobs:
       - name: Install Rune headless dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libxkbcommon-dev libwayland-dev libx11-dev mesa-vulkan-drivers vulkan-tools
+          sudo apt-get install -y --no-install-recommends libxkbcommon-dev libwayland-dev libx11-dev libasound2-dev mesa-vulkan-drivers vulkan-tools
       - uses: dtolnay/rust-toolchain@stable
       - uses: swatinem/rust-cache@v2
         with:
