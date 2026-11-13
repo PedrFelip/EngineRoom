@@ -206,6 +206,7 @@ async fn automatic_worker_failure_closes_every_process_before_next_owner() {
 
 #[tokio::test]
 async fn real_sidecar_pool_holds_one_lease_until_all_processes_terminate() {
+    link_sidecar_beside_test_binary();
     let app = tauri::test::mock_builder()
         .plugin(tauri_plugin_shell::init())
         .build(tauri::test::mock_context(tauri::test::noop_assets()))

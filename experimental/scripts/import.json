@@ -1,0 +1,7 @@
+{"events":[
+  {"t":0.1,"type":"tap","key":"pgn-editor/scroll/input"},
+  {"t":0.3,"type":"type","text":"1. d4 d5 2. c4 e6 *"},
+  {"t":2.0,"type":"tap","key":"continue"},
+  {"t":2.5,"type":"tap","key":"start-review"},
+  {"t":3.0,"type":"key","name":"End"}
+]}

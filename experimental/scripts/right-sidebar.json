@@ -1,0 +1,10 @@
+{"events":[
+  {"t":0.1,"type":"tap","key":"move-11"},
+  {"t":0.2,"type":"tap","key":"review-tabs/segment1"},
+  {"t":0.4,"type":"drag","key":"review-sidebar-grip","dx":-40,"dy":0,"dur":0.2},
+  {"t":0.8,"type":"tap","key":"review-sidebar-grip"},
+  {"t":0.9,"type":"key","name":"Left"},
+  {"t":1.1,"type":"tap","key":"review-tabs/segment1"},
+  {"t":1.3,"type":"key","name":"b","base":"b","ctrl":true,"cmd":true,"alt":true},
+  {"t":1.7,"type":"key","name":"b","base":"b","ctrl":true,"cmd":true,"alt":true}
+]}

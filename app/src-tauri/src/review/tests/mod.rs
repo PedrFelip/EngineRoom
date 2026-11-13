@@ -28,6 +28,68 @@ mod pool;
 #[path = "repository.rs"]
 mod repository_tests;
 
+/// Places the Stockfish sidecar next to the current test executable, mirroring how
+/// the bundler places it beside the app binary in production. Rust 1.100 emits
+/// unittest binaries into `target/<profile>/build/<pkg>/<hash>/out/` instead of
+/// `deps/`, and `tauri-plugin-shell` resolves sidecars beside the current
+/// executable, so tests exercising the production spawn path need it adjacent.
+/// A missing fetched sidecar still fails those tests explicitly at spawn time.
+pub(crate) fn link_sidecar_beside_test_binary() {
+    let Ok(exe) = std::env::current_exe() else {
+        return;
+    };
+    let Some(exe_dir) = exe.parent() else {
+        return;
+    };
+    let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| ".".into());
+    let source = std::path::Path::new(&manifest)
+        .join("binaries")
+        .join(format!(
+            "stockfish-{}{}",
+            sidecar_target_triple(),
+            std::env::consts::EXE_SUFFIX,
+        ));
+    if !source.is_file() {
+        return;
+    }
+    let dest = exe_dir.join(format!("stockfish{}", std::env::consts::EXE_SUFFIX));
+    match std::fs::hard_link(&source, &dest) {
+        Ok(()) => return,
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => return,
+        Err(_) => {}
+    }
+    // Hard links can fail across filesystems; fall back to a copy with an
+    // atomic rename so concurrent tests never observe a partial file.
+    let tmp = exe_dir.join(format!("stockfish.link-{}", std::process::id()));
+    if std::fs::copy(&source, &tmp).is_ok() {
+        let _ = std::fs::rename(&tmp, &dest);
+    }
+}
+
+/// Same best-effort triple as `tests/engine_handshake.rs` (which lives in a
+/// separate integration-test binary and cannot share this module).
+fn sidecar_target_triple() -> String {
+    if let Some(triple) = option_env!("TAURI_ENV_TARGET_TRIPLE") {
+        if !triple.is_empty() {
+            return triple.to_string();
+        }
+    }
+    let arch = match std::env::consts::ARCH {
+        "x86_64" => "x86_64",
+        "x86" => "i686",
+        "aarch64" => "aarch64",
+        "arm" => "armv7",
+        other => other,
+    };
+    let os = match std::env::consts::OS {
+        "linux" => "unknown-linux-gnu",
+        "macos" => "apple-darwin",
+        "windows" => "pc-windows-msvc",
+        other => other,
+    };
+    format!("{arch}-{os}")
+}
+
 #[derive(Default)]
 pub(super) struct FakeState {
     pub(super) sent: Vec<String>,
