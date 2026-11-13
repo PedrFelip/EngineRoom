@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.3.4](https://github.com/PedrFelip/EngineRoom/compare/v2.3.3...v2.3.4) (2026-11-02)
+
+
+### Desempenho
+
+- **Revisão de partidas:** reduz o trabalho de gerenciamento de memória durante o processamento das análises e a montagem das revisões automáticas. Em benchmarks isolados, algumas operações alocaram até 43% menos memória; o ganho de tempo na análise com Stockfish depende do cenário. ([#54](https://github.com/PedrFelip/EngineRoom/pull/54))
+
 ## [2.3.3](https://github.com/PedrFelip/EngineRoom/compare/v2.3.2...v2.3.3) (2026-10-30)
 
 ### Correções
