@@ -285,6 +285,7 @@ async fn real_stockfish_sidecar_cache_history_reopen_and_live_cancellation() {
     use tauri::Manager;
     // Test the production shell plugin and raw stdout transport without a GUI.
     // Unlike the old handshake test, a missing sidecar must fail here.
+    crate::review::tests::link_sidecar_beside_test_binary();
     let app = tauri::test::mock_builder()
         .plugin(tauri_plugin_shell::init())
         .build(tauri::test::mock_context(tauri::test::noop_assets()))

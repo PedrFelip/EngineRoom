@@ -1,0 +1,24 @@
+[package]
+name = "engineroom-rune"
+version = "3.0.0-alpha.2"
+edition = "2024"
+license = "GPL-3.0-or-later"
+publish = false
+
+[dependencies]
+rfd = "0.15"
+rodio = "0.20"
+unicode-normalization = "0.1"
+blake3 = "1"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "gzip"] }
+directories = "6"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+engineroom-backend = { path = "../engineroom-backend" }
+engineroom-ui = { path = "../engineroom-ui" }
+tokio = { version = "1", features = ["rt-multi-thread", "sync"] }
+rune = { git = "https://github.com/anomalyco/rune", rev = "b726a4d152512e51821884506776c3bad6b11410", default-features = false }
+rune-kit = { git = "https://github.com/anomalyco/rune", rev = "b726a4d152512e51821884506776c3bad6b11410", default-features = false }
+rune-theme-opencode = { git = "https://github.com/anomalyco/rune", rev = "b726a4d152512e51821884506776c3bad6b11410" }
+pgn-reader = "0.29"
+shakmaty = "0.30"

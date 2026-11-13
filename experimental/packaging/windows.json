@@ -1,0 +1,36 @@
+{
+  "productName": "EngineRoom",
+  "identifier": "com.engineroom.rune",
+  "description": "Local chess game review with Stockfish",
+  "publisher": "EngineRoom",
+  "licenseFile": "../LICENSE",
+  "binaries": [
+    {
+      "path": "engineroom-rune",
+      "main": true
+    }
+  ],
+  "binariesDir": "target/release",
+  "outDir": "target/packages",
+  "externalBinaries": [
+    "../app/src-tauri/binaries/stockfish"
+  ],
+  "resources": [
+    "../LICENSE",
+    "../THIRD_PARTY_NOTICES.md",
+    "RUNE-LICENSE.txt",
+    "assets/IBMPlex-LICENSE.txt",
+    "assets/OCTICONS-LICENSE.txt"
+  ],
+  "formats": [
+    "nsis"
+  ],
+  "icons": [
+    "../app/src-tauri/icons/icon.ico"
+  ],
+  "nsis": {
+    "installMode": "currentUser",
+    "installerIcon": "../app/src-tauri/icons/icon.ico"
+  },
+  "name": "engineroom-rune"
+}

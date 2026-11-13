@@ -1,5 +1,60 @@
-use crate::db::mode::Mode;
 use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Mode {
+    Depth,
+    Time,
+}
+impl Mode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Depth => "depth",
+            Self::Time => "time",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MoveColor {
+    #[serde(rename = "w")]
+    White,
+    #[serde(rename = "b")]
+    Black,
+}
+impl MoveColor {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::White => "w",
+            Self::Black => "b",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SearchPurpose {
+    Playback,
+    Refinement,
+}
+// Existing pipeline constructs these two fixed values at the search boundary.
+impl From<&str> for SearchPurpose {
+    fn from(value: &str) -> Self {
+        match value {
+            "playback" => Self::Playback,
+            "refinement" => Self::Refinement,
+            _ => panic!("unknown search purpose: {value}"),
+        }
+    }
+}
+impl PartialEq<&str> for SearchPurpose {
+    fn eq(&self, other: &&str) -> bool {
+        matches!(
+            (self, *other),
+            (Self::Playback, "playback") | (Self::Refinement, "refinement")
+        )
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -140,7 +195,7 @@ pub struct RawPosition {
 #[serde(rename_all = "camelCase")]
 pub struct PlayedMove {
     pub ply: usize,
-    pub color: String,
+    pub color: MoveColor,
     pub san: String,
     pub uci: String,
     pub fen_before: String,
@@ -178,7 +233,7 @@ pub struct PvLine {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Search {
-    pub purpose: String,
+    pub purpose: SearchPurpose,
     pub movetime_ms: u32,
     pub multipv: u32,
 }
@@ -427,6 +482,29 @@ mod error_tests {
             .unwrap();
             assert_eq!(payload["error"], expected);
         }
+    }
+
+    #[test]
+    fn chess_enums_preserve_wire_values_and_reject_unknown_values() {
+        for (color, value) in [(MoveColor::White, "w"), (MoveColor::Black, "b")] {
+            assert_eq!(serde_json::to_value(color).unwrap(), value);
+            assert_eq!(
+                serde_json::from_value::<MoveColor>(value.into()).unwrap(),
+                color
+            );
+        }
+        for (purpose, value) in [
+            (SearchPurpose::Playback, "playback"),
+            (SearchPurpose::Refinement, "refinement"),
+        ] {
+            assert_eq!(serde_json::to_value(purpose).unwrap(), value);
+            assert_eq!(
+                serde_json::from_value::<SearchPurpose>(value.into()).unwrap(),
+                purpose
+            );
+        }
+        assert!(serde_json::from_str::<MoveColor>("\"white\"").is_err());
+        assert!(serde_json::from_str::<SearchPurpose>("\"unknown\"").is_err());
     }
 
     #[test]

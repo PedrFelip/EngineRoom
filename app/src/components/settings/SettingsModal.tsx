@@ -10,21 +10,14 @@ import {
 import { useEffect, useRef, useState } from 'react'
 import { useStore } from 'zustand'
 import { version } from '../../../package.json'
-import { runUi } from '../../lib/effect/ui-runtime'
-import { type ProbeResult, probeEngine } from '../../lib/engine'
-import { clearGames } from '../../lib/games'
-import {
-  clearCache,
-  formatBytes,
-  getStorageStats,
-  type StorageStats,
-} from '../../lib/storage'
+import { formatBytes } from '../../lib/storage'
 import { updatesStore } from '../../lib/updates-store'
 import { useModalFocus } from '../../lib/use-modal-focus'
 import { Button } from '../ui/button'
 import { SegmentedControl } from '../ui/segmented-control'
 import ReviewEngineSettings from './ReviewEngineSettings'
 import SettingsPreferences from './SettingsPreferences'
+import { useSettingsController } from './use-settings-controller'
 
 interface Props {
   open: boolean
@@ -44,30 +37,19 @@ export default function SettingsModal({
   const [section, setSection] = useState('preferences')
   const dialogRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
-  const [testing, setTesting] = useState(false)
-  const [result, setResult] = useState<ProbeResult | null>(null)
-  const [stats, setStats] = useState<StorageStats | null>(null)
+  const {
+    testing,
+    result,
+    stats,
+    acting,
+    storageError,
+    test,
+    runClearCache,
+    runClearGames,
+  } = useSettingsController(isOpen, onGamesCleared, () =>
+    setConfirmTarget(null),
+  )
   const [confirmTarget, setConfirmTarget] = useState<ConfirmTarget | null>(null)
-  const [acting, setActing] = useState(false)
-  const [storageError, setStorageError] = useState<string | null>(null)
-  const probeController = useRef<AbortController | null>(null)
-
-  useEffect(() => {
-    if (!isOpen) return
-    const controller = new AbortController()
-    setStorageError(null)
-    runUi(getStorageStats(), controller.signal)
-      .then((s) => !controller.signal.aborted && setStats(s))
-      .catch((e) => {
-        if (controller.signal.aborted) return
-        console.warn('Falha ao ler armazenamento:', e)
-        setStorageError('Não foi possível ler o tamanho.')
-      })
-    return () => {
-      controller.abort()
-      probeController.current?.abort()
-    }
-  }, [isOpen])
 
   const cancelRef = useRef<HTMLButtonElement>(null)
   const clearCacheRef = useRef<HTMLButtonElement>(null)
@@ -85,8 +67,6 @@ export default function SettingsModal({
   useEffect(() => {
     if (!isOpen) return
     setConfirmTarget(null)
-    setResult(null)
-    setStats(null)
   }, [isOpen])
 
   useEffect(() => {
@@ -101,66 +81,6 @@ export default function SettingsModal({
   }, [confirmTarget, isOpen])
 
   if (!isOpen) return null
-
-  async function test() {
-    const controller = new AbortController()
-    probeController.current?.abort()
-    probeController.current = controller
-    setTesting(true)
-    setResult(null)
-    try {
-      const res = await runUi(probeEngine(), controller.signal)
-      if (!controller.signal.aborted) setResult(res)
-    } catch (error) {
-      if (!controller.signal.aborted) {
-        setResult({ ok: false, name: null, error: String(error) })
-      }
-    } finally {
-      if (probeController.current === controller) {
-        probeController.current = null
-        setTesting(false)
-      }
-    }
-  }
-
-  async function refreshStats() {
-    try {
-      setStats(await runUi(getStorageStats()))
-    } catch (e) {
-      console.warn('Falha ao reler armazenamento:', e)
-    }
-  }
-
-  async function runClearCache() {
-    setActing(true)
-    try {
-      await runUi(clearCache())
-      await refreshStats()
-      setStorageError(null)
-    } catch (e) {
-      console.warn('Falha ao limpar cache:', e)
-      setStorageError('Falha ao limpar o cache.')
-    } finally {
-      setActing(false)
-      setConfirmTarget(null)
-    }
-  }
-
-  async function runClearGames() {
-    setActing(true)
-    try {
-      await runUi(clearGames())
-      await refreshStats()
-      onGamesCleared?.()
-      setStorageError(null)
-    } catch (e) {
-      console.warn('Falha ao limpar histórico:', e)
-      setStorageError('Falha ao limpar o histórico.')
-    } finally {
-      setActing(false)
-      setConfirmTarget(null)
-    }
-  }
 
   return (
     <div className='fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4'>

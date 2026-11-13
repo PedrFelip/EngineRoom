@@ -1,0 +1,11 @@
+{"events":[
+  {"t":0.1,"type":"tap","key":"settings-nav"},
+  {"t":0.5,"type":"tap","key":"appearance/segment1"},
+  {"t":0.9,"type":"tap","key":"sound"},
+  {"t":1.3,"type":"tap","key":"reduce-motion"},
+  {"t":1.7,"type":"tap","key":"settings-tabs/segment1"},
+  {"t":2.1,"type":"tap","key":"live-engine"},
+  {"t":2.5,"type":"tap","key":"feedback"},
+  {"t":2.9,"type":"tap","key":"lines-trigger"},
+  {"t":3.3,"type":"tap","key":"option4"}
+]}

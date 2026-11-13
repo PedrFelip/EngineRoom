@@ -9,24 +9,7 @@
 
 use rusqlite::types::{FromSql, FromSqlError, ToSql, ToSqlOutput, ValueRef};
 
-/// Modo de análise. Serializa como `"depth"`/`"time"` (lowercase) no wire JSON
-/// do Tauri e como TEXT no SQLite.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Mode {
-    Depth,
-    Time,
-}
-
-impl Mode {
-    /// String canônica usada nas colunas TEXT do SQLite (`"depth"`/`"time"`).
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Mode::Depth => "depth",
-            Mode::Time => "time",
-        }
-    }
-}
+pub use crate::review::types::Mode;
 
 impl ToSql for Mode {
     fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {

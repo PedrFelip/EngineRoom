@@ -31,6 +31,7 @@ import ReviewLiveStatus from './ReviewLiveStatus'
 import ReviewLoading from './ReviewLoading'
 import { PlayerTag, ReviewNavButton } from './ReviewNavigation'
 import ReviewSidebar from './ReviewSidebar'
+import { useLinePlayback } from './use-line-playback'
 
 interface ReviewScreenProps {
   config: ReviewConfig
@@ -42,7 +43,6 @@ const ANALYSIS_ARROW_BRUSHES = [
   'analysisBlueMedium',
   'analysisBlueFaint',
 ] as const
-const EXPLORE_STEP_MS = 650
 
 function uciToSquares(uci: string): [string, string] | null {
   if (uci.length < 4) return null
@@ -63,70 +63,8 @@ export default function ReviewScreen({ config, onExit }: ReviewScreenProps) {
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
   const [analysisModalOpen, setAnalysisModalOpen] = useState(false)
   const closeAnalysisModal = useCallback(() => setAnalysisModalOpen(false), [])
-  const [isExploringLine, setIsExploringLine] = useState(false)
-  const exploreTimerRef = useRef<number | null>(null)
-
-  const stopExplorePlayback = useCallback(
-    (endPlaybackAnalysis = true) => {
-      if (exploreTimerRef.current !== null) {
-        window.clearTimeout(exploreTimerRef.current)
-        exploreTimerRef.current = null
-      }
-      setIsExploringLine(false)
-      if (endPlaybackAnalysis) review.endPlaybackAnalysis()
-    },
-    [review.endPlaybackAnalysis],
-  )
-
-  const exploreLineSlowly = useCallback(
-    (pv: string[]) => {
-      stopExplorePlayback(false)
-      review.startPlaybackAnalysis()
-      setIsExploringLine(true)
-      const path = review.exploreLine(pv)
-      const variation = review.store.getState().variation
-      if (!variation || path.length === 0) {
-        stopExplorePlayback()
-        return
-      }
-      let cursor = variation.path.length
-      let remainingMoves = path.length - cursor
-      const advance = () => {
-        review.goToVariation(variation.id, path.slice(0, ++cursor))
-        remainingMoves--
-        if (remainingMoves === 0) {
-          exploreTimerRef.current = null
-          setIsExploringLine(false)
-          review.endPlaybackAnalysis()
-          return
-        }
-        exploreTimerRef.current = window.setTimeout(advance, EXPLORE_STEP_MS)
-      }
-      if (remainingMoves > 0) {
-        exploreTimerRef.current = window.setTimeout(advance, EXPLORE_STEP_MS)
-      } else {
-        setIsExploringLine(false)
-        review.endPlaybackAnalysis()
-      }
-    },
-    [
-      review.exploreLine,
-      review.store,
-      review.goToVariation,
-      review.startPlaybackAnalysis,
-      review.endPlaybackAnalysis,
-      stopExplorePlayback,
-    ],
-  )
-
-  useEffect(
-    () => () => {
-      if (exploreTimerRef.current !== null) {
-        window.clearTimeout(exploreTimerRef.current)
-      }
-    },
-    [],
-  )
+  const { isExploringLine, stopExplorePlayback, exploreLineSlowly } =
+    useLinePlayback(review)
 
   useEffect(() => {
     if (status !== 'running') return

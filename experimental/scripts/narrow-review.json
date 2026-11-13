@@ -1,0 +1,5 @@
+{"events":[
+  {"t":0.1,"type":"tap","key":"compact-review-tabs/segment1"},
+  {"t":0.6,"type":"wheel","key":"review-panel-scroll","dy":-400},
+  {"t":1.1,"type":"tap","key":"move-16"}
+]}

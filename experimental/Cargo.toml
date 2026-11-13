@@ -1,0 +1,17 @@
+[workspace]
+members = [
+    "crates/engineroom-backend",
+    "crates/engineroom-domain",
+    "crates/engineroom-application",
+    "crates/engineroom-rune",
+    "crates/engineroom-ui",
+    "crates/engineroom-sqlite",
+    "crates/engineroom-uci",
+]
+default-members = ["crates/engineroom-rune"]
+resolver = "2"
+
+[profile.dev]
+debug = 0
+# Rune performs layout and scene construction on the UI thread, including in dev.
+opt-level = 1
