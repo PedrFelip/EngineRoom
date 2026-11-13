@@ -1,6 +1,6 @@
 [package]
 name = "engineroom-rune"
-version = "3.0.0-alpha.1"
+version = "3.0.0-alpha.2"
 edition = "2024"
 license = "GPL-3.0-or-later"
 publish = false

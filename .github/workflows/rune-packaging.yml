@@ -2,6 +2,11 @@ name: Rune installers (manual)
 
 on:
   workflow_dispatch:
+  pull_request:
+    branches: [develop]
+    paths:
+      - experimental/crates/engineroom-rune/Cargo.toml
+      - .github/workflows/rune-packaging.yml
 
 permissions:
   contents: read
@@ -30,7 +35,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential pkg-config libasound2-dev libudev-dev libxkbcommon-dev libwayland-dev libegl1-mesa-dev libvulkan-dev mesa-vulkan-drivers patchelf file squashfs-tools xvfb libfuse2t64
+          sudo apt-get install -y build-essential pkg-config libasound2-dev libudev-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libegl1-mesa-dev libvulkan-dev mesa-vulkan-drivers patchelf file squashfs-tools xvfb libfuse2t64
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: experimental

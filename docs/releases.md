@@ -260,7 +260,7 @@ cargo install cargo-packager --version 0.11.8 --locked
 ```
 
 No Linux, use um ambiente de build Ubuntu 22.04/24.04 com compilador C/C++,
-pkg-config, libasound2-dev, libudev-dev, libxkbcommon-dev, libwayland-dev,
+pkg-config, libasound2-dev, libudev-dev, libxkbcommon-dev, libxkbcommon-x11-dev, libwayland-dev,
 libegl1-mesa-dev, libvulkan-dev, libvulkan1, mesa-vulkan-drivers, patchelf,
 file, squashfs-tools e libfuse2 (Ubuntu 24.04: libfuse2t64). Para o smoke test, mantenha um display X11/Wayland
 ativo (CI: `xvfb-run -a python3 scripts/package.py`). O driver Vulkan do host

@@ -940,7 +940,7 @@ dependencies = [
 
 [[package]]
 name = "engineroom-rune"
-version = "3.0.0-alpha.1"
+version = "3.0.0-alpha.2"
 dependencies = [
  "blake3",
  "directories",
