@@ -17,7 +17,7 @@ static SIDEBAR_EXPAND: Icon = Icon {
     view: 16.0,
     body: concat!(
         "<g fill=\"currentColor\" stroke=\"none\">",
-        include_str!("../../../../../../assets/sidebar-expand-16.svg"),
+        include_str!("../../../../assets/sidebar-expand-16.svg"),
         "</g>"
     ),
 };
@@ -26,7 +26,7 @@ static SIDEBAR_COLLAPSE: Icon = Icon {
     view: 16.0,
     body: concat!(
         "<g fill=\"currentColor\" stroke=\"none\">",
-        include_str!("../../../../../../assets/sidebar-collapse-16.svg"),
+        include_str!("../../../../assets/sidebar-collapse-16.svg"),
         "</g>"
     ),
 };

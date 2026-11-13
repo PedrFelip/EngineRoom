@@ -174,6 +174,7 @@ mod tests {
         fs::create_dir_all(&binaries).expect("create sidecar dir");
         let exe = root.join("install/app");
         let manifest = root.join("experimental");
+        fs::create_dir_all(&manifest).expect("create experimental workspace");
         assert!(
             resolve_stockfish(None, &exe, &manifest, true, true).is_err(),
             "nothing to resolve before the sidecar exists"
@@ -181,7 +182,10 @@ mod tests {
         let sidecar = binaries.join("stockfish-x86_64-pc-windows-msvc.exe");
         fs::write(&sidecar, "sidecar").expect("write sidecar");
         assert_eq!(
-            resolve_stockfish(None, &exe, &manifest, true, true).expect("sidecar"),
+            resolve_stockfish(None, &exe, &manifest, true, true)
+                .expect("sidecar")
+                .canonicalize()
+                .expect("canonical sidecar"),
             sidecar
         );
         assert!(

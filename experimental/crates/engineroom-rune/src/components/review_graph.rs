@@ -580,7 +580,7 @@ mod tests {
         assert_eq!(black.visible_status(), "Pretas");
         assert_eq!(
             black.accessible_label(),
-            "Avaliação -1.42, vantagem das pretas"
+            "Avaliação −1.42, vantagem das pretas"
         );
 
         let mate = Evaluation::Scored {

@@ -1,5 +1,6 @@
 //! Shared EngineRoom theme and reusable Rune UI primitives.
 
+pub mod icons;
 mod primitives;
 mod theme;
 
