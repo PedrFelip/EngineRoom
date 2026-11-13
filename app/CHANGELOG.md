@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.4.0](https://github.com/PedrFelip/EngineRoom/compare/v2.3.4...v2.4.0) (2026-11-13)
+
+
+### Funcionalidades
+
+* **experimental:** WIP frontend desktop com Rune ([#76](https://github.com/PedrFelip/EngineRoom/issues/76)) ([e213b1a](https://github.com/PedrFelip/EngineRoom/commit/e213b1aa3f050eb787636a5e4d2c36039e6a33f7))
+
 ## [2.3.4](https://github.com/PedrFelip/EngineRoom/compare/v2.3.3...v2.3.4) (2026-11-02)
 
 
