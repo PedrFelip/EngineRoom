@@ -1,10 +1,11 @@
 # AGENTS.md
 
-Tauri 2 desktop app (Rust + React 19) that reviews chess games locally with Stockfish 19. The root `README.md` is the canonical feature/architecture overview; `app/README.md` is template boilerplate.
+Tauri 2 desktop app (Rust + React 19) that reviews chess games locally with Stockfish 19. The root `README.md` is the canonical feature/architecture overview. The Rune experiment in `experimental/` is CI-gated (`rune` job in `.github/workflows/checks.yml`: fmt, clippy, workspace tests, headless captures) and will replace the Tauri app — see `docs/rune-migration-plan.md` and `docs/rune-release-plan.md`.
 
 ## Working directory and setup
 
-- Run frontend/Tauri commands from `app/`; Rust commands from `app/src-tauri/`.
+- Run frontend/Tauri commands from `app/`; Rust commands from `app/src-tauri/`. Rune experiment commands from `experimental/` (`cargo run --locked`, `./scripts/check-headless.sh`).
+- Real-sidecar session tests call `link_sidecar_beside_test_binary()` first: Rust 1.100+ emits unittest binaries into `target/<profile>/build/<pkg>/<hash>/out/`, and the shell plugin resolves sidecars beside the executable, so the helper links the fetched `binaries/stockfish-<triple>` there at test start. Do not remove it or replace the production `.sidecar("stockfish")` spawn with a fixed path.
 - First setup: `bun install`, then `node scripts/fetch-stockfish.mjs` from `app/`.
 - The gitignored sidecar is `src-tauri/binaries/stockfish-<triple>`. The real Rust session test fails if it cannot spawn the bundled sidecar; do not report it as verified when only the old handshake test skipped.
 - `bun run tauri dev` starts Vite through `beforeDevCommand`; do not start a second Vite on strict port 1420. `bun run dev` alone is browser-only, without the Rust IPC backend.

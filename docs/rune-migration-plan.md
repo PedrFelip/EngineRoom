@@ -33,7 +33,10 @@ Enquanto isso não for verdade, `app/` continua sendo o app publicado.
 
 - **[decidir]** Nome final do produto/pasta: mantém "EngineRoom" e só troca o
   motor de UI, ou também renomeia o app? Isso afeta app id, ícones, nome do
-  instalador e possivelmente o nome do repositório.
+  instalador e possivelmente o nome do repositório. **Resolvido em
+  13/11/2026:** mantém "EngineRoom" e todo o app Rune passa a viver na raiz do
+  repositório (sem subpasta própria). Detalhes de empacotamento e release em
+  [rune-release-plan.md](rune-release-plan.md).
 - **[decidir]** Plataformas-alvo da primeira release do Rune: só Linux
   primeiro (onde já roda e tem CI de AppImage), com Windows/macOS depois, ou
   as três de uma vez como hoje?
@@ -48,7 +51,8 @@ Enquanto isso não for verdade, `app/` continua sendo o app publicado.
   durante a transição, evitar o nome `app/` para não colidir com o Tauri.
 - Atualizar `README.md` raiz, `AGENTS.md`, scripts (`check-headless.sh`,
   `check-responsive.sh`, `check-review-matrix.py`) e variáveis de ambiente
-  (`ENGINE_ROOM_STOCKFISH`) para os novos caminhos.
+  (`ENGINE_ROOM_STOCKFISH`) para os novos caminhos. Alvo decidido: raiz do
+  repositório (ver [rune-release-plan.md](rune-release-plan.md)).
 - Manter a seção do README raiz explicando que `app/` está em descontinuação
   e será removido quando o Rune atingir os critérios da Fase 0.
 
