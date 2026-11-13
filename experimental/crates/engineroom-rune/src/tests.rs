@@ -1301,3 +1301,53 @@ fn text_file_drop_accepts_extension_and_rejects_other_formats() {
             .is_some_and(|error| error.contains(".txt"))
     );
 }
+
+#[test]
+fn analysis_glare_only_animates_while_running_and_motion_is_enabled() {
+    let mut rt = runtime();
+    rt.state.page = Page::Review;
+    rt.state.real_result = None;
+    rt.state.real_progress = Some((3, 17));
+    rt.invalidate();
+    rt.frame(0.0);
+    assert!(
+        rt.find("glare-strip-0").is_some(),
+        "running analysis has a text sweep"
+    );
+
+    rt.state.preferences.reduced_motion = true;
+    rt.invalidate();
+    rt.frame(0.0);
+    assert!(
+        rt.find("glare-strip-0").is_none(),
+        "reduced motion removes the sweep"
+    );
+
+    rt.state.preferences.reduced_motion = false;
+    rt.state.real_progress = None;
+    rt.invalidate();
+    rt.frame(0.0);
+    assert!(
+        rt.find("glare-strip-0").is_none(),
+        "idle analysis has no sweep"
+    );
+}
+
+#[test]
+fn board_candidate_roots_match_playable_lines() {
+    let mut state = State::fixture();
+    for ply in 0..=state.game.moves.len() {
+        state.go_to(ply);
+        let expected: Vec<_> = state
+            .candidates()
+            .iter()
+            .take(state.preferences.lines)
+            .map(|line| line.moves.first().copied())
+            .collect();
+        assert_eq!(
+            state.candidate_roots(),
+            expected,
+            "candidate roots at ply {ply}"
+        );
+    }
+}

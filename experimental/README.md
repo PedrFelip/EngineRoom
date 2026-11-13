@@ -197,3 +197,17 @@ limitações, veja [strobe-study.md](strobe-study.md).
 
 Para cenários Strobe com uma partida histórica, Stockfish real, cache SQLite
 isolado e abertura da janela nativa, veja [real-game-strobe.md](real-game-strobe.md).
+
+### Perfil da interface
+
+`./scripts/profile-sidebar.sh` mede redimensionamento com revisão curta, partida de
+200 meios-lances e análise em andamento. Executa três capturas por cena em release,
+com logs de tempo de frame e PNGs em `artifacts/sidebar-profile/`. O primeiro frame
+inclui inicialização; use os percentis dos frames seguintes para avaliar interação.
+São medidas headless de CPU, não latência de apresentação da janela ou análise Stockfish.
+
+O perfil de desenvolvimento usa otimização nível 1, mantendo assertions, para que
+layout e construção da cena Rune não rodem sem otimização durante `cargo run`.
+A lista usa uma única linha interativa por lance; setas resolvem somente raízes e
+o painel Análise expande apenas a continuação selecionada. Não há cache de subárvores
+ou de dados derivados nesses caminhos; o tema é construído por renderização.

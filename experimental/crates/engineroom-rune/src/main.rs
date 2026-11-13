@@ -20,7 +20,7 @@ use rune::{AppSpec, Cx, El};
 use state::{Appearance, ImportSource, Page, Profile, SettingsSection, State};
 fn view(s: &State, cx: &mut Cx<State>) -> El {
     cx.reduced_motion(s.preferences.reduced_motion);
-    let k = theme::kit(s.preferences.appearance);
+    let k = &theme::kit(s.preferences.appearance);
     let mut layers = Vec::new();
     let shell_size = cx.layout_size("shell").unwrap_or([1220.0, 900.0]);
     let review_size = [
@@ -292,6 +292,13 @@ fn spec() -> AppSpec<State> {
                 s.page = Page::Review;
                 s.go_to(11);
                 s.sidebar.set_open(false);
+            }),
+            ("review-long", |s| {
+                *s = State::fixture();
+                s.page = Page::Review;
+                let pgn = format!("{} *", "Nf3 Nf6 Ng1 Ng8 ".repeat(50));
+                s.game = game::parse(&pgn).expect("long headless game is legal");
+                s.real_result = None;
             }),
             ("demo-progress", |s| {
                 *s = State::fixture();

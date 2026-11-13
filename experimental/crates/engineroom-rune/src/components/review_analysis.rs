@@ -42,7 +42,7 @@ pub fn view(s: &State, k: &Kit) -> El {
                 .w_full(),
             );
     }
-    let lines = s.candidates();
+    let lines = s.candidate_previews();
     let mut content =
         col()
             .gap(12.0)

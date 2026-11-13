@@ -32,26 +32,29 @@ static SIDEBAR_COLLAPSE: Icon = Icon {
 };
 
 fn panel_toggle(s: &State, k: &Kit) -> El {
-    IconButton::new(if s.review_sidebar.is_open() {
-        &SIDEBAR_COLLAPSE
-    } else {
-        &SIDEBAR_EXPAND
-    })
-    .variant(IconButtonVariant::GhostMuted)
-    .control_size(ControlSize::ExtraLarge)
-    .label(if s.review_sidebar.is_open() {
-        "Ocultar painéis da revisão"
-    } else {
-        "Mostrar painéis da revisão"
-    })
-    .help(if s.review_sidebar.is_open() {
-        "Ocultar painéis da revisão"
-    } else {
-        "Mostrar painéis da revisão"
-    })
-    .shortcut("Ctrl+Alt+B")
-    .expanded(s.review_sidebar.is_open())
-    .build(k)
+    ui::icon_feedback(
+        IconButton::new(if s.review_sidebar.is_open() {
+            &SIDEBAR_COLLAPSE
+        } else {
+            &SIDEBAR_EXPAND
+        })
+        .variant(IconButtonVariant::GhostMuted)
+        .control_size(ControlSize::ExtraLarge)
+        .label(if s.review_sidebar.is_open() {
+            "Ocultar painéis da revisão"
+        } else {
+            "Mostrar painéis da revisão"
+        })
+        .help(if s.review_sidebar.is_open() {
+            "Ocultar painéis da revisão"
+        } else {
+            "Mostrar painéis da revisão"
+        })
+        .shortcut("Ctrl+Alt+B")
+        .expanded(s.review_sidebar.is_open())
+        .build(k),
+        k,
+    )
     .key("focus-board")
     .on_press(|s: &mut State| s.review_sidebar.toggle())
 }
@@ -159,20 +162,23 @@ fn playback(s: &State, k: &Kit) -> El {
                icon: &'static Icon,
                disabled: bool,
                action: fn(&mut State)| {
-        IconButton::new(icon)
-            .variant(IconButtonVariant::GhostMuted)
-            .control_size(ControlSize::Large)
-            .label(label)
-            .help(label)
-            .shortcut(shortcut)
-            .disabled(disabled)
-            .on_press_tx(move |s: &mut State, tx| {
-                action(s);
-                crate::reveal_move(s, tx);
-            })
-            .build(k)
-            .key(key)
-            .size(32.0, 32.0)
+        ui::icon_feedback(
+            IconButton::new(icon)
+                .variant(IconButtonVariant::GhostMuted)
+                .control_size(ControlSize::Large)
+                .label(label)
+                .help(label)
+                .shortcut(shortcut)
+                .disabled(disabled)
+                .on_press_tx(move |s: &mut State, tx| {
+                    action(s);
+                    crate::reveal_move(s, tx);
+                })
+                .build(k),
+            k,
+        )
+        .key(key)
+        .size(32.0, 32.0)
     };
     row()
         .key("playback")
@@ -237,47 +243,56 @@ fn playback(s: &State, k: &Kit) -> El {
                 )),
         )
         .child(
-            IconButton::new(&FLIP)
-                .variant(IconButtonVariant::GhostMuted)
-                .control_size(ControlSize::Large)
-                .label("Girar tabuleiro")
-                .help("Girar tabuleiro")
-                .shortcut("F")
-                .on_press(|s: &mut State| s.flipped = !s.flipped)
-                .build(k)
-                .key("flip")
-                .checked(s.flipped)
-                .size(32.0, 32.0),
+            ui::icon_feedback(
+                IconButton::new(&FLIP)
+                    .variant(IconButtonVariant::GhostMuted)
+                    .control_size(ControlSize::Large)
+                    .label("Girar tabuleiro")
+                    .help("Girar tabuleiro")
+                    .shortcut("F")
+                    .on_press(|s: &mut State| s.flipped = !s.flipped)
+                    .build(k),
+                k,
+            )
+            .key("flip")
+            .checked(s.flipped)
+            .size(32.0, 32.0),
         )
         .children(s.active_variation.map(|_| {
-            IconButton::new(&super::icons::RETURN)
-                .variant(IconButtonVariant::GhostMuted)
-                .control_size(ControlSize::Large)
-                .label("Voltar à partida")
-                .help("Voltar à partida")
-                .on_press_tx(|s: &mut State, tx| {
-                    s.selected_square = None;
-                    s.go_to(s.ply);
-                    crate::reveal_move(s, tx);
-                })
-                .build(k)
-                .key("return-mainline")
-                .size(32.0, 32.0)
+            ui::icon_feedback(
+                IconButton::new(&super::icons::RETURN)
+                    .variant(IconButtonVariant::GhostMuted)
+                    .control_size(ControlSize::Large)
+                    .label("Voltar à partida")
+                    .help("Voltar à partida")
+                    .on_press_tx(|s: &mut State, tx| {
+                        s.selected_square = None;
+                        s.go_to(s.ply);
+                        crate::reveal_move(s, tx);
+                    })
+                    .build(k),
+                k,
+            )
+            .key("return-mainline")
+            .size(32.0, 32.0)
         }))
         .children(s.active_variation.map(|_| {
-            IconButton::new(if s.playing {
-                &super::icons::PAUSE
-            } else {
-                &super::icons::PLAY
-            })
-            .variant(IconButtonVariant::GhostMuted)
-            .control_size(ControlSize::Large)
-            .label(if s.playing { "Pausar" } else { "Reproduzir" })
-            .on_press_tx(|s: &mut State, tx| {
-                s.toggle_playback();
-                tx.wake_after(std::time::Duration::from_millis(50));
-            })
-            .build(k)
+            ui::icon_feedback(
+                IconButton::new(if s.playing {
+                    &super::icons::PAUSE
+                } else {
+                    &super::icons::PLAY
+                })
+                .variant(IconButtonVariant::GhostMuted)
+                .control_size(ControlSize::Large)
+                .label(if s.playing { "Pausar" } else { "Reproduzir" })
+                .on_press_tx(|s: &mut State, tx| {
+                    s.toggle_playback();
+                    tx.wake_after(std::time::Duration::from_millis(50));
+                })
+                .build(k),
+                k,
+            )
             .key("pause-variation")
             .size(32.0, 32.0)
         }))
@@ -388,8 +403,8 @@ fn learning(s: &State, k: &Kit) -> El {
     items = items.child(moves);
     ui::section("Momentos para aprender", items, k)
 }
-fn branches_at(s: &State, k: &Kit, root_ply: usize) -> Option<El> {
-    if !s.variations.iter().any(|v| v.root_ply == root_ply) {
+fn branches_at(s: &State, k: &Kit, root_ply: usize, indices: &[usize]) -> Option<El> {
+    if indices.is_empty() {
         return None;
     }
     let mut branches = col()
@@ -399,12 +414,8 @@ fn branches_at(s: &State, k: &Kit, root_ply: usize) -> Option<El> {
         .radius(k.radius.md)
         .border(1.0, k.c.border_base)
         .fill(k.c.layer_01);
-    for (i, v) in s
-        .variations
-        .iter()
-        .enumerate()
-        .filter(|(_, v)| v.root_ply == root_ply)
-    {
+    for &i in indices {
+        let v = &s.variations[i];
         let mut moves = row().gap(8.0).flex_wrap();
         let branch_start = v.branch_from.map_or(0, |(_, cursor)| cursor);
         for (offset, san) in v.san.iter().enumerate().skip(branch_start) {
@@ -499,8 +510,15 @@ fn branches_at(s: &State, k: &Kit, root_ply: usize) -> Option<El> {
     Some(branches)
 }
 fn move_list(s: &State, k: &Kit) -> El {
+    // Transient render data: group once rather than scan every branch for every ply.
+    let mut branches = vec![Vec::new(); s.game.moves.len() + 1];
+    for (index, variation) in s.variations.iter().enumerate() {
+        if let Some(group) = branches.get_mut(variation.root_ply) {
+            group.push(index);
+        }
+    }
     let mut list = col().key("move-list").w_full().gap(4.0);
-    if let Some(branches) = branches_at(s, k, 0) {
+    if let Some(branches) = branches_at(s, k, 0, &branches[0]) {
         list = list.child(branches);
     }
     let mut index = 0;
@@ -534,44 +552,46 @@ fn move_list(s: &State, k: &Kit) -> El {
             let selected = s.ply == ply
                 && s.active_variation
                     .is_none_or(|i| s.variations[i].cursor == 0);
-            let mut cell = row()
-                .key(format!("move-cell-{ply}"))
+            let mut cell = k
+                .interactive(row())
+                .key(format!("move-{ply}"))
+                .role("button")
+                .focusable(true)
+                .label(format!(
+                    "{}{} {}{}",
+                    position.fullmoves(),
+                    if s.game.positions[index].turn().is_black() {
+                        "…"
+                    } else {
+                        "."
+                    },
+                    notation,
+                    if selected { ", lance atual" } else { "" }
+                ))
                 .grow(1.0)
                 .min_w(0.0)
+                .h(36.0)
+                .px(8.0)
                 .gap(5.0)
                 .center_y()
                 .radius(k.radius.md)
-                .motion(rune::Spring::new(0.18, 0.0))
                 .fill(if selected {
                     k.c.bg_accent.alpha(0.25)
                 } else {
                     Color::TRANSPARENT
                 })
                 .child(
-                    Button::new(notation)
-                        .variant(ButtonVariant::Ghost)
-                        .control_size(ControlSize::ExtraLarge)
-                        .build(k)
-                        .key(format!("move-{ply}"))
-                        .label(format!(
-                            "{}{} {}{}",
-                            s.game.positions[index].fullmoves(),
-                            if s.game.positions[index].turn().is_black() {
-                                "…"
-                            } else {
-                                "."
-                            },
-                            notation,
-                            if selected { ", lance atual" } else { "" }
-                        ))
+                    rune::text(notation)
+                        .font(k.ty.ui_medium)
+                        .color(k.c.text_base)
                         .grow(1.0)
-                        .min_w(0.0)
-                        .fill(Color::TRANSPARENT)
-                        .on_press_tx(move |s: &mut State, tx| {
-                            s.go_to(ply);
-                            crate::reveal_move(s, tx);
-                        }),
-                );
+                        .center()
+                        .a11y_hidden(),
+                )
+                .on_press_tx(move |s: &mut State, tx| {
+                    s.go_to(ply);
+                    crate::reveal_move(s, tx);
+                });
             if s.preferences.feedback
                 && let Some(class) = s.classification(ply)
             {
@@ -579,7 +599,7 @@ fn move_list(s: &State, k: &Kit) -> El {
             }
             line = line.child(cell);
             index += 1;
-            if s.variations.iter().any(|v| v.root_ply == index) {
+            if !branches[index].is_empty() {
                 if s.game.positions[index - 1].turn().is_white() {
                     line = line.child(el().grow(1.0));
                 }
@@ -587,7 +607,7 @@ fn move_list(s: &State, k: &Kit) -> El {
             }
         }
         list = list.child(line);
-        if let Some(branches) = branches_at(s, k, index) {
+        if let Some(branches) = branches_at(s, k, index, &branches[index]) {
             list = list.child(branches);
         }
     }
@@ -620,10 +640,11 @@ fn status(s: &State, k: &Kit) -> El {
     if let Some((done, total)) = s.real_progress {
         return col()
             .gap(8.0)
-            .child(ui::label(
-                format!("Analisando posições: {done} de {total}"),
-                13.0,
-                k.c.text_base,
+            .child(ui::analysis_label(
+                &format!("Analisando posições: {done} de {total}"),
+                rune::TextStyle::new(13.0, 400.0),
+                s,
+                k,
             ))
             .child(
                 Progress::new(Some(done as f32 / total.max(1) as f32))

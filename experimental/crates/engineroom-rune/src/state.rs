@@ -1434,26 +1434,67 @@ impl State {
             self.classification(self.ply)
         }
     }
-    pub fn candidates(&self) -> Vec<review_data::Candidate> {
-        use shakmaty::{san::SanPlus, uci::UciMove};
+    fn candidate_analysis(&self) -> Option<&engineroom_backend::review::types::PositionAnalysis> {
         let fen = engineroom_backend::review::core::fen(self.position());
         let original = self.original_analysis(&fen, self.current_mainline_ply());
         let live = self.live_positions.get(&fen);
-        let analysis = match (original, live) {
+        match (original, live) {
             (Some(a), Some(b)) if (b.lines.len(), b.depth) > (a.lines.len(), a.depth) => Some(b),
             (Some(a), _) => Some(a),
             (None, b) => b,
-        };
-        analysis
+        }
+    }
+
+    /// Resolves only candidate roots for board overlays, without replaying their continuations.
+    pub fn candidate_roots(&self) -> Vec<Option<shakmaty::Move>> {
+        let board = self.position();
+        self.candidate_analysis()
+            .into_iter()
+            .flat_map(|analysis| &analysis.lines)
+            .take(self.preferences.lines)
+            .map(|line| {
+                line.pv
+                    .first()?
+                    .parse::<shakmaty::uci::UciMove>()
+                    .ok()?
+                    .to_move(board)
+                    .ok()
+            })
+            .collect()
+    }
+
+    pub fn candidates(&self) -> Vec<review_data::Candidate> {
+        self.build_candidates(false)
+    }
+
+    /// Only the selected line needs a continuation in the analysis panel.
+    pub fn candidate_previews(&self) -> Vec<review_data::Candidate> {
+        self.build_candidates(true)
+    }
+
+    fn build_candidates(&self, preview: bool) -> Vec<review_data::Candidate> {
+        use shakmaty::{san::SanPlus, uci::UciMove};
+        self.candidate_analysis()
             .map(|position| {
                 position
                     .lines
                     .iter()
-                    .map(|line| {
+                    .take(if preview {
+                        self.preferences.lines
+                    } else {
+                        usize::MAX
+                    })
+                    .enumerate()
+                    .map(|(index, line)| {
                         let mut board = self.position().clone();
                         let mut moves = Vec::new();
                         let mut san = Vec::new();
-                        for uci in &line.pv {
+                        let depth = if preview && index != self.selected_candidate {
+                            1
+                        } else {
+                            line.pv.len()
+                        };
+                        for uci in line.pv.iter().take(depth) {
                             let Ok(m) = uci.parse::<UciMove>().and_then(|u| {
                                 u.to_move(&board)
                                     .map_err(|_| shakmaty::uci::ParseUciMoveError)

@@ -37,6 +37,11 @@ fn sidebar(s: &State, k: &Kit) -> El {
             SidebarRow::new(&entry.title)
                 .icon(&icons::SESSION)
                 .subtitle(status)
+                .subtitle_color(if active && s.real_progress.is_some() {
+                    Color::TRANSPARENT
+                } else {
+                    k.c.text_faint
+                })
                 .selected(active && s.page == Page::Review)
                 .height(48.0)
                 .on_select(move |s: &mut State, _| s.activate_review(key))
@@ -47,18 +52,27 @@ fn sidebar(s: &State, k: &Kit) -> El {
                         .label("Ações da sessão")
                         .focus_group()
                         .child(
-                            IconButton::new(&icons::CLOSE)
-                                .variant(IconButtonVariant::GhostMuted)
-                                .control_size(ControlSize::Small)
-                                .label(format!("Fechar sessão {}", entry.title))
-                                .build(k)
-                                .key(format!("close-session-{key}"))
-                                .on_press(move |s: &mut State| s.close_review(key)),
+                            ui::icon_feedback(
+                                IconButton::new(&icons::CLOSE)
+                                    .variant(IconButtonVariant::GhostMuted)
+                                    .control_size(ControlSize::Small)
+                                    .label(format!("Fechar sessão {}", entry.title))
+                                    .build(k),
+                                k,
+                            )
+                            .key(format!("close-session-{key}"))
+                            .on_press(move |s: &mut State| s.close_review(key)),
                         ),
                 )
                 .build(k)
                 .key(format!("session-{key}"))
-                .help(format!("{} — {detail}", entry.title)),
+                .help(format!("{} — {detail}", entry.title))
+                .children((active && s.real_progress.is_some()).then(|| {
+                    ui::analysis_label(status, k.ty.caption(), s, k)
+                        .absolute(30.0, 25.0)
+                        .inert()
+                        .a11y_hidden()
+                })),
         );
     }
     if s.workspace.is_empty() {
@@ -108,28 +122,24 @@ fn sidebar(s: &State, k: &Kit) -> El {
                 .build(k)
                 .key("settings-nav"),
         )
-        .footer(
-            col()
-                .gap(5.0)
-                .px(12.0)
-                .py(8.0)
-                .child(ui::label("Uma análise ativa por vez", 12.0, k.c.text_muted))
-                .child(ui::label("EngineRoom · local", 12.0, k.c.text_muted)),
-        )
+        .footer(col().gap(5.0).px(12.0).py(8.0))
         .build(k)
 }
 fn rail_button(icon: &'static rune::Icon, label: &str, selected: bool, k: &Kit) -> El {
-    IconButton::new(icon)
-        .variant(if selected {
-            IconButtonVariant::Neutral
-        } else {
-            IconButtonVariant::GhostMuted
-        })
-        .control_size(ControlSize::Large)
-        .label(label)
-        .help(label)
-        .build(k)
-        .checked(selected)
+    ui::icon_feedback(
+        IconButton::new(icon)
+            .variant(if selected {
+                IconButtonVariant::Neutral
+            } else {
+                IconButtonVariant::GhostMuted
+            })
+            .control_size(ControlSize::Large)
+            .label(label)
+            .help(label)
+            .build(k),
+        k,
+    )
+    .checked(selected)
 }
 
 fn toggle(open: bool, k: &Kit) -> El {
@@ -138,22 +148,25 @@ fn toggle(open: bool, k: &Kit) -> El {
     } else {
         "Abrir barra lateral"
     };
-    IconButton::new(if open {
-        &icons::SIDEBAR_COLLAPSE
-    } else {
-        &icons::SIDEBAR_EXPAND
-    })
-    .variant(IconButtonVariant::GhostMuted)
-    .control_size(ControlSize::Large)
-    .label(label)
-    .help(label)
-    .shortcut(if cfg!(target_os = "macos") {
-        "⌘B"
-    } else {
-        "Ctrl+B"
-    })
-    .expanded(open)
-    .build(k)
+    ui::icon_feedback(
+        IconButton::new(if open {
+            &icons::SIDEBAR_COLLAPSE
+        } else {
+            &icons::SIDEBAR_EXPAND
+        })
+        .variant(IconButtonVariant::GhostMuted)
+        .control_size(ControlSize::Large)
+        .label(label)
+        .help(label)
+        .shortcut(if cfg!(target_os = "macos") {
+            "⌘B"
+        } else {
+            "Ctrl+B"
+        })
+        .expanded(open)
+        .build(k),
+        k,
+    )
     .key("sidebar-toggle")
     .on_press(|s: &mut State| s.sidebar.toggle())
 }
@@ -214,6 +227,7 @@ pub fn view(s: &State, cx: &mut Cx<State>, main: El, trailing: Option<El>, k: &K
         shell = shell.child(
             col()
                 .key("sidebar-rail")
+                .pb(12.0)
                 .w(36.0)
                 .h_full()
                 .pt(if cfg!(target_os = "macos") && cx.titlebar_inset() > 0.0 {
@@ -253,6 +267,7 @@ pub fn view(s: &State, cx: &mut Cx<State>, main: El, trailing: Option<El>, k: &K
                             .on_press(move |s: &mut State| s.activate_review(key))
                         }),
                 )
+                .child(el().grow(1.0).min_h(0.0))
                 .child(
                     rail_button(&icons::GEAR, "Configurações", s.page == Page::Settings, k)
                         .key("rail-settings")

@@ -13,3 +13,5 @@ resolver = "2"
 
 [profile.dev]
 debug = 0
+# Rune performs layout and scene construction on the UI thread, including in dev.
+opt-level = 1

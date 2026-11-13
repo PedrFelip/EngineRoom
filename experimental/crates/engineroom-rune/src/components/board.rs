@@ -13,16 +13,14 @@ pub fn view(s: &State, k: &Kit, size: f32) -> El {
         s.game.board(s.ply)
     };
     let last = s.last_move();
-    let targets: Vec<usize> = s
-        .position()
-        .legal_moves()
-        .into_iter()
-        .filter(|m| {
-            s.selected_square
-                .is_some_and(|source| m.from().is_some_and(|from| from.to_usize() ^ 56 == source))
-        })
-        .map(|m| review_data::squares(m).1)
-        .collect();
+    let mut targets = [false; 64];
+    if let Some(source) = s.selected_square {
+        for m in s.position().legal_moves() {
+            if m.from().is_some_and(|from| from.to_usize() ^ 56 == source) {
+                targets[review_data::squares(m).1] = true;
+            }
+        }
+    }
     let mut board = col()
         .key("chessboard")
         .role("group")
@@ -98,7 +96,7 @@ pub fn view(s: &State, k: &Kit, size: f32) -> El {
                     } else {
                         ""
                     },
-                    if targets.contains(&index) {
+                    if targets[index] {
                         ", destino legal"
                     } else {
                         ""
@@ -158,7 +156,7 @@ pub fn view(s: &State, k: &Kit, size: f32) -> El {
                         .a11y_hidden(),
                 );
             }
-            if targets.contains(&index) {
+            if targets[index] {
                 tile = tile.child(
                     el().size(square_size * 0.2, square_size * 0.2)
                         .radius(square_size * 0.1)
@@ -183,22 +181,19 @@ pub fn view(s: &State, k: &Kit, size: f32) -> El {
         board = board.child(line);
     }
     if s.preferences.live_engine {
-        let colors = [
-            k.c.bg_accent,
-            oklch(0.72, 0.15, 155.0),
-            oklch(0.78, 0.14, 80.0),
-        ];
-        let candidates = s.candidates();
+        let opacities = [0.9, 0.7, 0.5, 0.35, 0.22];
+        let arrow_color = oklch(0.72, 0.15, 155.0);
+        let candidates = s.candidate_roots();
         for (i, line) in candidates
             .iter()
-            .take(s.preferences.lines.min(colors.len()))
+            .take(s.preferences.lines.min(opacities.len()))
             .enumerate()
             .rev()
         {
-            let Some(m) = line.moves.first().copied() else {
+            let Some(m) = *line else {
                 continue;
             };
-            let color = colors[i];
+            let color = arrow_color.alpha(opacities[i]);
             let (from, to) = review_data::squares(m);
             let center = |index: usize| {
                 let index = if s.flipped { 63 - index } else { index };
@@ -217,12 +212,7 @@ pub fn view(s: &State, k: &Kit, size: f32) -> El {
             let shared = candidates
                 .iter()
                 .take(i)
-                .filter(|candidate| {
-                    candidate
-                        .moves
-                        .first()
-                        .is_some_and(|m| review_data::squares(*m).0 == from)
-                })
+                .filter(|candidate| candidate.is_some_and(|m| review_data::squares(m).0 == from))
                 .count();
             let offset = shared as f32 * square_size * 0.12;
             let start = [
@@ -235,13 +225,7 @@ pub fn view(s: &State, k: &Kit, size: f32) -> El {
             ];
             let tip = square_size * 0.26;
             let arrow = Shape::new()
-                .line(
-                    start,
-                    end,
-                    square_size * 0.1,
-                    LineCap::Round,
-                    color.alpha(0.75),
-                )
+                .line(start, end, square_size * 0.1, LineCap::Round, color)
                 .fill(
                     vec![
                         end,
@@ -254,7 +238,7 @@ pub fn view(s: &State, k: &Kit, size: f32) -> El {
                             end[1] - uy * tip - ux * tip * 0.6,
                         ],
                     ],
-                    color.alpha(0.9),
+                    color,
                 );
             board = board.child(
                 el().key(format!("candidate-arrow-{i}"))
