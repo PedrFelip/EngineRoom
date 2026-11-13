@@ -1,5 +1,10 @@
 # Plano de empacotamento e release: Rune substitui o app Tauri
 
+Escopo da implementação da Fase 3: todo o Rune permanece em `experimental/`,
+com AppImage Linux e NSIS Windows; macOS e reorganização para a raiz ficam
+fora desta etapa. O downloader permanece em `app/scripts/`. Comandos locais
+em [releases.md](releases.md#rune-empacotamento-de-pré-releases).
+
 Decisão registrada em 13/11/2026: o app Tauri (`app/`) será descontinuado e o
 experimento Rune (`experimental/`) se torna o único produto desktop, organizado
 na **raiz do repositório** (sem subpasta própria e sem versão web). Este

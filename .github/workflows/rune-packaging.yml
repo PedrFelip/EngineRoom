@@ -1,0 +1,53 @@
+name: Rune installers (manual)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: Rune ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: experimental
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Linux build and software Vulkan dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config libasound2-dev libudev-dev libxkbcommon-dev libwayland-dev libegl1-mesa-dev libvulkan-dev mesa-vulkan-drivers patchelf file squashfs-tools xvfb libfuse2t64
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: experimental
+      - name: Install packager
+        run: cargo install cargo-packager --version 0.11.8 --locked
+      - name: Verify AppImage policy tests
+        run: python scripts/test_verify_appimage.py
+      - name: Build and verify AppImage
+        if: runner.os == 'Linux'
+        run: xvfb-run -a python3 scripts/package.py
+      - name: Build NSIS installer
+        if: runner.os == 'Windows'
+        run: python scripts/package.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rune-${{ runner.os }}
+          path: |
+            experimental/target/packages/*.AppImage
+            experimental/target/packages/*.exe
+          if-no-files-found: error
