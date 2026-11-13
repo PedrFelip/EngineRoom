@@ -17,7 +17,7 @@ pub fn data_dir() -> io::Result<PathBuf> {
 
 /// Resolves Stockfish from the override, installed resources, or development resources.
 ///
-/// The override takes precedence and must name an accessible file. Development
+/// A sidecar beside the executable takes precedence over the override. Development
 /// builds fall back to `resources/stockfish` and then to the main app's bundled
 /// Tauri sidecar under `app/src-tauri/binaries`. This function does not launch
 /// the executable.
@@ -54,15 +54,19 @@ fn resolve_stockfish(
     } else {
         "stockfish"
     };
-    if let Some(path) = override_path {
-        return validate(path);
-    }
     let parent = executable.parent().ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::InvalidInput,
             "executable has no parent directory",
         )
     })?;
+    match validate(&parent.join(name)) {
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        result => return result,
+    }
+    if let Some(path) = override_path {
+        return validate(path);
+    }
     let installed = parent.join("resources").join(name);
     match validate(&installed) {
         Err(error) if error.kind() == io::ErrorKind::NotFound && development => {
@@ -73,6 +77,10 @@ fn resolve_stockfish(
                 result => result,
             }
         }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            "Stockfish ausente; reinstale o aplicativo ou configure ENGINE_ROOM_STOCKFISH",
+        )),
         result => result,
     }
 }
@@ -166,6 +174,33 @@ mod tests {
         );
         fs::remove_dir_all(root).expect("remove test files");
     }
+    #[test]
+    fn packaged_sidecar_precedes_override_and_missing_engine_is_reported() {
+        let root =
+            env::temp_dir().join(format!("engineroom-packaged-paths-{}", std::process::id()));
+        fs::create_dir_all(&root).expect("create package directory");
+        for windows in [false, true] {
+            let exe = root.join("engineroom-rune");
+            let error = resolve_stockfish(None, &exe, &root, false, windows)
+                .expect_err("missing engine must be an error, not a panic");
+            assert_eq!(error.kind(), io::ErrorKind::NotFound);
+            assert!(error.to_string().contains("Stockfish ausente"));
+            let sidecar = root.join(if windows {
+                "stockfish.exe"
+            } else {
+                "stockfish"
+            });
+            fs::write(&sidecar, "engine").expect("write sidecar");
+            assert_eq!(
+                resolve_stockfish(Some(&root.join("missing")), &exe, &root, false, windows)
+                    .expect("packaged engine"),
+                sidecar
+            );
+            fs::remove_file(sidecar).expect("remove sidecar");
+        }
+        fs::remove_dir_all(root).expect("remove package directory");
+    }
+
     #[test]
     fn development_falls_back_to_the_main_app_sidecar() {
         let root = env::temp_dir().join(format!("engineroom-paths-sidecar-{}", std::process::id()));

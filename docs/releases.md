@@ -244,3 +244,63 @@ dela, novas versões podem ser instaladas pelo próprio app. Para gerar
 instaladores assinados localmente, forneça `TAURI_SIGNING_PRIVATE_KEY`
 (caminho do arquivo privado) e, se necessário, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`
 no ambiente antes de `bun run tauri build`.
+
+## Rune: empacotamento de pré-releases
+
+O Rune permanece integralmente em `experimental/`. Nesta etapa os alvos são
+Linux x86_64 (AppImage) e Windows x86_64 MSVC (NSIS); não há pacote macOS.
+O pipeline Tauri e o job `Rune experiment` existentes permanecem intactos.
+A versão é lida de `experimental/crates/engineroom-rune/Cargo.toml`; não se
+recria nem publica a tag `v3.0.0-alpha.1`.
+
+Instale Rust estável, Node >= 22.12 e Python >= 3.11. Instale o empacotador:
+
+```sh
+cargo install cargo-packager --version 0.11.8 --locked
+```
+
+No Linux, use um ambiente de build Ubuntu 22.04/24.04 com compilador C/C++,
+pkg-config, libasound2-dev, libudev-dev, libxkbcommon-dev, libwayland-dev,
+libegl1-mesa-dev, libvulkan-dev, libvulkan1, mesa-vulkan-drivers, patchelf,
+file, squashfs-tools e libfuse2 (Ubuntu 24.04: libfuse2t64). Para o smoke test, mantenha um display X11/Wayland
+ativo (CI: `xvfb-run -a python3 scripts/package.py`). O driver Vulkan do host
+é obrigatório; Mesa lavapipe permite o teste sem GPU física. Compile na
+menor versão de distribuição que pretende suportar (a glibc não é portátil
+para hosts mais antigos que o build).
+
+No Windows, execute nativamente com Rust MSVC, Visual Studio Build Tools
+(C++ e Windows SDK), Node e Python no PATH. O cargo-packager provisiona as
+ferramentas NSIS. O usuário final precisa de driver com suporte a Vulkan.
+
+Comando exato em ambas as plataformas, a partir da raiz do repositório:
+
+```sh
+cd experimental
+python scripts/package.py
+```
+
+O comando reutiliza `app/scripts/fetch-stockfish.mjs` a partir de `app/`,
+compila `engineroom-rune --release --locked` e aplica a configuração declarativa
+em `experimental/packaging/{linux,windows}.json`. Saída:
+`experimental/target/packages/`. O sidecar externo perde o sufixo do target
+no pacote: `usr/bin/stockfish` no AppImage e `stockfish.exe` ao lado de
+`engineroom-rune.exe` no diretório NSIS. A resolução prioriza esse diretório,
+depois o override `ENGINE_ROOM_STOCKFISH` e os fallbacks existentes de dev.
+Licença GPL e avisos de terceiros acompanham os pacotes.
+
+No Linux, `scripts/verify_appimage.py --smoke` é obrigatório no comando de
+empacotamento: extrai sem FUSE, rejeita bibliotecas Wayland/EGL/GLES/GL/Vulkan
+que sombreiem os drivers do host, verifica executáveis e inicia o Rune por
+10 segundos. Falha remove o AppImage da saída e encerra com erro: nunca publique
+um AppImage que falhou nessa checagem. Verificação independente:
+
+```sh
+python scripts/verify_appimage.py --smoke target/packages/*.AppImage
+```
+
+Este fluxo ainda exige validação nativa de instalação/abertura no Windows
+antes de publicar. O workflow manual `Rune installers (manual)` gera e armazena os instaladores
+como artifacts, sem publicar releases e sem participar do gate de CI. Execute-o
+na branch desejada via `workflow_dispatch` (após o workflow chegar à branch
+padrão). O pipeline de release estável continua dependente da migração de dados
+prevista na Fase 4.
