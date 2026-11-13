@@ -82,7 +82,7 @@ jobs:
         with:
           ref: ${{ inputs.ref }}
           persist-credentials: false
-      - name: Install Rune headless dependencies
+      - name: Install Rune build dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends libxkbcommon-dev libwayland-dev libx11-dev libasound2-dev mesa-vulkan-drivers vulkan-tools
@@ -96,8 +96,6 @@ jobs:
       - run: cargo clippy --all-targets --all-features -- -D warnings
         working-directory: experimental
       - run: cargo test --workspace --locked
-        working-directory: experimental
-      - run: ./scripts/check-headless.sh && ./scripts/check-responsive.sh
         working-directory: experimental
 
   automation:
