@@ -1,0 +1,5 @@
+{
+  "name": "engineroom-perf",
+  "private": true,
+  "devDependencies": { "@hona/strobe": "0.44.0" }
+}
