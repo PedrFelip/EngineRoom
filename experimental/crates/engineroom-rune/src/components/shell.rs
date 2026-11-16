@@ -10,13 +10,23 @@ fn sidebar(s: &State, k: &Kit) -> El {
     let nav = |page: Page, key: &str, title: &str, icon: &'static rune::Icon| {
         SidebarRow::new(title)
             .icon(icon)
-            .selected(s.page == page || (page == Page::Home && s.page == Page::Configure))
+            .selected(
+                (s.page == page && (page != Page::Play || s.play.game.is_none()))
+                    || (page == Page::Home && s.page == Page::Configure),
+            )
             .height(36.0)
-            .on_select(move |s: &mut State, _| s.navigate(page))
+            .on_select(move |s: &mut State, _| {
+                if page == Page::Play {
+                    s.open_play_setup();
+                } else {
+                    s.navigate(page);
+                }
+            })
             .build(k)
             .key(key)
     };
-    let mut sessions = SidebarSection::new("SESSÕES ABERTAS").count(s.workspace.len());
+    let mut sessions =
+        SidebarSection::new("SESSÕES ABERTAS").count(s.workspace.len() + s.play.sessions.len());
     for entry in &s.workspace {
         let key = entry.key;
         let active = s.active_workspace == Some(key);
@@ -36,7 +46,11 @@ fn sidebar(s: &State, k: &Kit) -> El {
         sessions = sessions.row(
             SidebarRow::new(&entry.title)
                 .icon(&icons::SESSION)
-                .subtitle(status)
+                .subtitle(if !active && let Some((done, total)) = entry.progress() {
+                    format!("Analisando {done} de {total}")
+                } else {
+                    status.to_owned()
+                })
                 .subtitle_color(if active && s.real_progress.is_some() {
                     Color::TRANSPARENT
                 } else {
@@ -75,12 +89,65 @@ fn sidebar(s: &State, k: &Kit) -> El {
                 })),
         );
     }
-    if s.workspace.is_empty() {
+    for entry in &s.play.sessions {
+        let key = entry.key;
+        let active = s.play.active == Some(key) && s.page == Page::Play;
+        let game = if active {
+            s.play.game.as_ref().unwrap_or(&entry.game)
+        } else {
+            &entry.game
+        };
+        let status = if game.result.is_some() {
+            "Partida encerrada"
+        } else if entry.request.is_some() {
+            "Stockfish pensando"
+        } else if game.human_turn() {
+            "Sua vez"
+        } else {
+            "Vez do Stockfish"
+        };
+        let title = format!("Partida {key} · Stockfish {}", game.rating);
         sessions = sessions.row(
-            ui::label("Importe uma partida para começar", 12.0, k.c.text_muted)
-                .wrap()
-                .w_full()
-                .padding(12.0),
+            SidebarRow::new(&title)
+                .icon(&icons::SESSION)
+                .subtitle(status)
+                .selected(active)
+                .height(48.0)
+                .on_select(move |s: &mut State, _| s.activate_play(key))
+                .trailing(
+                    ui::icon_feedback(
+                        IconButton::new(&icons::CLOSE)
+                            .variant(IconButtonVariant::GhostMuted)
+                            .control_size(ControlSize::Small)
+                            .label(format!("Fechar partida {key}"))
+                            .build(k),
+                        k,
+                    )
+                    .key(format!("close-play-{key}"))
+                    .on_press(move |s: &mut State| s.close_play(key)),
+                )
+                .build(k)
+                .key(format!("play-session-{key}"))
+                .help(format!(
+                    "{title} · {} · {status}",
+                    if game.human.is_white() {
+                        "Brancas"
+                    } else {
+                        "Pretas"
+                    }
+                )),
+        );
+    }
+    if s.workspace.is_empty() && s.play.sessions.is_empty() {
+        sessions = sessions.row(
+            ui::label(
+                "Importe uma partida ou jogue contra Stockfish",
+                12.0,
+                k.c.text_muted,
+            )
+            .wrap()
+            .w_full()
+            .padding(12.0),
         );
     }
     Sidebar::new()
@@ -105,6 +172,12 @@ fn sidebar(s: &State, k: &Kit) -> El {
         .section(
             SidebarSection::new("ESPAÇO DE TRABALHO")
                 .row(nav(Page::Home, "home-nav", "Nova revisão", &icons::PLUS))
+                .row(nav(
+                    Page::Play,
+                    "play-nav",
+                    "Jogar contra Stockfish",
+                    &icons::SESSION,
+                ))
                 .row(nav(
                     Page::History,
                     "history-nav",
@@ -249,6 +322,16 @@ pub fn view(s: &State, cx: &mut Cx<State>, main: El, trailing: Option<El>, k: &K
                     .on_press(|s: &mut State| s.navigate(Page::Home)),
                 )
                 .child(
+                    rail_button(
+                        &icons::SESSION,
+                        "Jogar contra Stockfish",
+                        s.page == Page::Play,
+                        k,
+                    )
+                    .key("rail-play")
+                    .on_press(|s: &mut State| s.open_play_setup()),
+                )
+                .child(
                     rail_button(&icons::HISTORY, "Histórico", s.page == Page::History, k)
                         .key("rail-history")
                         .on_press(|s: &mut State| s.navigate(Page::History)),
@@ -267,7 +350,26 @@ pub fn view(s: &State, cx: &mut Cx<State>, main: El, trailing: Option<El>, k: &K
                             .on_press(move |s: &mut State| s.activate_review(key))
                         }),
                 )
-                .child(el().grow(1.0).min_h(0.0))
+                .child(
+                    col()
+                        .key("rail-play-sessions")
+                        .grow(1.0)
+                        .min_h(0.0)
+                        .scroll(rune::ScrollSpec {
+                            stick_bottom: false,
+                        })
+                        .children(s.play.sessions.iter().map(|entry| {
+                            let key = entry.key;
+                            rail_button(
+                                &icons::SESSION,
+                                &format!("Partida {key} · Stockfish {}", entry.game.rating),
+                                s.page == Page::Play && s.play.active == Some(key),
+                                k,
+                            )
+                            .key(format!("rail-play-{key}"))
+                            .on_press(move |s: &mut State| s.activate_play(key))
+                        })),
+                )
                 .child(
                     rail_button(&icons::GEAR, "Configurações", s.page == Page::Settings, k)
                         .key("rail-settings")

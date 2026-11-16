@@ -12,3 +12,5 @@ pub mod review_summary;
 pub mod settings;
 pub mod shell;
 pub mod ui;
+
+pub mod play;

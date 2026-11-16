@@ -9,9 +9,12 @@ mod file_dialog;
 mod fixtures;
 mod game;
 mod layout;
+mod play;
 mod preferences;
 mod review_data;
 mod review_session;
+mod session_store;
+mod startup;
 mod state;
 mod theme;
 mod variation;
@@ -33,20 +36,53 @@ fn view(s: &State, cx: &mut Cx<State>) -> El {
             - 16.0,
         shell_size[1] - 16.0,
     ];
-    let layout = layout::Layout::new(if s.page == Page::Review {
-        review_size
-    } else {
-        cx.layout_size("page-body").unwrap_or([984.0, 836.0])
-    })
+    let layout = layout::Layout::new(
+        if s.page == Page::Review || (s.page == Page::Play && s.play.game.is_some()) {
+            review_size
+        } else {
+            cx.layout_size("page-body").unwrap_or([984.0, 836.0])
+        },
+    )
     .with_inspector_width(s.review_sidebar.width());
     let content = match s.page {
+        Page::Play => components::play::view(s, k, layout, &mut layers),
         Page::Home => components::home::view(s, k, layout),
         Page::Configure => components::home::configure(s, k, layout),
         Page::Review => components::review::view(s, k, layout, &mut layers),
         Page::History => components::history::view(s, k, layout),
         Page::Settings => components::settings::view(s, k, layout, &mut layers),
     };
-    let trailing = (s.page == Page::Review
+    let content = if s.startup.loading() {
+        rune::col()
+            .grow(1.0)
+            .center()
+            .gap(8.0)
+            .child(components::ui::label(
+                "Restaurando sessões…",
+                18.0,
+                k.c.text_base,
+            ))
+            .child(components::ui::label(
+                "Preparando seu espaço de trabalho",
+                13.0,
+                k.c.text_muted,
+            ))
+    } else if let Some(error) = &s.startup.error {
+        rune::col()
+            .grow(1.0)
+            .min_h(0.0)
+            .child(
+                components::ui::label(format!("Sessões: {error}"), 12.0, k.c.text_muted)
+                    .wrap()
+                    .w_full()
+                    .padding(12.0),
+            )
+            .child(content)
+    } else {
+        content
+    };
+    let trailing = (!s.startup.loading()
+        && (s.page == Page::Review || (s.page == Page::Play && s.play.game.is_some()))
         && s.review_sidebar.is_open()
         && !layout.stacked_review())
     .then(|| {
@@ -61,8 +97,18 @@ fn view(s: &State, cx: &mut Cx<State>) -> El {
         )
     });
     rune_kit::root(
-        components::shell::view(s, cx, content.key("page-body").fill(k.c.page), trailing, k)
-            .on_key(review_shortcut),
+        (if s.startup.loading() {
+            components::shell::view(s, cx, content.key("page-body").fill(k.c.page), trailing, k)
+                .inert()
+        } else {
+            components::shell::view(s, cx, content.key("page-body").fill(k.c.page), trailing, k)
+        })
+        .on_key(review_shortcut)
+        .children(
+            s.startup
+                .loading()
+                .then(|| rune::el().absolute(0.0, 0.0).inert()),
+        ),
         layers,
     )
     .on_drop_files(|s: &mut State, files, _| {
@@ -73,7 +119,8 @@ fn view(s: &State, cx: &mut Cx<State>) -> El {
     })
 }
 fn review_shortcut(s: &mut State, key: &rune::KeyEvent, tx: &mut rune::Tx) -> bool {
-    if s.page != Page::Review
+    if !matches!(s.page, Page::Review | Page::Play)
+        || (s.page == Page::Play && s.play.game.is_none())
         || s.analysis_settings_open
         || s.promotion_pending.is_some()
         || key.mods.ctrl
@@ -84,8 +131,8 @@ fn review_shortcut(s: &mut State, key: &rune::KeyEvent, tx: &mut rune::Tx) -> bo
         return false;
     }
     match &key.key {
-        rune::Key::Right if key.mods.shift => s.next_critical(),
-        rune::Key::Left if key.mods.shift => s.previous_critical(),
+        rune::Key::Right if key.mods.shift && s.page == Page::Review => s.next_critical(),
+        rune::Key::Left if key.mods.shift && s.page == Page::Review => s.previous_critical(),
         rune::Key::Right => s.next(),
         rune::Key::Left => s.previous(),
         rune::Key::Home if !key.mods.shift => s.first(),
@@ -102,6 +149,14 @@ fn review_shortcut(s: &mut State, key: &rune::KeyEvent, tx: &mut rune::Tx) -> bo
 }
 
 fn reveal_move(s: &State, tx: &mut rune::Tx) {
+    if s.page == Page::Play {
+        tx.scroll_into_view(if s.play.cursor > 0 {
+            format!("move-{}", s.play.cursor)
+        } else {
+            "move-list".into()
+        });
+        return;
+    }
     let key = match s.visible_variation_cursor() {
         Some((i, cursor)) if cursor > 0 => {
             format!("variation-{i}-move-{cursor}")
@@ -131,6 +186,9 @@ fn spec() -> AppSpec<State> {
         fonts: theme::FONTS,
         families: theme::FAMILIES,
         scenes: &[
+            ("play", |s| s.page = Page::Play),
+            ("play-game", |s| *s = fixtures::play_scene(1)),
+            ("play-many", |s| *s = fixtures::play_scene(15)),
             ("sessions", |s| *s = fixtures::workspace_scene()),
             ("home-file", |s| s.import_source = ImportSource::File),
             ("home-chesscom", |s| {
@@ -429,10 +487,13 @@ fn spec() -> AppSpec<State> {
                     )
                 })
             {
-                s.setup_avatars(wake.clone());
-                s.setup_bridge(wake.clone());
                 s.setup_preferences(wake.clone());
-                s.setup_file_dialog(wake);
+                if std::env::var_os("ENGINE_ROOM_EAGER_STARTUP").is_some() {
+                    s.setup_avatars(wake.clone());
+                    s.setup_bridge(wake.clone());
+                    s.setup_file_dialog(wake.clone());
+                }
+                s.setup_startup(wake);
             }
         }),
         poll: Some(|s, now, tx| {
@@ -440,7 +501,7 @@ fn spec() -> AppSpec<State> {
                 s.active_variation,
                 s.active_variation.map(|i| s.variations[i].cursor),
             );
-            let changed = s.tick(now) | s.poll_bridge();
+            let changed = s.poll_startup(now, tx) | s.tick(now) | s.poll_bridge();
             if s.history_focus_after_delete {
                 s.history_focus_after_delete = false;
                 tx.focus("history-search", true);
@@ -458,6 +519,9 @@ fn spec() -> AppSpec<State> {
             changed
         }),
         on_key: Some(|s, key, tx| {
+            if s.startup.loading() {
+                return true;
+            }
             if s.page == Page::History
                 && s.history_confirm_delete.is_some()
                 && matches!(key.key, rune::Key::Escape)
@@ -466,7 +530,7 @@ fn spec() -> AppSpec<State> {
                 return true;
             }
             // Control is literal on every platform; cmd is also set with it on Linux/Windows.
-            if s.page == Page::Review
+            if (s.page == Page::Review || (s.page == Page::Play && s.play.game.is_some()))
                 && key.mods.ctrl
                 && key.mods.alt
                 && !key.mods.shift
@@ -475,7 +539,7 @@ fn spec() -> AppSpec<State> {
                     || matches!(&key.key, rune::Key::Text(text) if text.eq_ignore_ascii_case("b"))
                     || tx.key_base() == Some('b'))
             {
-                if !s.analysis_settings_open && !tx.key_repeat() {
+                if !s.analysis_settings_open && s.promotion_pending.is_none() && !tx.key_repeat() {
                     s.review_sidebar.toggle();
                 }
                 return true;
@@ -492,9 +556,26 @@ fn spec() -> AppSpec<State> {
     }
 }
 fn main() {
-    rune::run(spec());
+    // The first drawn frame is a startup milestone for the perf bench: printing it from
+    // `on_frame_drawn` times the first present without reading pixels (native Wayland
+    // windows refuse `launch.painted`). Desktop windows only; gated on the bench flag.
+    let mut drawn_frame_reported = false;
+    let draw_metrics = std::env::var_os("ENGINE_ROOM_STARTUP_METRICS").is_some();
+    rune::App::new(spec())
+        .on_frame_drawn(move |_| {
+            if draw_metrics && !drawn_frame_reported {
+                drawn_frame_reported = true;
+                println!("ENGINE_ROOM_FIRST_FRAME");
+            }
+        })
+        .on_close(|s, _| s.flush_workspace())
+        .on_quit(|s, _| s.flush_workspace())
+        .run();
 }
 #[cfg(test)]
 mod perf_headless;
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod navigation_qa_tests;

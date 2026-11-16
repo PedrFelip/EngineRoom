@@ -356,7 +356,7 @@ fn list_games_paginates_through_real_sqlite() {
 }
 
 #[test]
-fn replacement_filters_old_events_and_acknowledges_cleanup() {
+fn opening_another_review_keeps_existing_sessions_until_explicit_close() {
     let repo = Arc::new(MemoryRepo::default());
     let (b, wake) = bridge(Arc::new(NoEngine), repo.clone());
     b.open("first", config(true)).unwrap();
@@ -366,14 +366,18 @@ fn replacement_filters_old_events_and_acknowledges_cleanup() {
             .any(|e| matches!(e, BridgeLifecycle::Opened { id } if id == "first"))
     });
     b.open("second", config(true)).unwrap();
-    let mut closed = false;
     until(&b, &wake, |events, lifecycle| {
-        assert!(events.iter().all(|e| e.session_id == "second"));
+        assert!(
+            events
+                .iter()
+                .all(|e| matches!(e.session_id.as_str(), "first" | "second"))
+        );
         for e in lifecycle {
             match e {
-                BridgeLifecycle::Closed { id } if id == "first" => closed = true,
+                BridgeLifecycle::Closed { id } if id == "first" => {
+                    panic!("opening another session closed the first")
+                }
                 BridgeLifecycle::Opened { id } if id == "second" => {
-                    assert!(closed, "replacement opened before close ack");
                     return true;
                 }
                 _ => {}
@@ -386,6 +390,12 @@ fn replacement_filters_old_events_and_acknowledges_cleanup() {
         events
             .iter()
             .any(|e| matches!(e, BridgeLifecycle::Closed { id } if id == "second"))
+    });
+    b.close("first".into());
+    until(&b, &wake, |_, events| {
+        events
+            .iter()
+            .any(|e| matches!(e, BridgeLifecycle::Closed { id } if id == "first"))
     });
     assert!(repo.drains.load(Ordering::SeqCst) >= 2);
 }
@@ -870,6 +880,12 @@ fn real_stockfish_bridge_resumes_interrupted_review_from_cache() {
     until(&b, &wake, |events, _| {
         events.iter().any(|e| matches!(&e.event, Event::Progress{progress} if progress.completed >= 9 && progress.completed < progress.total))
     });
+    b.close("interrupted".into());
+    until(&b, &wake, |_, lifecycle| {
+        lifecycle
+            .iter()
+            .any(|e| matches!(e, BridgeLifecycle::Closed { id } if id == "interrupted"))
+    });
     b.open("other", config(true)).unwrap();
     until(&b, &wake, |_, events| {
         events
@@ -895,10 +911,13 @@ fn real_stockfish_bridge_resumes_interrupted_review_from_cache() {
             "bridge error: {lifecycle:?}"
         );
         for envelope in events {
-            assert_eq!(
-                envelope.session_id, "resumed",
-                "stale generation escaped bridge"
+            assert_ne!(
+                envelope.session_id, "interrupted",
+                "explicitly closed session published a stale event"
             );
+            if envelope.session_id != "resumed" {
+                continue;
+            }
             match envelope.event {
                 Event::Progress { progress } => reused |= progress.cached_positions > 0,
                 Event::Completed { result } => {

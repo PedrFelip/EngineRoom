@@ -7,7 +7,7 @@ use rune_kit::Kit;
 use shakmaty::Position;
 pub fn view(s: &State, k: &Kit, size: f32) -> El {
     let square_size = size / 8.0;
-    let pieces = if s.active_variation.is_some() {
+    let pieces = if s.page == crate::state::Page::Play || s.active_variation.is_some() {
         variation::board(s.position())
     } else {
         s.game.board(s.ply)
@@ -166,7 +166,8 @@ pub fn view(s: &State, k: &Kit, size: f32) -> El {
                         .a11y_hidden(),
                 );
             }
-            if s.preferences.feedback
+            if s.page != crate::state::Page::Play
+                && s.preferences.feedback
                 && last.is_some_and(|(_, to)| to == index)
                 && let Some(class) = s.displayed_classification()
             {
@@ -180,7 +181,7 @@ pub fn view(s: &State, k: &Kit, size: f32) -> El {
         }
         board = board.child(line);
     }
-    if s.preferences.live_engine {
+    if s.page != crate::state::Page::Play && s.preferences.live_engine {
         let opacities = [0.9, 0.7, 0.5, 0.35, 0.22];
         let arrow_color = oklch(0.72, 0.15, 155.0);
         let candidates = s.candidate_roots();

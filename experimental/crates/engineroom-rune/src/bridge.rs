@@ -7,6 +7,7 @@ use engineroom_backend::review::{
     types::{Envelope, LiveRequest, LiveSettings, ReviewConfig, ReviewError},
 };
 use std::{
+    collections::HashMap,
     path::PathBuf,
     sync::{
         Arc,
@@ -59,6 +60,7 @@ enum Intent {
 }
 
 pub enum DataEvent {
+    PlayMove(u64, Result<String, String>),
     Games(
         Result<engineroom_backend::db::games::GamePage, String>,
         bool,
@@ -78,16 +80,23 @@ pub struct Bridge {
     actor: Option<tokio::task::JoinHandle<()>>,
     intents: Option<tokio::sync::mpsc::UnboundedSender<Intent>>,
     generation: Arc<AtomicU64>,
+    registrations: Arc<std::sync::Mutex<HashMap<String, u64>>>,
     events: mpsc::Receiver<(u64, Envelope)>,
     lifecycle: mpsc::Receiver<BridgeLifecycle>,
     files: mpsc::Receiver<Result<String, String>>,
     data: mpsc::Receiver<DataEvent>,
+    play_tasks: std::sync::Mutex<HashMap<u64, PlayTask>>,
     probe_cancel: tokio::sync::watch::Sender<bool>,
     probe_task: std::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
     probe_factory: Arc<dyn EngineFactory>,
     probe_events: mpsc::Sender<DataEvent>,
     probe_wake: Arc<dyn Fn() + Send + Sync>,
 }
+struct PlayTask {
+    cancel: tokio::sync::watch::Sender<bool>,
+    task: tokio::task::JoinHandle<()>,
+}
+
 impl Bridge {
     pub fn new(wake: rune::Waker) -> Result<Self, String> {
         // A missing engine must not disable storage, history, file and Chess.com
@@ -102,7 +111,10 @@ impl Bridge {
         let http =
             Arc::new(engineroom_backend::imports::ChessComHttp::new().map_err(|e| e.to_string())?);
         Self::with_data_ports(
-            Arc::new(NativeEngineFactory::new(engine)),
+            Arc::new(NativeEngineFactory::with_concurrency(
+                engine,
+                engine_slots(),
+            )),
             repository.clone(),
             Some(repository),
             Arc::new(move || (wake)()),
@@ -177,12 +189,12 @@ impl Bridge {
         let (data_tx, data) = mpsc::channel();
         let (intents, mut receiver) = tokio::sync::mpsc::unbounded_channel();
         let generation = Arc::new(AtomicU64::new(0));
-        let current_generation = generation.clone();
+        let registrations = Arc::new(std::sync::Mutex::new(HashMap::<String, u64>::new()));
+        let current_registrations = registrations.clone();
         let probe_wake = wake.clone();
         let probe_events = data_tx.clone();
         let (probe_cancel, _) = tokio::sync::watch::channel(false);
         let actor = runtime.spawn(async move {
-            let mut active: Option<String> = None;
             while let Some(intent) = receiver.recv().await {
                 match intent {
                     Intent::Open {
@@ -190,28 +202,24 @@ impl Bridge {
                         config,
                         generation,
                     } => {
-                        if let Some(previous) = active.take() {
-                            let result = sessions.close(&previous, "window").await;
-                            publish_lifecycle(
-                                &lifecycle_tx,
-                                &wake,
-                                match result {
-                                    Ok(()) => BridgeLifecycle::Closed { id: previous },
-                                    Err(error) => BridgeLifecycle::Error {
-                                        id: previous,
-                                        error,
-                                    },
-                                },
-                            );
-                        }
-                        if current_generation.load(Ordering::SeqCst) != generation {
+                        if current_registrations
+                            .lock()
+                            .expect("session registrations lock")
+                            .get(&id)
+                            != Some(&generation)
+                        {
                             continue;
                         }
                         let event_sender = sender.clone();
                         let event_wake = wake.clone();
-                        let event_generation = current_generation.clone();
+                        let event_registrations = current_registrations.clone();
                         match sessions.open(&id, "window", config, move |event| {
-                            if event_generation.load(Ordering::SeqCst) != generation {
+                            if event_registrations
+                                .lock()
+                                .expect("session registrations lock")
+                                .get(&event.session_id)
+                                != Some(&generation)
+                            {
                                 return true;
                             }
                             let sent = event_sender.send((generation, event)).is_ok();
@@ -219,18 +227,26 @@ impl Bridge {
                             sent
                         }) {
                             Ok(()) => {
-                                active = Some(id.clone());
                                 publish_lifecycle(
                                     &lifecycle_tx,
                                     &wake,
                                     BridgeLifecycle::Opened { id },
                                 );
                             }
-                            Err(error) => publish_lifecycle(
-                                &lifecycle_tx,
-                                &wake,
-                                BridgeLifecycle::Error { id, error },
-                            ),
+                            Err(error) => {
+                                let mut registrations = current_registrations
+                                    .lock()
+                                    .expect("session registrations lock");
+                                if registrations.get(&id) == Some(&generation) {
+                                    registrations.remove(&id);
+                                }
+                                drop(registrations);
+                                publish_lifecycle(
+                                    &lifecycle_tx,
+                                    &wake,
+                                    BridgeLifecycle::Error { id, error },
+                                );
+                            }
                         }
                     }
                     Intent::Analyze {
@@ -338,9 +354,6 @@ impl Bridge {
                     }
                     Intent::Close { id } => {
                         let result = sessions.close(&id, "window").await;
-                        if active.as_deref() == Some(&id) {
-                            active = None;
-                        }
                         publish_lifecycle(
                             &lifecycle_tx,
                             &wake,
@@ -355,6 +368,7 @@ impl Bridge {
             sessions.shutdown().await;
         });
         Ok(Self {
+            play_tasks: std::sync::Mutex::new(HashMap::new()),
             runtime,
             import_actor: Some(import_actor),
             import_intents: Some(import_intents),
@@ -362,6 +376,7 @@ impl Bridge {
             actor: Some(actor),
             intents: Some(intents),
             generation,
+            registrations,
             events,
             lifecycle,
             files,
@@ -374,6 +389,46 @@ impl Bridge {
         })
     }
 
+    pub fn cancel_play(&self, request: u64) {
+        if let Some(job) = self
+            .play_tasks
+            .lock()
+            .expect("play tasks lock")
+            .get(&request)
+        {
+            job.cancel.send_replace(true);
+        }
+    }
+    pub fn play_move(&self, request: u64, rating: u32, position: String) {
+        let mut tasks = self.play_tasks.lock().expect("play tasks lock");
+        tasks.retain(|_, job| !job.task.is_finished());
+        if tasks.contains_key(&request) {
+            return;
+        }
+        let (cancel_tx, closed) = tokio::sync::watch::channel(false);
+        let factory = self.probe_factory.clone();
+        let cancel = engineroom_backend::review::engine::Cancellation {
+            closed,
+            revision: None,
+        };
+        let events = self.probe_events.clone();
+        let wake = self.probe_wake.clone();
+        let task = self.runtime.spawn(async move {
+            let result = crate::play::best_move(factory.as_ref(), &cancel, rating, &position).await;
+            if cancel.check().is_ok() {
+                let _ = events.send(DataEvent::PlayMove(request, result));
+                wake();
+            }
+        });
+        tasks.insert(
+            request,
+            PlayTask {
+                cancel: cancel_tx,
+                task,
+            },
+        );
+    }
+
     fn send(&self, intent: Intent) -> Result<(), String> {
         self.intents
             .as_ref()
@@ -383,6 +438,16 @@ impl Bridge {
     }
     pub fn open(&self, id: &str, config: ReviewConfig) -> Result<(), String> {
         let generation = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
+        {
+            let mut registrations = self
+                .registrations
+                .lock()
+                .expect("session registrations lock");
+            if registrations.contains_key(id) {
+                return Err("Uma sessão com este identificador já está aberta.".into());
+            }
+            registrations.insert(id.to_owned(), generation);
+        }
         self.send(Intent::Open {
             id: id.into(),
             config,
@@ -394,8 +459,13 @@ impl Bridge {
         id: &str,
         request_id: u64,
         request: LiveRequest,
-        settings: LiveSettings,
+        mut settings: LiveSettings,
     ) -> Result<(), String> {
+        let threads = std::thread::available_parallelism().map_or(1, usize::from);
+        settings.threads = settings
+            .threads
+            .min((threads / engine_slots()).max(1) as u32);
+        settings.memory_mb = settings.memory_mb.min(512);
         self.send(Intent::Analyze {
             id: id.into(),
             request_id,
@@ -407,7 +477,10 @@ impl Bridge {
         let _ = self.send(Intent::Cancel { id, request_id });
     }
     pub fn close(&self, id: String) {
-        self.generation.fetch_add(1, Ordering::SeqCst);
+        self.registrations
+            .lock()
+            .expect("session registrations lock")
+            .remove(&id);
         let _ = self.send(Intent::Close { id });
     }
     pub fn search_chesscom(
@@ -477,7 +550,13 @@ impl Bridge {
         self.events
             .try_iter()
             .filter_map(|(generation, event)| {
-                (generation == self.generation.load(Ordering::SeqCst)).then_some(event)
+                let current = self
+                    .registrations
+                    .lock()
+                    .expect("session registrations lock")
+                    .get(&event.session_id)
+                    .copied();
+                (current == Some(generation)).then_some(event)
             })
             .collect()
     }
@@ -486,6 +565,14 @@ impl Bridge {
     }
 }
 /// Resolves Stockfish without making a missing executable fatal for the bridge.
+// Two bounded groups allow analysis and play to progress together without
+// creating a process for every open tab. Each owner awaits its own teardown.
+fn engine_slots() -> usize {
+    std::thread::available_parallelism()
+        .map_or(1, usize::from)
+        .clamp(1, 2)
+}
+
 fn engine_path() -> PathBuf {
     crate::desktop_paths::stockfish_path().unwrap_or_else(|_| {
         engine_fallback(std::env::var_os("ENGINE_ROOM_STOCKFISH").map(PathBuf::from))
@@ -512,6 +599,13 @@ impl Drop for Bridge {
         if let Some(task) = self.probe_task.get_mut().expect("probe task lock").take() {
             let _ = self.runtime.block_on(task);
         }
+        let tasks = self.play_tasks.get_mut().expect("play tasks lock");
+        for job in tasks.values() {
+            job.cancel.send_replace(true);
+        }
+        for (_, job) in tasks.drain() {
+            let _ = self.runtime.block_on(job.task);
+        }
         self.import_intents.take();
         if let Some(actor) = self.import_actor.take() {
             let _ = self.runtime.block_on(actor);
@@ -525,3 +619,7 @@ impl Drop for Bridge {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+#[path = "bridge/play_qa_tests.rs"]
+mod play_qa_tests;

@@ -2,7 +2,7 @@
 use super::{board, review_analysis, review_feedback, review_graph, review_summary, ui};
 use crate::{
     layout::Layout,
-    state::{LearningSide, ReviewTab, State},
+    state::{LearningSide, Page, ReviewTab, State},
 };
 use rune::{Color, Cursor, Drag, El, Icon, Phase, ScrollSpec, col, el, row};
 use rune_kit::{
@@ -31,7 +31,7 @@ static SIDEBAR_COLLAPSE: Icon = Icon {
     ),
 };
 
-fn panel_toggle(s: &State, k: &Kit) -> El {
+pub(super) fn panel_toggle(s: &State, k: &Kit) -> El {
     ui::icon_feedback(
         IconButton::new(if s.review_sidebar.is_open() {
             &SIDEBAR_COLLAPSE
@@ -66,10 +66,14 @@ pub fn docked_sidebar(s: &State, k: &Kit, top_inset: f32) -> El {
         .h_full()
         .child(resize_grip(s))
         .child(
-            inspector(s, k, false)
-                .w(s.review_sidebar.width())
-                .h_full()
-                .pt(top_inset),
+            (if s.page == Page::Play {
+                super::play::inspector(s, k)
+            } else {
+                inspector(s, k, false)
+            })
+            .w(s.review_sidebar.width())
+            .h_full()
+            .pt(top_inset),
         )
 }
 
@@ -143,15 +147,19 @@ octicon!(
     "arrow-switch"
 );
 
-fn playback(s: &State, k: &Kit) -> El {
-    let (position, total) = s.active_variation.map_or((s.ply, s.game.moves.len()), |i| {
-        let variation = &s.variations[i];
-        let start = variation.branch_from.map_or(0, |(_, cursor)| cursor);
-        (
-            variation.cursor.saturating_sub(start),
-            variation.moves.len().saturating_sub(start),
-        )
-    });
+pub(super) fn playback(s: &State, k: &Kit) -> El {
+    let (position, total) = if s.page == Page::Play {
+        (s.play.cursor, s.displayed_game().moves.len())
+    } else {
+        s.active_variation.map_or((s.ply, s.game.moves.len()), |i| {
+            let variation = &s.variations[i];
+            let start = variation.branch_from.map_or(0, |(_, cursor)| cursor);
+            (
+                variation.cursor.saturating_sub(start),
+                variation.moves.len().saturating_sub(start),
+            )
+        })
+    };
     let counter = s.active_variation.map_or_else(
         || format!("{position:02} / {total}"),
         |i| format!("V{} {position}/{total}", i + 1),
@@ -297,11 +305,18 @@ fn playback(s: &State, k: &Kit) -> El {
             .size(32.0, 32.0)
         }))
 }
-fn workspace(s: &State, k: &Kit, size: f32, compact: bool) -> El {
-    let (top, bottom) = if s.flipped {
-        ((&s.game.white, "Brancas"), (&s.game.black, "Pretas"))
+pub(super) fn workspace(s: &State, k: &Kit, size: f32, compact: bool) -> El {
+    let game = s.displayed_game();
+    let playing = s.page == Page::Play;
+    let ratings = if playing {
+        &[None, None]
     } else {
-        ((&s.game.black, "Pretas"), (&s.game.white, "Brancas"))
+        &game.ratings
+    };
+    let (top, bottom) = if s.flipped {
+        ((&game.white, "Brancas"), (&game.black, "Pretas"))
+    } else {
+        ((&game.black, "Pretas"), (&game.white, "Brancas"))
     };
     col()
         .key("board-workspace")
@@ -312,8 +327,12 @@ fn workspace(s: &State, k: &Kit, size: f32, compact: bool) -> El {
         .child(board::player(
             top.0,
             top.1,
-            s.avatar(if s.flipped { 0 } else { 1 }),
-            &s.game.ratings[if s.flipped { 0 } else { 1 }],
+            if playing {
+                None
+            } else {
+                s.avatar(if s.flipped { 0 } else { 1 })
+            },
+            &ratings[if s.flipped { 0 } else { 1 }],
             k,
             size + 24.0,
             compact,
@@ -323,20 +342,24 @@ fn workspace(s: &State, k: &Kit, size: f32, compact: bool) -> El {
                 .key("position-evaluation")
                 .items_center()
                 .gap(0.0)
-                .child(review_graph::readout(s, k, size))
+                .children((!playing).then(|| review_graph::readout(s, k, size)))
                 .child(
                     row()
                         .gap(10.0)
                         .items_start()
-                        .child(review_graph::meter(s, k, size))
+                        .children((!playing).then(|| review_graph::meter(s, k, size)))
                         .child(board::view(s, k, size)),
                 ),
         )
         .child(board::player(
             bottom.0,
             bottom.1,
-            s.avatar(if s.flipped { 1 } else { 0 }),
-            &s.game.ratings[if s.flipped { 1 } else { 0 }],
+            if playing {
+                None
+            } else {
+                s.avatar(if s.flipped { 1 } else { 0 })
+            },
+            &ratings[if s.flipped { 1 } else { 0 }],
             k,
             size + 24.0,
             compact,
@@ -509,10 +532,13 @@ fn branches_at(s: &State, k: &Kit, root_ply: usize, indices: &[usize]) -> Option
     }
     Some(branches)
 }
-fn move_list(s: &State, k: &Kit) -> El {
+pub(super) fn move_list(s: &State, k: &Kit) -> El {
+    let game = s.displayed_game();
+    let playing = s.page == Page::Play;
+    let cursor = if playing { s.play.cursor } else { s.ply };
     // Transient render data: group once rather than scan every branch for every ply.
-    let mut branches = vec![Vec::new(); s.game.moves.len() + 1];
-    for (index, variation) in s.variations.iter().enumerate() {
+    let mut branches = vec![Vec::new(); game.moves.len() + 1];
+    for (index, variation) in s.variations.iter().enumerate().filter(|_| !playing) {
         if let Some(group) = branches.get_mut(variation.root_ply) {
             group.push(index);
         }
@@ -522,8 +548,8 @@ fn move_list(s: &State, k: &Kit) -> El {
         list = list.child(branches);
     }
     let mut index = 0;
-    while index < s.game.moves.len() {
-        let position = &s.game.positions[index];
+    while index < game.moves.len() {
+        let position = &game.positions[index];
         let mut line = row().gap(6.0).center_y().child(
             ui::mono(
                 format!(
@@ -544,12 +570,12 @@ fn move_list(s: &State, k: &Kit) -> El {
             line = line.child(el().grow(1.0));
         }
         for _ in 0..if position.turn().is_black() { 1 } else { 2 } {
-            if index >= s.game.moves.len() {
+            if index >= game.moves.len() {
                 break;
             }
             let ply = index + 1;
-            let notation = &s.game.moves[index];
-            let selected = s.ply == ply
+            let notation = &game.moves[index];
+            let selected = cursor == ply
                 && s.active_variation
                     .is_none_or(|i| s.variations[i].cursor == 0);
             let mut cell = k
@@ -560,7 +586,7 @@ fn move_list(s: &State, k: &Kit) -> El {
                 .label(format!(
                     "{}{} {}{}",
                     position.fullmoves(),
-                    if s.game.positions[index].turn().is_black() {
+                    if game.positions[index].turn().is_black() {
                         "…"
                     } else {
                         "."
@@ -592,7 +618,8 @@ fn move_list(s: &State, k: &Kit) -> El {
                     s.go_to(ply);
                     crate::reveal_move(s, tx);
                 });
-            if s.preferences.feedback
+            if !playing
+                && s.preferences.feedback
                 && let Some(class) = s.classification(ply)
             {
                 cell = cell.child(review_feedback::badge(class));
@@ -600,7 +627,7 @@ fn move_list(s: &State, k: &Kit) -> El {
             line = line.child(cell);
             index += 1;
             if !branches[index].is_empty() {
-                if s.game.positions[index - 1].turn().is_white() {
+                if game.positions[index - 1].turn().is_white() {
                     line = line.child(el().grow(1.0));
                 }
                 break;
@@ -797,8 +824,7 @@ fn toolbar(s: &State, k: &Kit, compact: bool) -> El {
         .children(compact.then_some(tabs))
         .child(engine_toggle(s, k))
 }
-pub fn view(s: &State, k: &Kit, layout: Layout, layers: &mut Vec<El>) -> El {
-    review_analysis::dialog(s, k, layers);
+pub(super) fn promotion_dialog(s: &State, k: &Kit, layers: &mut Vec<El>) {
     let mut choices = col().gap(8.0);
     let mut choice_row = row().gap(8.0);
     for (index, (name, role, icon)) in [
@@ -838,6 +864,11 @@ pub fn view(s: &State, k: &Kit, layout: Layout, layers: &mut Vec<El>) -> El {
         .on_close(|s: &mut State| s.promotion_pending = None)
         .child(choices.padding(16.0))
         .build(k, layers);
+}
+
+pub fn view(s: &State, k: &Kit, layout: Layout, layers: &mut Vec<El>) -> El {
+    review_analysis::dialog(s, k, layers);
+    promotion_dialog(s, k, layers);
     let header = row()
         .min_h(layout.header_height())
         .px(16.0)

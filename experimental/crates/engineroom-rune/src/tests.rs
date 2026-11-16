@@ -1351,3 +1351,96 @@ fn board_candidate_roots_match_playable_lines() {
         );
     }
 }
+
+#[test]
+fn plays_stockfish_and_opens_the_completed_game_for_review_at_minimum_size() {
+    let mut rt = rune::App::new(spec()).headless_runtime(
+        (720.0, 560.0),
+        Env {
+            system_dark: true,
+            scale: 1.0,
+        },
+    );
+    rt.state = State::fixture();
+    rt.invalidate();
+    rt.frame(0.0);
+    tap(&mut rt, "play-nav");
+    tap(&mut rt, "play-color/segment1");
+    tap(&mut rt, "play-start");
+    assert!(rt.state.flipped);
+    assert!(
+        !rt.state.play_can_move(),
+        "Stockfish opens when human chooses black"
+    );
+    tap(&mut rt, "play-resign");
+    tap(&mut rt, "play-new");
+    tap(&mut rt, "play-color/segment0");
+    tap(&mut rt, "play-start");
+    tap(&mut rt, "square-e2");
+    tap(&mut rt, "square-e4");
+    assert_eq!(
+        rt.state.play.game.as_ref().expect("match").game.moves,
+        ["e4"]
+    );
+    tap(&mut rt, "play-resign");
+    tap(&mut rt, "play-analyze");
+    assert_eq!(rt.state.page, Page::Configure);
+    assert_eq!(rt.state.game.moves, ["e4"]);
+    assert!(rt.state.pgn.text.contains("[BlackElo \"1500\"]"));
+    assert!(rt.find("start-review").is_some());
+}
+
+#[test]
+fn play_move_list_navigates_without_overwriting_the_match_in_small_and_large_windows() {
+    for size in [(720.0, 560.0), (1440.0, 1080.0)] {
+        let mut rt = rune::App::new(spec()).headless_runtime(
+            size,
+            Env {
+                system_dark: true,
+                scale: 1.0,
+            },
+        );
+        rt.state = fixtures::play_scene(1);
+        rt.invalidate();
+        rt.frame(0.0);
+        if size.0 < 1000.0 {
+            tap(&mut rt, "play-panels/segment1");
+        }
+        tap(&mut rt, "move-2");
+        assert_eq!(rt.state.play.cursor, 2);
+        assert!(!rt.state.play_can_move());
+        assert_eq!(rt.state.play.game.as_ref().expect("game").moves.len(), 8);
+        tap(&mut rt, "play-current");
+        assert_eq!(rt.state.play.cursor, 8);
+        assert!(rt.state.play_can_move());
+        tap(&mut rt, "play-add");
+        tap(&mut rt, "play-start");
+        assert_eq!(rt.state.play.sessions.len(), 2);
+        tap(&mut rt, "play-session-1");
+        assert_eq!(
+            rt.state.play.game.as_ref().expect("first game").moves.len(),
+            8
+        );
+        tap(&mut rt, "close-play-2");
+        assert_eq!(rt.state.play.sessions.len(), 1);
+        assert_eq!(rt.state.play.active, Some(1));
+    }
+}
+
+#[test]
+fn newly_created_fifteenth_game_is_visible_in_the_scrolling_session_list() {
+    let mut rt = runtime();
+    rt.state = fixtures::play_scene(14);
+    rt.invalidate();
+    rt.frame(0.0);
+    tap(&mut rt, "play-add");
+    tap(&mut rt, "play-start");
+    assert_eq!(rt.state.play.sessions.len(), 15);
+    let (_, y) = rt.find("play-session-15").expect("new game session");
+    assert!(
+        (0.0..900.0).contains(&y),
+        "newly selected game must scroll into view: {y}"
+    );
+    tap(&mut rt, "play-session-15");
+    assert_eq!(rt.state.play.active, Some(15));
+}

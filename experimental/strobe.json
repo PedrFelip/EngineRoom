@@ -1,0 +1,30 @@
+{
+  "$schema": "./perf/node_modules/@hona/strobe/schema/strobe.v1.json",
+  "unit": "ms",
+  "apps": {
+    "deferred": {
+      "kind": "native",
+      "exe": "./target/debug/engineroom-rune",
+      "env": {
+        "XDG_DATA_HOME": "{home}/data",
+        "ENGINE_ROOM_STARTUP_METRICS": "1"
+      },
+      "unset": ["ENGINE_ROOM_EAGER_STARTUP"],
+      "files": {
+        "data/engineroom-experimental/preferences.json": { "version": 1, "preferences": { "sound": false } }
+      }
+    },
+    "eager": {
+      "kind": "native",
+      "exe": "./target/debug/engineroom-rune",
+      "env": {
+        "XDG_DATA_HOME": "{home}/data",
+        "ENGINE_ROOM_STARTUP_METRICS": "1",
+        "ENGINE_ROOM_EAGER_STARTUP": "1"
+      },
+      "files": {
+        "data/engineroom-experimental/preferences.json": { "version": 1, "preferences": { "sound": false } }
+      }
+    }
+  }
+}

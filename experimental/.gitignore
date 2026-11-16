@@ -3,3 +3,9 @@
 /scripts/__pycache__/
 
 /node_modules/
+
+/resources/stockfish
+/resources/stockfish.exe
+/resources/stockfish-Copying.txt
+
+/perf/node_modules/

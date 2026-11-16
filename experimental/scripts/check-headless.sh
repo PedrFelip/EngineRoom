@@ -6,7 +6,7 @@ python3 scripts/test-headless-report.py
 cargo build --locked
 binary="target/debug/engineroom-rune"
 "$binary" --snap artifacts/home.png --tree artifacts/home.json --scale 1
-for scene in sessions home-file home-chesscom home-valid home-invalid home-light configure configure-deep manual review opening summary history settings settings-light settings-analysis settings-storage; do
+for scene in play play-game play-many sessions home-file home-chesscom home-valid home-invalid home-light configure configure-deep manual review opening summary history settings settings-light settings-analysis settings-storage; do
   "$binary" --scene "$scene" --snap "artifacts/$scene.png" --tree "artifacts/$scene.json" --scale 1
 done
 "$binary" --scene review --script scripts/review.json --at 3.8 --snap artifacts/interaction.png --tree artifacts/interaction.json --scale 1
@@ -24,6 +24,12 @@ for scene in home-light review-light configure history settings settings-light d
     "$binary" --scene "$scene" --size "$size" --snap "artifacts/sidebar-$scene-$size.png" --tree "artifacts/sidebar-$scene-$size.json" --scale 1
   done
 done
+for scene in play play-game play-many; do
+  for size in 720x560 1440x1080; do
+    "$binary" --scene "$scene" --size "$size" --snap "artifacts/$scene-$size.png" --tree "artifacts/$scene-$size.json" --scale 1
+  done
+done
+python3 scripts/check-play.py
 python3 scripts/check-sidebar.py
 python3 scripts/check-tree.py
 for scene in review review-light; do

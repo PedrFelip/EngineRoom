@@ -7,11 +7,12 @@ use crate::{
 use rune::TextEdit;
 use rune_kit::shell::PaneState;
 use shakmaty::{Chess, Position, Role, Square};
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Page {
     #[default]
     Home,
     Configure,
+    Play,
     Review,
     History,
     Settings,
@@ -22,14 +23,14 @@ pub enum Appearance {
     Dark,
     Light,
 }
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum SettingsSection {
     #[default]
     Preferences,
     Analysis,
     Storage,
 }
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ImportSource {
     File,
     #[default]
@@ -37,7 +38,7 @@ pub enum ImportSource {
     ChessCom,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Profile {
     #[default]
     Fast,
@@ -45,7 +46,7 @@ pub enum Profile {
     Manual,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ReviewTab {
     #[default]
     Moves,
@@ -105,7 +106,22 @@ enum HistoryOperation {
     Open { id: i64, reanalyze: bool },
 }
 
+#[cfg(test)]
+#[path = "play_qa_tests.rs"]
+mod play_qa_tests;
+#[cfg(test)]
+#[path = "review_concurrency_tests.rs"]
+mod review_concurrency_tests;
+
+#[path = "play_state.rs"]
+mod play_state;
+
+#[path = "session_state.rs"]
+mod session_state;
+
 pub struct State {
+    pub startup: crate::startup::Startup,
+    pub play: crate::play::Play,
     avatars: Option<crate::avatar::Avatars>,
     pub workspace: Vec<WorkspaceReview>,
     pub active_workspace: Option<u64>,
@@ -132,6 +148,7 @@ pub struct State {
     pub import_source: ImportSource,
     pub import_error: Option<String>,
     pub file_loading: bool,
+    file_context: Option<(Page, ImportSource, String)>,
     pub file_drag_over: bool,
     pub pending_picks: usize,
     pub file_dialog: Option<crate::file_dialog::FileDialog>,
@@ -188,6 +205,8 @@ pub struct State {
 impl Default for State {
     fn default() -> Self {
         Self {
+            startup: crate::startup::Startup::default(),
+            play: crate::play::Play::default(),
             avatars: None,
             workspace: Vec::new(),
             active_workspace: None,
@@ -213,6 +232,7 @@ impl Default for State {
             import_source: ImportSource::Paste,
             import_error: None,
             file_loading: false,
+            file_context: None,
             file_drag_over: false,
             pending_picks: 0,
             file_dialog: None,
@@ -371,6 +391,11 @@ impl State {
         };
         self.park_review();
         self.active_workspace = None;
+        self.session = Default::default();
+        self.live_positions.clear();
+        self.live_running = false;
+        self.live_error = None;
+        self.live_key = None;
         self.review_tab = ReviewTab::Moves;
         self.compact_panel = false;
         self.real_result = None;
@@ -408,6 +433,11 @@ impl State {
             lines: self.preferences.lines as u32,
             initial_result: None,
         };
+        self.session = Default::default();
+        self.live_positions.clear();
+        self.live_running = false;
+        self.live_error = None;
+        self.live_key = None;
         self.register_review(config.clone());
         let id = format!(
             "review-{}",
@@ -443,10 +473,10 @@ impl State {
         self.live_key = None;
     }
     pub fn poll_bridge(&mut self) -> bool {
+        self.sync_play();
         self.sync_live();
         let preferences_changed = self.poll_preferences();
         let avatars_changed = self.avatars.as_mut().is_some_and(|avatars| avatars.poll());
-        use engineroom_backend::review::types::Event;
         let events = self
             .bridge
             .as_ref()
@@ -526,6 +556,9 @@ impl State {
                         Err(error) => crate::engine_probe::Status::Error(error),
                     };
                 }
+                crate::bridge::DataEvent::PlayMove(request, result) => {
+                    self.receive_play_move(request, result)
+                }
                 crate::bridge::DataEvent::Deleted(id, result) => {
                     self.history_delete_pending = false;
                     match result {
@@ -600,6 +633,12 @@ impl State {
         }
         for result in files {
             self.file_loading = false;
+            changed = true;
+            if self.file_context.take()
+                != Some((self.page, self.import_source, self.pgn.text.clone()))
+            {
+                continue;
+            }
             match result {
                 Ok(pgn) => {
                     self.pgn.replace_text(&pgn);
@@ -613,86 +652,99 @@ impl State {
             changed = true;
             self.pending_picks = self.pending_picks.saturating_sub(1);
             match result {
-                Ok(Some(path)) => {
+                Ok(Some(path))
+                    if self.file_context.as_ref()
+                        == Some(&(self.page, self.import_source, self.pgn.text.clone())) =>
+                {
                     self.read_pgn_path(path);
                 }
-                Ok(None) => {}
+                Ok(_) => {}
                 Err(error) => self.import_error = Some(format!("Seletor de arquivos: {error}")),
             }
         }
         for event in lifecycle {
             use crate::bridge::BridgeLifecycle;
-            match event {
-                BridgeLifecycle::Opened { id } => self.session.acquired(&id),
-                BridgeLifecycle::Closed { id } => self.session.closed(&id),
-                BridgeLifecycle::Error { id, error } if self.session.id() == Some(id.as_str()) => {
-                    self.bridge_error = Some(error.to_string());
-                    self.real_progress = None;
-                    self.live_running = false;
-                    self.playing = false;
-                    self.session.closed(&id);
+            let id = match &event {
+                BridgeLifecycle::Opened { id }
+                | BridgeLifecycle::Closed { id }
+                | BridgeLifecycle::Error { id, .. } => id.clone(),
+            };
+            changed |= self.with_review_session(&id, |state| match event {
+                BridgeLifecycle::Opened { id } => state.session.acquired(&id),
+                BridgeLifecycle::Closed { id } => state.session.closed(&id),
+                BridgeLifecycle::Error { id, error } => {
+                    state.bridge_error = Some(error.to_string());
+                    state.real_progress = None;
+                    state.live_running = false;
+                    state.playing = false;
+                    state.session.closed(&id);
                 }
-                BridgeLifecycle::Error { .. } => continue,
-            }
-            changed = true;
+            });
         }
         for envelope in events {
-            if !self
-                .session
-                .accepts(&envelope.session_id, envelope.sequence, envelope.request_id)
-            {
-                continue;
-            }
-            changed = true;
-            match envelope.event {
-                Event::Progress { progress } => {
-                    self.real_progress = Some((progress.completed, progress.total))
-                }
-                Event::Completed { result } => {
-                    self.real_result = Some(result);
-                    self.real_progress = None;
-                    self.live_key = None;
-                }
-                Event::Error {
-                    error,
-                    fen: Some(_),
-                } => {
-                    self.stop_live_with_error(error.to_string());
-                }
-                Event::Error { error, fen: None } => {
-                    self.bridge_error = Some(error.to_string());
-                    self.real_progress = None;
-                    self.live_running = false;
-                    self.playing = false;
-                }
-                Event::LiveStarted { .. } => {
-                    self.live_running = true;
-                    self.live_error = None;
-                }
-                Event::LiveCompleted { analysis, .. } => {
-                    self.live_running = false;
-                    let replace = self
-                        .live_positions
-                        .get(&analysis.fen)
-                        .is_none_or(|old| prefer_live(old, &analysis));
-                    if replace {
-                        self.live_positions.insert(analysis.fen.clone(), analysis);
-                    }
-                }
-                Event::Classification {
-                    node_id,
-                    classification,
-                } => {
-                    self.apply_variation_classification(&node_id, classification);
-                }
-                Event::Warning { error } => eprintln!("review warning: {error}"),
-            }
+            let id = envelope.session_id.clone();
+            changed |= self.with_review_session(&id, |state| state.apply_review_envelope(envelope));
         }
         self.sync_live();
         changed
     }
+    fn apply_review_envelope(&mut self, envelope: engineroom_backend::review::types::Envelope) {
+        use engineroom_backend::review::types::Event;
+        if !self
+            .session
+            .accepts(&envelope.session_id, envelope.sequence, envelope.request_id)
+        {
+            return;
+        }
+        match envelope.event {
+            Event::Progress { progress } => {
+                self.real_progress = Some((progress.completed, progress.total))
+            }
+            Event::Completed { result } => {
+                self.real_result = Some(result);
+                self.real_progress = None;
+                self.live_key = None;
+            }
+            Event::Error {
+                error,
+                fen: Some(_),
+            } => {
+                self.stop_live_with_error(error.to_string());
+            }
+            Event::Error { error, fen: None } => {
+                self.bridge_error = Some(error.to_string());
+                self.real_progress = None;
+                self.live_running = false;
+                self.playing = false;
+            }
+            Event::LiveStarted { .. } => {
+                self.live_running = true;
+                self.live_error = None;
+            }
+            Event::LiveCompleted { analysis, .. } => {
+                self.live_running = false;
+                let replace = self
+                    .live_positions
+                    .get(&analysis.fen)
+                    .is_none_or(|old| prefer_live(old, &analysis));
+                if replace {
+                    self.live_positions.insert(analysis.fen.clone(), analysis);
+                }
+            }
+            Event::Classification {
+                node_id,
+                classification,
+            } => {
+                self.apply_variation_classification(&node_id, classification);
+            }
+            Event::Warning { error } => eprintln!("review warning: {error}"),
+        }
+    }
     fn sync_live(&mut self) {
         use engineroom_backend::review::types::{LiveRequest, LiveSettings};
+        if self.page != Page::Review || self.active_workspace.is_none() {
+            return;
+        }
         use shakmaty::{EnPassantMode, fen::Fen};
         let Some(id) = self.session.id().map(str::to_owned) else {
             return;
@@ -814,6 +866,13 @@ impl State {
                         }
                         game.avatar_key = Some(key);
                         self.park_review();
+                        self.active_workspace = None;
+                        self.session = Default::default();
+                        self.real_progress = None;
+                        self.live_positions.clear();
+                        self.live_running = false;
+                        self.live_error = None;
+                        self.live_key = None;
                         self.game = game;
                         self.go_to(0);
                         self.variations.clear();
@@ -855,6 +914,28 @@ impl State {
         }
     }
     pub fn navigate(&mut self, page: Page) {
+        if page != self.page && self.page == Page::Review {
+            self.park_review();
+        }
+        if page != self.page {
+            self.file_context = None;
+        }
+        if self.page == Page::Play && page != Page::Play {
+            self.park_play();
+        }
+        if page == Page::Play && self.page != Page::Play {
+            self.park_review();
+            self.active_workspace = None;
+            self.selected_square = None;
+            if let Some(game) = &self.play.game {
+                self.flipped = self
+                    .play
+                    .sessions
+                    .iter()
+                    .find(|entry| Some(entry.key) == self.play.active)
+                    .map_or(game.human.is_black(), |entry| entry.flipped);
+            }
+        }
         self.invalidate_history_load();
         if page == Page::Home && self.page != Page::Home {
             self.park_review();
@@ -869,6 +950,12 @@ impl State {
         self.promotion_pending = None;
         self.select_open = false;
         self.confirm_clear_history = false;
+        if page == Page::Play {
+            self.restore_play_promotion();
+        }
+        if page == Page::Review {
+            self.restore_review_promotion();
+        }
     }
     pub(crate) fn apply_history_page(
         &mut self,
@@ -1055,6 +1142,9 @@ impl State {
         self.chess_loading = false;
     }
     pub fn select_import_source(&mut self, source: ImportSource) {
+        if source != self.import_source {
+            self.file_context = None;
+        }
         self.cancel_chesscom();
         self.import_source = source;
         self.import_error = None;
@@ -1121,6 +1211,11 @@ impl State {
         }
     }
     pub fn select_chesscom(&mut self, index: usize) {
+        if self.avatars.is_none()
+            && let Some(wake) = &self.startup.wake
+        {
+            self.setup_avatars(wake.clone());
+        }
         if let Some(game) = self.chess_games.get(index) {
             let players = [game.white.username.clone(), game.black.username.clone()];
             self.pgn.replace_text(&game.pgn);
@@ -1160,6 +1255,11 @@ impl State {
         });
     }
     pub fn pick_pgn_file(&mut self) {
+        if self.file_dialog.is_none()
+            && let Some(wake) = &self.startup.wake
+        {
+            self.setup_file_dialog(wake.clone());
+        }
         let Some(dialog) = &self.file_dialog else {
             self.import_error = Some("Seletor de arquivos indisponível.".into());
             return;
@@ -1167,6 +1267,7 @@ impl State {
         match dialog.request() {
             Ok(()) => {
                 self.pending_picks += 1;
+                self.file_context = Some((self.page, self.import_source, self.pgn.text.clone()));
                 self.import_error = None;
             }
             Err(error) => self.import_error = Some(format!("Seletor de arquivos: {error}")),
@@ -1195,6 +1296,7 @@ impl State {
         {
             Ok(()) => {
                 self.file_loading = true;
+                self.file_context = Some((self.page, self.import_source, self.pgn.text.clone()));
                 self.import_error = None;
             }
             Err(error) => self.import_error = Some(error),
@@ -1206,7 +1308,9 @@ impl State {
                 self.park_review();
                 self.active_workspace = None;
                 self.game = game;
-                self.go_to(0);
+                self.ply = 0;
+                self.active_variation = None;
+                self.selected_square = None;
                 self.variations.clear();
                 self.import_error = None;
                 self.navigate(Page::Configure);
@@ -1216,6 +1320,10 @@ impl State {
     }
 
     pub fn go_to(&mut self, ply: usize) {
+        if self.page == Page::Play {
+            self.play_go_to(ply);
+            return;
+        }
         self.promotion_pending = None;
         let previous_ply = self.ply;
         let was_mainline = self.active_variation.is_none();
@@ -1251,6 +1359,10 @@ impl State {
         self.selected_candidate = 0;
     }
     pub fn next(&mut self) {
+        if self.page == Page::Play {
+            self.play_go_to(self.play.cursor + 1);
+            return;
+        }
         self.playing = false;
         self.selected_square = None;
         self.selected_candidate = 0;
@@ -1262,6 +1374,10 @@ impl State {
         }
     }
     pub fn previous(&mut self) {
+        if self.page == Page::Play {
+            self.play_go_to(self.play.cursor.saturating_sub(1));
+            return;
+        }
         self.playing = false;
         self.selected_square = None;
         self.selected_candidate = 0;
@@ -1285,6 +1401,10 @@ impl State {
         }
     }
     pub fn first(&mut self) {
+        if self.page == Page::Play {
+            self.play_go_to(0);
+            return;
+        }
         self.selected_candidate = 0;
         self.selected_square = None;
         if let Some(i) = self.active_variation {
@@ -1297,6 +1417,10 @@ impl State {
         }
     }
     pub fn last(&mut self) {
+        if self.page == Page::Play {
+            self.play_go_to(self.play.game.as_ref().map_or(0, |g| g.moves.len()));
+            return;
+        }
         self.selected_candidate = 0;
         self.selected_square = None;
         if let Some(i) = self.active_variation {
@@ -1306,7 +1430,21 @@ impl State {
             self.go_to(self.game.moves.len());
         }
     }
+    pub fn displayed_game(&self) -> &Game {
+        if self.page == Page::Play
+            && let Some(game) = &self.play.game
+        {
+            &game.game
+        } else {
+            &self.game
+        }
+    }
     pub fn position(&self) -> &Chess {
+        if self.page == Page::Play
+            && let Some(game) = &self.play.game
+        {
+            return &game.game.positions[self.play.cursor.min(game.moves.len())];
+        }
         match self.active_variation {
             Some(i) => self.variations[i].position(),
             None => &self.game.positions[self.ply],
@@ -1329,6 +1467,16 @@ impl State {
         })
     }
     pub fn last_move(&self) -> Option<(usize, usize)> {
+        if self.page == Page::Play {
+            return self
+                .play
+                .game
+                .as_ref()?
+                .moves
+                .get(self.play.cursor.checked_sub(1)?)
+                .copied()
+                .map(review_data::squares);
+        }
         if let Some(i) = self.active_variation {
             let v = &self.variations[i];
             if let Some(j) = v.cursor.checked_sub(1) {
@@ -1581,6 +1729,9 @@ impl State {
         true
     }
     pub fn click_square(&mut self, index: usize) {
+        if self.page == Page::Play && !self.play_can_move() {
+            return;
+        }
         if self.promotion_pending.is_some() {
             return;
         }
@@ -1611,6 +1762,9 @@ impl State {
             .map(|_| index);
     }
     pub fn promote(&mut self, role: Role) {
+        if self.page == Page::Play && !self.play_can_move() {
+            return;
+        }
         let Some((from, target)) = self.promotion_pending.take() else {
             return;
         };
@@ -1624,6 +1778,10 @@ impl State {
         }
     }
     fn play_exploration_move(&mut self, m: shakmaty::Move) {
+        if self.page == Page::Play {
+            self.push_play_move(m);
+            return;
+        }
         if let Some(i) = self.active_variation {
             if self.variations[i].cursor < self.variations[i].moves.len() {
                 let mut branch = self.variations[i].clone();

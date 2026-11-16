@@ -18,9 +18,14 @@ pub struct NativeEngineFactory {
 }
 impl NativeEngineFactory {
     pub fn new(path: PathBuf) -> Self {
+        Self::with_concurrency(path, 1)
+    }
+
+    /// Bounds concurrent owners; each group holds its slot through process teardown.
+    pub fn with_concurrency(path: PathBuf, groups: usize) -> Self {
         Self {
             path,
-            permit: Arc::new(Semaphore::new(1)),
+            permit: Arc::new(Semaphore::new(groups.clamp(1, 2))),
         }
     }
 }

@@ -160,3 +160,26 @@ pub fn workspace_scene() -> State {
     state.activate_review(first);
     state
 }
+
+/// Populates the native play workspace without creating engine or database tasks.
+pub fn play_scene(count: usize) -> State {
+    let mut s = State::fixture();
+    for i in 0..count {
+        s.open_play_setup();
+        s.play.rating = 1500 + i as u32 * 50;
+        s.start_play();
+        for text in [
+            "e2e4", "c7c6", "d2d4", "d7d5", "e4e5", "c8f5", "b1c3", "e7e6",
+        ] {
+            let game = s.play.game.as_mut().expect("fixture match");
+            let m = text
+                .parse::<shakmaty::uci::UciMove>()
+                .expect("fixture move")
+                .to_move(game.position())
+                .expect("legal fixture move");
+            game.push(m).expect("fixture match accepts move");
+            s.play.cursor = game.moves.len();
+        }
+    }
+    s
+}

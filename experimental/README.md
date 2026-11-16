@@ -86,8 +86,8 @@ orienta layout, escopos de eventos, acessibilidade e testes headless.
   ou teclado na divisória, com duplo clique para restaurar 352 pt.
   Aba, lance e largura são mantidos ao ocultar e ao navegar entre telas.
 - Alternar entre sessões abertas pela dock, preservando lance, orientação, variações e resultado.
-  Uma análise fica ativa por vez; ao trocar, a anterior é encerrada e a revisão
-  incompleta pode ser retomada pelo cache. Fechar uma sessão não apaga seu histórico.
+  Partidas e análises continuam trabalhando em segundo plano. Eventos, erros e
+  cancelamentos são vinculados à sessão, e fechar uma sessão não apaga seu histórico.
 - Reabrir, reanalisar e excluir revisões salvas na lista paginada do histórico
   ("Carregar mais").
 - Persistir as preferências em `engineroom-experimental/preferences.json` dentro do
@@ -206,8 +206,66 @@ com logs de tempo de frame e PNGs em `artifacts/sidebar-profile/`. O primeiro fr
 inclui inicialização; use os percentis dos frames seguintes para avaliar interação.
 São medidas headless de CPU, não latência de apresentação da janela ou análise Stockfish.
 
+O bench Strobe `perf/startup.bench.ts` compara a inicialização ansiosa (backend na
+thread da interface antes do primeiro quadro) com a diferida (backend em paralelo,
+numa thread separada), com workspace vazio e com 15 sessões restauradas, e também
+cronometra o primeiro quadro desenhado (`ENGINE_ROOM_FIRST_FRAME`). A captura de
+pixels do Strobe (`launch.painted`) não funciona em janela Wayland nativa neste
+ambiente, por isso o marco vem do próprio aplicativo. O fixture de 15 sessões é
+reproduzível:
+
+```sh
+ENGINE_ROOM_PERF_WORKSPACE=perf/data/workspace-15.json \
+  cargo test -p engineroom-rune write_startup_fixture -- --ignored
+bun install --cwd perf
+./perf/node_modules/.bin/strobe bench perf/startup.bench.ts \
+  --base eager --head deferred --check
+```
+
 O perfil de desenvolvimento usa otimização nível 1, mantendo assertions, para que
 layout e construção da cena Rune não rodem sem otimização durante `cargo run`.
 A lista usa uma única linha interativa por lance; setas resolvem somente raízes e
 o painel Análise expande apenas a continuação selecionada. Não há cache de subárvores
 ou de dados derivados nesses caminhos; o tema é construído por renderização.
+
+### Jogar contra Stockfish
+
+A navegação **Jogar contra Stockfish** abre uma partida local, sem relógio, com
+rating entre **1320 e 3190 Elo** e escolha de brancas, pretas ou cor aleatória.
+A força usa `UCI_LimitStrength` e `UCI_Elo` do Stockfish; o Elo é uma estimativa
+do motor, não uma equivalência ao rating do Chess.com. O executável é resolvido
+pelos mesmos caminhos da análise nativa.
+
+O tabuleiro aceita cliques e arraste, roque, en passant e escolha de promoção.
+Xeque-mate, afogamento, material insuficiente, repetição tripla e a regra dos
+50 lances encerram a partida; também é possível desistir. **Analisar partida**
+abre a configuração da revisão com o PGN e o resultado da partida jogada.
+Cada partida aparece junto das análises em **Sessões abertas**. É possível abrir
+várias partidas, alternar entre elas, consultar os lances anteriores e voltar à
+posição atual para continuar jogando. Cor, orientação, posição consultada e
+promoção pendente são preservadas por sessão. A partida fica na memória ao
+navegar entre telas; sua revisão é salva pelo
+fluxo normal de análise. Sair do aplicativo descarta partidas ainda não analisadas.
+
+Sair da tela mantém o turno do Stockfish em andamento. A resposta atualiza a
+partida de origem mesmo durante outra partida, análise ou configuração, sem
+mover o cursor se o usuário estiver consultando um lance anterior. Desistir ou
+fechar cancela somente a busca daquela partida; sair do aplicativo cancela todas
+as tarefas e aguarda a limpeza dos processos.
+
+O backend permite até dois grupos de Stockfish simultâneos (um em máquinas com
+uma CPU disponível), compartilhados por partidas, análises e diagnósticos. Um
+grupo pode conter os workers de uma revisão automática, dividindo seu orçamento.
+As demais tarefas aguardam na fila do semáforo, preservando o estado da sessão.
+O motor ao vivo divide o limite de threads disponíveis entre os grupos e limita
+Hash a 512 MiB por grupo; partidas usam um thread e 32 MiB. Sessões ociosas liberam
+seus processos para não bloquear a fila. Não há um processo por aba aberta.
+As cenas `play`, `play-game` e `play-many` são determinísticas.
+
+Teste opcional com o executável real:
+
+```sh
+ENGINE_ROOM_STOCKFISH=/caminho/para/stockfish cargo test -p engineroom-rune real_stockfish_returns_a_legal_move_at_rating_limits -- --ignored
+```
+
+A rodada de QA multicessão, os contratos e as limitações estão em [qa-multisession.md](qa-multisession.md).
