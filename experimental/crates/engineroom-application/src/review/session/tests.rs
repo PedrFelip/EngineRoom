@@ -164,7 +164,9 @@ async fn replacing_live_search_waits_for_discard_and_does_not_emit_old_result() 
     .unwrap();
     let event = receive(&mut rx, |e| matches!(e.event, Event::LiveCompleted { .. })).await;
     assert_eq!(event.request_id, Some(2));
-    assert_eq!(f.state.lock().unwrap().stopped, 1);
+    let mut finished = s.finished.clone();
+    finished.wait_for(|id| *id >= 2).await.unwrap();
+    assert_eq!(f.state.lock().unwrap().stopped, 2);
     assert_eq!(f.acquired.load(std::sync::atomic::Ordering::SeqCst), 2);
     s.close.send_replace(true);
     running.await.unwrap();

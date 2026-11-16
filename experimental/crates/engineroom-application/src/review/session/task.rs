@@ -152,9 +152,9 @@ pub(super) async fn run_session(
                         },
                     );
                 }
-            } else {
-                pipeline.discard().await;
             }
+            // Idle sessions release capacity for other reviews, games and probes.
+            pipeline.discard().await;
             finished.send_replace(id);
             continue;
         }
