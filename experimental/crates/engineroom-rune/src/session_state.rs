@@ -9,7 +9,17 @@ impl State {
         self.start_backend();
         match crate::desktop_paths::data_dir() {
             Ok(dir) => {
-                self.startup.store = Some(Store::open(dir.join("workspace.json"), move || (wake)()))
+                let (store, initial) = Store::open(dir.join("workspace.json"), move || (wake)());
+                self.startup.store = Some(store);
+                // The initial read is synchronous: setup runs before the first
+                // frame, so the window opens already showing the restored
+                // workspace instead of a loading state.
+                match initial {
+                    Ok(Some(restored)) => self.restore_workspace(*restored),
+                    Ok(None) => {}
+                    Err(e) => self.startup.error = Some(e),
+                }
+                self.startup.loaded = true;
             }
             Err(e) => {
                 self.startup.error = Some(e.to_string());
@@ -132,11 +142,6 @@ impl State {
         if !self.startup.enabled() {
             return false;
         }
-        if !self.startup.first_poll {
-            self.startup.first_poll = true;
-            tx.wake_after(std::time::Duration::from_millis(1));
-            return false;
-        }
         let mut changed = false;
         let events = self
             .startup
@@ -145,15 +150,6 @@ impl State {
             .map_or_else(Vec::new, Store::drain);
         for event in events {
             match event {
-                Event::Loaded(result) => {
-                    match result {
-                        Ok(Some(restored)) => self.restore_workspace(*restored),
-                        Ok(None) => {}
-                        Err(e) => self.startup.error = Some(e),
-                    }
-                    self.startup.loaded = true;
-                    self.startup.last_checkpoint = now;
-                }
                 Event::Saved(Err(e)) => self.startup.error = Some(e),
                 Event::Saved(Ok(())) => {}
             }

@@ -288,7 +288,6 @@ enum Intent {
     Stop,
 }
 pub(crate) enum Event {
-    Loaded(Result<Option<Box<Restored>>, String>),
     Saved(Result<(), String>),
 }
 pub(crate) struct Store {
@@ -297,14 +296,19 @@ pub(crate) struct Store {
     worker: Option<thread::JoinHandle<()>>,
 }
 impl Store {
-    pub fn open(path: PathBuf, wake: impl Fn() + Send + 'static) -> Self {
+    /// Reads the current workspace before starting the save worker.
+    ///
+    /// The initial read is synchronous so setup can restore the workspace
+    /// without racing the first UI frame; saves stay on the worker thread.
+    pub fn open(
+        path: PathBuf,
+        wake: impl Fn() + Send + 'static,
+    ) -> (Self, Result<Option<Box<Restored>>, String>) {
+        let initial = read(&path);
+        let writable = initial.is_ok();
         let (sender, intents) = mpsc::channel();
         let (tx, events) = mpsc::channel();
         let worker = thread::spawn(move || {
-            let initial = read(&path);
-            let writable = initial.is_ok();
-            let _ = tx.send(Event::Loaded(initial));
-            wake();
             let mut previous = None;
             while let Ok(intent) = intents.recv() {
                 let (mut doc, mut ack) = match intent {
@@ -342,11 +346,14 @@ impl Store {
                 }
             }
         });
-        Self {
-            sender,
-            events,
-            worker: Some(worker),
-        }
+        (
+            Self {
+                sender,
+                events,
+                worker: Some(worker),
+            },
+            initial,
+        )
     }
     pub fn save(&self, doc: Document) {
         let _ = self.sender.send(Intent::Save(Box::new(doc)));
@@ -408,7 +415,6 @@ fn write(path: &Path, doc: Document, previous: &mut Option<Vec<u8>>) -> Result<(
 mod tests {
     use super::*;
     use crate::state::{ReviewTab, State};
-    use std::time::Duration;
 
     fn path() -> PathBuf {
         std::env::temp_dir().join(format!(
@@ -548,16 +554,8 @@ mod tests {
     #[test]
     fn flush_is_a_barrier_and_drop_drains_the_last_queued_checkpoint() {
         let path = path();
-        let (tx, rx) = mpsc::channel();
-        let store = Store::open(path.clone(), move || {
-            let _ = tx.send(());
-        });
-        rx.recv_timeout(Duration::from_secs(5))
-            .expect("loaded notification");
-        assert!(matches!(
-            store.drain().first(),
-            Some(Event::Loaded(Ok(None)))
-        ));
+        let (store, initial) = Store::open(path.clone(), || {});
+        assert!(matches!(initial, Ok(None)));
         let mut s = State::default();
         s.start_play();
         store.save(s.workspace_document());
@@ -584,13 +582,8 @@ mod tests {
         let path = path();
         for bytes in [b"{broken".as_slice(), b"{\"version\":999}".as_slice()] {
             fs::write(&path, bytes).expect("seed invalid file");
-            let (tx, rx) = mpsc::channel();
-            let store = Store::open(path.clone(), move || {
-                let _ = tx.send(());
-            });
-            rx.recv_timeout(Duration::from_secs(5))
-                .expect("loaded notification");
-            assert!(matches!(store.drain().first(), Some(Event::Loaded(Err(_)))));
+            let (store, initial) = Store::open(path.clone(), || {});
+            assert!(initial.is_err());
             assert!(store.flush(State::default().workspace_document()).is_err());
             drop(store);
             assert_eq!(fs::read(&path).expect("preserved file"), bytes);

@@ -7,7 +7,6 @@ pub(crate) struct Startup {
     pub wake: Option<rune::Waker>,
     pub store: Option<Store>,
     pub loaded: bool,
-    pub first_poll: bool,
     pub backend: Option<mpsc::Receiver<Result<Bridge, String>>>,
     pub backend_started: bool,
     pub error: Option<String>,

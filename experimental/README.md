@@ -88,6 +88,8 @@ orienta layout, escopos de eventos, acessibilidade e testes headless.
 - Alternar entre sessões abertas pela dock, preservando lance, orientação, variações e resultado.
   Partidas e análises continuam trabalhando em segundo plano. Eventos, erros e
   cancelamentos são vinculados à sessão, e fechar uma sessão não apaga seu histórico.
+  O workspace é lido de forma síncrona no `setup`, antes do primeiro quadro: a janela
+  abre direto no estado restaurado, sem tela de carga nem indicativo de restauração.
 - Reabrir, reanalisar e excluir revisões salvas na lista paginada do histórico
   ("Carregar mais").
 - Persistir as preferências em `engineroom-experimental/preferences.json` dentro do

@@ -52,22 +52,7 @@ fn view(s: &State, cx: &mut Cx<State>) -> El {
         Page::History => components::history::view(s, k, layout),
         Page::Settings => components::settings::view(s, k, layout, &mut layers),
     };
-    let content = if s.startup.loading() {
-        rune::col()
-            .grow(1.0)
-            .center()
-            .gap(8.0)
-            .child(components::ui::label(
-                "Restaurando sessões…",
-                18.0,
-                k.c.text_base,
-            ))
-            .child(components::ui::label(
-                "Preparando seu espaço de trabalho",
-                13.0,
-                k.c.text_muted,
-            ))
-    } else if let Some(error) = &s.startup.error {
+    let content = if let Some(error) = &s.startup.error {
         rune::col()
             .grow(1.0)
             .min_h(0.0)
@@ -81,8 +66,7 @@ fn view(s: &State, cx: &mut Cx<State>) -> El {
     } else {
         content
     };
-    let trailing = (!s.startup.loading()
-        && (s.page == Page::Review || (s.page == Page::Play && s.play.game.is_some()))
+    let trailing = ((s.page == Page::Review || (s.page == Page::Play && s.play.game.is_some()))
         && s.review_sidebar.is_open()
         && !layout.stacked_review())
     .then(|| {
@@ -97,18 +81,8 @@ fn view(s: &State, cx: &mut Cx<State>) -> El {
         )
     });
     rune_kit::root(
-        (if s.startup.loading() {
-            components::shell::view(s, cx, content.key("page-body").fill(k.c.page), trailing, k)
-                .inert()
-        } else {
-            components::shell::view(s, cx, content.key("page-body").fill(k.c.page), trailing, k)
-        })
-        .on_key(review_shortcut)
-        .children(
-            s.startup
-                .loading()
-                .then(|| rune::el().absolute(0.0, 0.0).inert()),
-        ),
+        components::shell::view(s, cx, content.key("page-body").fill(k.c.page), trailing, k)
+            .on_key(review_shortcut),
         layers,
     )
     .on_drop_files(|s: &mut State, files, _| {
