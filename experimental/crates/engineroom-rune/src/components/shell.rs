@@ -4,7 +4,7 @@ use crate::{
     session_style::{
         self, DragItem, InsertSide, SessionColor, SessionDrag, SessionDropTarget, SessionFolder,
     },
-    state::{Page, State, WorkspaceReview},
+    state::{Page, RenderStatus, State, WorkspaceReview},
 };
 use rune::{Color, Cursor, Cx, Drag, El, Phase, col, el, icon, row};
 use rune_kit::{
@@ -132,10 +132,13 @@ fn reorder_indicator(s: &State, item: &DragItem, k: &Kit) -> Option<El> {
 fn session_row(
     s: &State,
     entry: &WorkspaceReview,
+    status: RenderStatus,
     folder: Option<&SessionFolder>,
     k: &Kit,
     layers: &mut Vec<El>,
 ) -> El {
+    debug_assert_eq!(status.label(), entry.status());
+    debug_assert_eq!(status.detail(), entry.status_detail());
     let key = entry.key;
     let active = s.active_workspace == Some(key);
     let (status, detail) = if active {
@@ -146,10 +149,10 @@ fn session_row(
         } else if s.real_result.is_some() {
             ("Concluída", "Análise concluída".to_string())
         } else {
-            (entry.status(), entry.status_detail().to_string())
+            (status.label(), status.detail().to_string())
         }
     } else {
-        (entry.status(), entry.status_detail().to_string())
+        (status.label(), status.detail().to_string())
     };
     let folder_name = folder.map_or("Sem pasta", |folder| folder.name.as_str());
     let item = SidebarRow::new(&entry.title)
@@ -415,8 +418,18 @@ fn sidebar(s: &State, k: &Kit, layers: &mut Vec<El>) -> El {
                             .py(10.0),
                     );
                 }
-                for entry in group.entries {
-                    contents = contents.child(session_row(s, entry, Some(folder), k, layers));
+                for slot in group.entries {
+                    let entry = slot
+                        .get(&s.workspace)
+                        .expect("group slot index comes from this workspace");
+                    contents = contents.child(session_row(
+                        s,
+                        entry,
+                        slot.status(),
+                        Some(folder),
+                        k,
+                        layers,
+                    ));
                 }
                 section = section.child(contents);
             }
@@ -466,8 +479,11 @@ fn sidebar(s: &State, k: &Kit, layers: &mut Vec<El>) -> El {
             } else if group.entries.is_empty() {
                 rows = rows.child(empty_hint());
             }
-            for entry in group.entries {
-                rows = rows.child(session_row(s, entry, None, k, layers));
+            for slot in group.entries {
+                let entry = slot
+                    .get(&s.workspace)
+                    .expect("group slot index comes from this workspace");
+                rows = rows.child(session_row(s, entry, slot.status(), None, k, layers));
             }
             shell = shell.child(rows);
         }
@@ -1168,7 +1184,9 @@ mod tests {
         assert!(rt.find(&format!("session-{session}")).is_some());
     }
     fn begin_drag(rt: &mut Runtime<State>, source: &str) {
-        let (x, y) = rt.find(source).expect("drag source");
+        let (x, y) = rt
+            .find(source)
+            .unwrap_or_else(|| panic!("drag source {source} not found"));
         rt.pointer_down(x, y);
         rt.pointer_move(x + 10.0, y);
         settle(rt);

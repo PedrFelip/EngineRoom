@@ -101,7 +101,7 @@ impl Default for Preferences {
 }
 #[path = "workspace.rs"]
 mod workspace;
-pub(crate) use workspace::WorkspaceReview;
+pub(crate) use workspace::{RenderStatus, WorkspaceReview};
 
 #[derive(Clone, Debug, PartialEq)]
 enum HistoryOperation {
@@ -1334,6 +1334,13 @@ impl State {
             None => &self.game.positions[self.ply],
         }
     }
+    /// FEN of the current position from the flat mainline/variation arrays.
+    pub(crate) fn current_fen(&self) -> &str {
+        match self.active_variation {
+            Some(i) => self.variations[i].fen(),
+            None => self.game.fen(self.ply),
+        }
+    }
     pub fn visible_variation_cursor(&self) -> Option<(usize, usize)> {
         let mut index = self.active_variation?;
         let cursor = self.variations[index].cursor;
@@ -1433,9 +1440,9 @@ impl State {
     pub fn position_analysis(
         &self,
     ) -> Option<&engineroom_backend::review::types::PositionAnalysis> {
-        let fen = engineroom_backend::review::core::fen(self.position());
-        let original = self.original_analysis(&fen, self.current_mainline_ply());
-        match (original, self.live_positions.get(&fen)) {
+        let fen = self.current_fen();
+        let original = self.original_analysis(fen, self.current_mainline_ply());
+        match (original, self.live_positions.get(fen)) {
             (Some(a), Some(b)) => Some(if prefer_incoming(a, b) { b } else { a }),
             (Some(a), None) => Some(a),
             (None, live) => live,
@@ -1457,9 +1464,9 @@ impl State {
         }
     }
     fn candidate_analysis(&self) -> Option<&engineroom_backend::review::types::PositionAnalysis> {
-        let fen = engineroom_backend::review::core::fen(self.position());
-        let original = self.original_analysis(&fen, self.current_mainline_ply());
-        let live = self.live_positions.get(&fen);
+        let fen = self.current_fen();
+        let original = self.original_analysis(fen, self.current_mainline_ply());
+        let live = self.live_positions.get(fen);
         match (original, live) {
             (Some(a), Some(b)) if (b.lines.len(), b.depth) > (a.lines.len(), a.depth) => Some(b),
             (Some(a), _) => Some(a),
@@ -1781,6 +1788,7 @@ mod council_regressions {
     fn mainline_repeated_fen_uses_its_ply_and_live_candidate_policy() {
         let mut state = State::fixture();
         state.game.positions[1] = state.game.positions[0].clone();
+        state.game.fens[1] = state.game.fens[0].clone();
         let positions = &mut state.real_result.as_mut().unwrap().positions;
         positions[1].fen = positions[0].fen.clone();
         positions[0].cp = 10;
@@ -1951,6 +1959,42 @@ mod council_regressions {
         state.apply_history_load(latest, Ok(Some(Box::new(config))), false);
         assert_eq!(state.page, Page::Settings);
         assert_eq!(state.workspace.len(), 2);
+    }
+    #[test]
+    fn cached_fen_matches_serialized_position_across_mainline_and_variations() {
+        let mut state = State::fixture();
+        for ply in 0..=state.game.moves.len() {
+            state.go_to(ply);
+            assert_eq!(
+                state.current_fen(),
+                engineroom_backend::review::core::fen(state.position()),
+                "mainline ply {ply}"
+            );
+        }
+        state.go_to(1);
+        state.explore_candidate();
+        let index = state.active_variation.expect("fixture has a candidate");
+        for cursor in 0..state.variations[index].moves.len() {
+            state.variations[index].cursor = cursor;
+            assert_eq!(
+                state.current_fen(),
+                engineroom_backend::review::core::fen(state.position()),
+                "variation cursor {cursor}"
+            );
+        }
+        let mut setup = State::fixture();
+        setup.game = crate::game::parse(
+            "[SetUp \"1\"]\n[FEN \"7k/P7/8/8/8/8/4K3/8 w - - 0 1\"]\n\n1. a8=Q+ *",
+        )
+        .expect("FEN setup PGN");
+        for ply in 0..=setup.game.moves.len() {
+            setup.go_to(ply);
+            assert_eq!(
+                setup.current_fen(),
+                engineroom_backend::review::core::fen(setup.position()),
+                "FEN setup ply {ply}"
+            );
+        }
     }
 }
 

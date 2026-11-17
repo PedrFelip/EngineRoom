@@ -1,4 +1,5 @@
 //! Local PGN preview only; analysis and persistence remain the Tauri backend's responsibility.
+use engineroom_backend::review::core;
 use pgn_reader::{RawTag, Reader, SanPlus, Visitor};
 use shakmaty::{CastlingMode, Chess, Position, Square, fen::Fen};
 use std::{collections::HashMap, io::Cursor, ops::ControlFlow};
@@ -12,19 +13,29 @@ pub struct Game {
     pub avatar_key: Option<String>,
     pub ratings: [Option<String>; 2],
     pub positions: Vec<Chess>,
+    /// FEN for each position, parallel to `positions`. Analysis lookups reuse
+    /// these instead of re-serializing the same board several times per frame.
+    pub fens: Vec<String>,
     pub moves: Vec<String>,
 }
 impl Game {
     pub fn empty() -> Self {
+        let position = Chess::default();
         Self {
             white: "Brancas".into(),
             black: "Pretas".into(),
             event: "Nova partida".into(),
             avatar_key: None,
             ratings: [None, None],
-            positions: vec![Chess::default()],
+            fens: vec![core::fen(&position)],
+            positions: vec![position],
             moves: Vec::new(),
         }
+    }
+
+    /// Cached FEN for the position at `ply`.
+    pub fn fen(&self, ply: usize) -> &str {
+        &self.fens[ply]
     }
 
     pub fn board(&self, ply: usize) -> [char; 64] {
@@ -70,6 +81,7 @@ impl Visitor for Preview {
             None => Chess::default(),
         };
         ControlFlow::Continue(Game {
+            fens: vec![core::fen(&position)],
             white: tags
                 .get("White")
                 .cloned()
@@ -97,6 +109,7 @@ impl Visitor for Preview {
         match san.san.to_move(&position) {
             Ok(m) => {
                 position.play_unchecked(m);
+                game.fens.push(core::fen(&position));
                 game.positions.push(position);
                 game.moves.push(san.to_string());
             }

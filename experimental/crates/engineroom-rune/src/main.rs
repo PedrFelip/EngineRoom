@@ -580,6 +580,8 @@ fn main() {
     rune::run(spec());
 }
 #[cfg(test)]
+mod analysis_lookup_bench;
+#[cfg(test)]
 mod perf_headless;
 #[cfg(test)]
 mod tests;

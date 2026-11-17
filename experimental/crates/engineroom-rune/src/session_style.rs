@@ -1,14 +1,71 @@
 //! Named folders for sidebar presentation. The workspace retains analysis ownership.
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet};
 
 use rune::{El, PointerPress, el, icon};
 use rune_kit::Kit;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::{
-    state::{State, WorkspaceReview},
+    state::{RenderStatus, State, WorkspaceReview},
     theme,
 };
+
+/// Bits of a [`GroupSlot`] reserved for the workspace index.
+const INDEX_BITS: u32 = 24;
+const INDEX_MASK: u32 = (1 << INDEX_BITS) - 1;
+/// Bits above the index reserved for the packed [`RenderStatus`].
+const STATUS_MASK: u32 = 0xF;
+
+/// A compact reference to a workspace entry inside a sidebar group.
+///
+/// The low 24 bits are a checked index into [`State::workspace`]; the next
+/// four bits carry the render status computed by the grouping pass. Groups
+/// store these values instead of borrowing `WorkspaceReview`, and the status
+/// is available to the renderer without reading the analysis fields again.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GroupSlot(u32);
+
+impl GroupSlot {
+    /// Sentinel for an absent slot; it never aliases a valid handle.
+    pub const NONE: Self = Self(u32::MAX);
+
+    /// Packs a workspace index and its render status into one word.
+    ///
+    /// Returns `None` when the index does not fit the index field, so callers
+    /// can guard capacity instead of silently truncating a handle.
+    pub(crate) fn new(index: usize, status: RenderStatus) -> Option<Self> {
+        let index = u32::try_from(index).ok()?;
+        if index >= INDEX_MASK {
+            return None;
+        }
+        Some(Self((status.code() << INDEX_BITS) | index))
+    }
+
+    /// Returns the checked workspace index encoded in the slot.
+    pub fn index(self) -> usize {
+        (self.0 & INDEX_MASK) as usize
+    }
+
+    /// Returns the render status packed by the grouping pass.
+    pub(crate) fn status(self) -> RenderStatus {
+        RenderStatus::from_code((self.0 >> INDEX_BITS) & STATUS_MASK)
+            .expect("group slot carries a valid render status")
+    }
+
+    /// Returns `true` for the absence sentinel.
+    pub const fn is_none(self) -> bool {
+        self.0 == Self::NONE.0
+    }
+
+    /// Resolves the slot against a workspace, rejecting sentinels and indexes
+    /// that do not belong to that workspace.
+    pub fn get(self, workspace: &[WorkspaceReview]) -> Option<&WorkspaceReview> {
+        if self.is_none() {
+            return None;
+        }
+        workspace.get(self.index())
+    }
+}
 
 /// A harmonised swatch from the app's theme scales. `None` is ordinary (no marker).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -229,7 +286,8 @@ fn move_to<T>(items: &mut Vec<T>, source: impl Fn(&T) -> bool, target: impl Fn(&
 
 pub struct SessionGroup<'a> {
     pub folder: Option<&'a SessionFolder>,
-    pub entries: Vec<&'a WorkspaceReview>,
+    /// Packed workspace slots, in the order they should be rendered.
+    pub entries: Vec<GroupSlot>,
 }
 
 fn display_groups<'a>(
@@ -239,52 +297,83 @@ fn display_groups<'a>(
 ) -> Vec<SessionGroup<'a>> {
     debug_assert!(workspace.windows(2).all(|pair| pair[0].key < pair[1].key));
     let mut groups = Vec::with_capacity(presentation.folders.len() + 1);
-    let mut folder_indices = HashMap::with_capacity(presentation.folders.len());
-    let mut placed = HashSet::new();
-    for folder in &presentation.folders {
-        folder_indices.insert(folder.id.as_str(), groups.len());
-        let entries = order
-            .get(&folder.id)
-            .into_iter()
-            .flatten()
-            .filter_map(|&key| workspace_entry(workspace, key))
-            .filter(|entry| {
-                entry.folder_id.as_deref() == Some(folder.id.as_str()) && placed.insert(entry.key)
-            })
-            .collect();
+
+    // Flat folder index sorted by id: folder id -> group index. Group order
+    // matches folder order, so the index doubles as the group. A binary search
+    // over this contiguous array replaces the per-pass HashMap.
+    let mut folder_order: Vec<usize> = (0..presentation.folders.len()).collect();
+    folder_order.sort_unstable_by_key(|&index| presentation.folders[index].id.as_str());
+    let folder_group = |id: &str| -> Option<usize> {
+        let position = folder_order
+            .binary_search_by(|&index| presentation.folders[index].id.as_str().cmp(id))
+            .ok()?;
+        Some(folder_order[position])
+    };
+
+    // Flat, workspace-indexed placement marks replace the HashSet of placed
+    // keys. The workspace keeps unique monotonic keys in sorted order, so the
+    // slot index is a stable alias for a session key.
+    const UNPLACED: usize = usize::MAX;
+    let mut placements = vec![UNPLACED; workspace.len()];
+
+    for (folder_index, folder) in presentation.folders.iter().enumerate() {
+        let mut entries = Vec::new();
+        for &key in order.get(&folder.id).into_iter().flatten() {
+            let Some(slot) = workspace_slot(workspace, key) else {
+                continue;
+            };
+            let entry = &workspace[slot];
+            if entry.folder_id.as_deref() != Some(folder.id.as_str())
+                || placements[slot] != UNPLACED
+            {
+                continue;
+            }
+            placements[slot] = folder_index;
+            if let Some(handle) = GroupSlot::new(slot, entry.render_status()) {
+                entries.push(handle);
+            }
+        }
         groups.push(SessionGroup {
             folder: Some(folder),
             entries,
         });
     }
 
+    let unfiled_group = presentation.folders.len();
     let mut unfiled = SessionGroup {
         folder: None,
-        entries: vec![],
+        entries: Vec::new(),
     };
-    for entry in workspace
-        .iter()
-        .filter(|entry| !placed.contains(&entry.key))
-    {
-        match entry
+    for (slot, entry) in workspace.iter().enumerate() {
+        if placements[slot] != UNPLACED {
+            continue;
+        }
+        let group = entry
             .folder_id
             .as_deref()
-            .and_then(|id| folder_indices.get(id))
-        {
-            Some(&index) => groups[index].entries.push(entry),
-            None => unfiled.entries.push(entry),
+            .and_then(folder_group)
+            .unwrap_or(unfiled_group);
+        placements[slot] = group;
+        let Some(handle) = GroupSlot::new(slot, entry.render_status()) else {
+            continue;
+        };
+        if group == unfiled_group {
+            unfiled.entries.push(handle);
+        } else {
+            groups[group].entries.push(handle);
         }
     }
     groups.push(unfiled);
     groups
 }
 
-fn workspace_entry(workspace: &[WorkspaceReview], key: u64) -> Option<&WorkspaceReview> {
+fn workspace_slot(workspace: &[WorkspaceReview], key: u64) -> Option<usize> {
     // The workspace appends monotonic keys and retains their order on close.
-    let index = workspace
-        .binary_search_by_key(&key, |entry| entry.key)
-        .ok()?;
-    Some(&workspace[index])
+    workspace.binary_search_by_key(&key, |entry| entry.key).ok()
+}
+
+fn workspace_entry(workspace: &[WorkspaceReview], key: u64) -> Option<&WorkspaceReview> {
+    Some(&workspace[workspace_slot(workspace, key)?])
 }
 
 impl State {
@@ -631,7 +720,7 @@ mod tests {
             state.session_groups()[0]
                 .entries
                 .iter()
-                .map(|entry| entry.key)
+                .map(|slot| state.workspace[slot.index()].key)
                 .collect::<Vec<_>>()
         };
         assert_eq!(keys(&state), [second, first]);
@@ -662,7 +751,7 @@ mod tests {
             groups[0]
                 .entries
                 .iter()
-                .map(|entry| entry.key)
+                .map(|slot| state.workspace[slot.index()].key)
                 .collect::<Vec<_>>(),
             [second, first]
         );
@@ -744,6 +833,91 @@ mod tests {
                 .is_none()
         );
     }
+    #[test]
+    fn group_slot_packs_status_and_guards_capacity_and_sentinel() {
+        for status in [
+            RenderStatus::Preview,
+            RenderStatus::Paused,
+            RenderStatus::Complete,
+            RenderStatus::Error,
+        ] {
+            let slot = GroupSlot::new(3, status).expect("slot fits");
+            assert_eq!(slot.index(), 3);
+            assert_eq!(slot.status(), status);
+            assert!(!slot.is_none());
+            assert_ne!(slot, GroupSlot::NONE);
+        }
+        assert!(GroupSlot::NONE.is_none());
+        assert_eq!(
+            GroupSlot::new(INDEX_MASK as usize, RenderStatus::Preview),
+            None,
+            "index that does not fit must be rejected"
+        );
+
+        let state = State::fixture();
+        let in_range = GroupSlot::new(0, RenderStatus::Preview).expect("slot 0");
+        assert!(
+            in_range
+                .get(&state.workspace)
+                .is_some_and(|entry| entry.key == state.workspace[0].key)
+        );
+        assert!(GroupSlot::NONE.get(&state.workspace).is_none());
+        let out_of_range = GroupSlot::new(state.workspace.len() + 1000, RenderStatus::Preview)
+            .expect("index still fits the packed field");
+        assert!(out_of_range.get(&state.workspace).is_none());
+    }
+
+    #[test]
+    fn grouping_packs_each_render_status_from_the_workspace() {
+        let mut state = crate::fixtures::workspace_scene();
+        let folder = create(&mut state, "Estudos", SessionColor::Blue);
+        state.move_session(state.workspace[0].key, Some(folder));
+        let mut seen = 0;
+        for group in state.session_groups() {
+            for slot in group.entries {
+                let entry = slot
+                    .get(&state.workspace)
+                    .expect("grouped slot resolves in the same workspace");
+                assert_eq!(slot.status(), entry.render_status());
+                seen += 1;
+            }
+        }
+        assert_eq!(
+            seen,
+            state.workspace.len(),
+            "every session grouped exactly once"
+        );
+    }
+
+    #[test]
+    fn grouping_routes_by_folder_id_when_presentation_order_differs_from_id_order() {
+        let mut state = crate::fixtures::workspace_scene();
+        let first_folder = create(&mut state, "Primeira", SessionColor::Blue);
+        let second_folder = create(&mut state, "Segunda", SessionColor::Amber);
+        let first = state.workspace[0].key;
+        let second = state.workspace[1].key;
+        state.move_session(first, Some(first_folder.clone()));
+        state.move_session(second, Some(second_folder.clone()));
+        // Invert presentation order so the flat folder index cannot rely on ids
+        // being already sorted.
+        state.preferences.sessions.folders.reverse();
+        assert_ne!(first_folder, second_folder);
+
+        let groups = state.session_groups();
+        let keys = |id: &str| {
+            groups
+                .iter()
+                .find(|group| group.folder.is_some_and(|folder| folder.id == id))
+                .expect("folder group")
+                .entries
+                .iter()
+                .map(|slot| state.workspace[slot.index()].key)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(keys(&first_folder), [first]);
+        assert_eq!(keys(&second_folder), [second]);
+    }
+
     #[test]
     fn folder_colors_remain_visible_in_both_themes() {
         let contrast = |a: rune::Color, b: rune::Color| {

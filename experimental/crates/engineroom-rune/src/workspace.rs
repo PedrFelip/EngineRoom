@@ -3,6 +3,61 @@ use super::{Page, Profile, ReviewTab, State};
 use crate::{game::Game, variation::Variation};
 use engineroom_backend::review::types::{ReviewConfig, ReviewResult};
 
+/// Compact render state for one workspace entry.
+///
+/// The grouping pass packs this into the upper bits of each sidebar slot so
+/// the renderer does not re-read the analysis fields to pick a row subtitle.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum RenderStatus {
+    Preview,
+    Paused,
+    Complete,
+    Error,
+}
+
+impl RenderStatus {
+    /// Stable numeric code stored in a sidebar slot.
+    pub(crate) fn code(self) -> u32 {
+        match self {
+            Self::Preview => 0,
+            Self::Paused => 1,
+            Self::Complete => 2,
+            Self::Error => 3,
+        }
+    }
+
+    /// Rebuilds a status from its packed code, rejecting reserved values.
+    pub(crate) fn from_code(code: u32) -> Option<Self> {
+        match code {
+            0 => Some(Self::Preview),
+            1 => Some(Self::Paused),
+            2 => Some(Self::Complete),
+            3 => Some(Self::Error),
+            _ => None,
+        }
+    }
+
+    /// Short status shown in the sidebar subtitle.
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Self::Preview => "Prévia",
+            Self::Paused => "Pausada",
+            Self::Complete => "Concluída",
+            Self::Error => "Erro",
+        }
+    }
+
+    /// Full status shown in the row's accessible help.
+    pub(crate) fn detail(self) -> &'static str {
+        match self {
+            Self::Preview => "Prévia · nenhuma análise iniciada",
+            Self::Paused => "Pausada · retoma do cache",
+            Self::Complete => "Análise concluída",
+            Self::Error => "Erro · abra para tentar novamente",
+        }
+    }
+}
+
 #[derive(Clone)]
 pub(crate) struct WorkspaceReview {
     pub key: u64,
@@ -26,28 +81,23 @@ pub(crate) struct WorkspaceReview {
     manual_time: bool,
 }
 impl WorkspaceReview {
-    pub fn status(&self) -> &'static str {
+    pub(crate) fn render_status(&self) -> RenderStatus {
         if self.error.is_some() {
-            "Erro"
+            RenderStatus::Error
         } else if self.result.is_some() {
-            "Concluída"
+            RenderStatus::Complete
         } else if self.paused {
-            "Pausada"
+            RenderStatus::Paused
         } else {
-            "Prévia"
+            RenderStatus::Preview
         }
+    }
+    pub fn status(&self) -> &'static str {
+        self.render_status().label()
     }
     /// Full status for the row tooltip, where the subtitle would truncate.
     pub fn status_detail(&self) -> &'static str {
-        if self.error.is_some() {
-            "Erro · abra para tentar novamente"
-        } else if self.result.is_some() {
-            "Análise concluída"
-        } else if self.paused {
-            "Pausada · retoma do cache"
-        } else {
-            "Prévia · nenhuma análise iniciada"
-        }
+        self.render_status().detail()
     }
 }
 impl State {
