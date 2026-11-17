@@ -1,6 +1,6 @@
 //! Rust owns the entire UCI exchange and exclusive process lease.
-use super::types::*;
-use std::{collections::BTreeMap, future::Future, pin::Pin, time::Duration};
+use super::{scoring::win_pct, types::*};
+use std::{future::Future, pin::Pin, time::Duration};
 use tokio::sync::watch;
 pub type Task<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
@@ -186,6 +186,62 @@ pub fn parse_info(line: &str) -> Option<RawLine> {
         san: None,
     })
 }
+/// MultiPV rank is 1-based; higher ranks are malformed reports and discarded.
+/// Stockfish caps MultiPV at 256, so this bound keeps the slot vector bounded
+/// without rejecting any rank a configured search can produce.
+const MAX_MULTIPV_RANK: u32 = 256;
+
+/// Latest completed report per MultiPV rank, stored in a flat slot vector.
+///
+/// MultiPV ranks are dense in practice, so a `Vec<Option<RawLine>>` gives O(1)
+/// updates and ascending-rank iteration without a tree node per rank. Gaps stay
+/// empty and are skipped when the lines are collected, preserving sparse and
+/// malformed reports exactly as the previous ordered map did.
+#[derive(Default)]
+struct LatestLines {
+    slots: Vec<Option<RawLine>>,
+}
+impl LatestLines {
+    fn record(&mut self, mut line: RawLine) {
+        let Some(slot) = line
+            .multipv
+            .checked_sub(1)
+            .filter(|_| line.multipv <= MAX_MULTIPV_RANK)
+            .map(|rank| rank as usize)
+        else {
+            return;
+        };
+        if self.slots.len() <= slot {
+            self.slots.resize_with(slot + 1, || None);
+        }
+        if self.slots[slot]
+            .as_ref()
+            .is_some_and(|previous| line.depth < previous.depth)
+        {
+            return;
+        }
+        if let Some(previous) = self.slots[slot].as_ref() {
+            line.unstable = if line.depth > previous.depth {
+                (win_pct(line.cp) - win_pct(previous.cp)).abs() >= 2.0
+                    || line.pv.first() != previous.pv.first()
+            } else {
+                previous.unstable
+            };
+        }
+        self.slots[slot] = Some(line);
+    }
+    fn depth(&self) -> u32 {
+        self.slots
+            .first()
+            .and_then(|slot| slot.as_ref())
+            .and_then(|line| line.depth)
+            .unwrap_or(0)
+    }
+    fn into_lines(self) -> Vec<RawLine> {
+        self.slots.into_iter().flatten().collect()
+    }
+}
+
 pub async fn evaluate(
     port: &mut dyn EnginePort,
     fen: &str,
@@ -206,32 +262,18 @@ pub async fn evaluate(
     let read = async {
         port.send(&format!("position fen {fen}")).await?;
         port.send(&go).await?;
-        let mut latest: BTreeMap<u32, RawLine> = BTreeMap::new();
+        let mut latest = LatestLines::default();
         loop {
             let line = port.next().await?;
-            if let Some(mut info) = parse_info(&line)
-                && latest
-                    .get(&info.multipv)
-                    .is_none_or(|p| info.depth >= p.depth)
-            {
-                if let Some(previous) = latest.get(&info.multipv) {
-                    info.unstable = if info.depth > previous.depth {
-                        (super::scoring::win_pct(info.cp) - super::scoring::win_pct(previous.cp))
-                            .abs()
-                            >= 2.0
-                            || info.pv.first() != previous.pv.first()
-                    } else {
-                        previous.unstable
-                    };
-                }
-                latest.insert(info.multipv, info);
+            if let Some(info) = parse_info(&line) {
+                latest.record(info);
             }
             if line.trim().starts_with("bestmove") {
                 break;
             }
         }
-        let depth = latest.get(&1).and_then(|l| l.depth).unwrap_or(0);
-        let lines: Vec<_> = latest.into_values().collect();
+        let depth = latest.depth();
+        let lines = latest.into_lines();
         let principal = lines.iter().find(|l| l.multipv == 1).ok_or_else(|| {
             ReviewError::new(
                 ReviewErrorCode::MissingEvaluation,
@@ -250,5 +292,75 @@ pub async fn evaluate(
     tokio::select! {
         _ = cancel.cancelled() => Err(ReviewError::cancelled()),
         result = tokio::time::timeout(Duration::from_millis(timeout), read) => result.unwrap_or_else(|_| Err(ReviewError::new(ReviewErrorCode::EngineTimeout, "engine.evaluate", format!("A engine não respondeu a '{go}' em {timeout}ms.")))),
+    }
+}
+
+#[cfg(test)]
+mod latest_lines_tests {
+    use super::*;
+
+    fn line(rank: u32, depth: u32, cp: i32, pv: &str) -> RawLine {
+        RawLine {
+            unstable: false,
+            multipv: rank,
+            cp,
+            pv: pv.split_whitespace().map(str::to_owned).collect(),
+            san: None,
+            depth: Some(depth),
+        }
+    }
+    fn ranks(lines: &[RawLine]) -> Vec<u32> {
+        lines.iter().map(|line| line.multipv).collect()
+    }
+
+    #[test]
+    fn ranks_are_sorted_ascending_and_sparse_gaps_are_skipped() {
+        let mut latest = LatestLines::default();
+        for rank in [3, 1, 5, 2] {
+            latest.record(line(rank, 12, 0, "e2e4"));
+        }
+        assert_eq!(ranks(&latest.into_lines()), vec![1, 2, 3, 5]);
+    }
+
+    #[test]
+    fn zero_and_out_of_range_ranks_are_discarded() {
+        let mut latest = LatestLines::default();
+        latest.record(line(0, 12, 0, "e2e4"));
+        latest.record(line(MAX_MULTIPV_RANK + 1, 12, 0, "e2e4"));
+        latest.record(line(u32::MAX, 12, 0, "e2e4"));
+        latest.record(line(MAX_MULTIPV_RANK, 12, 0, "e2e4"));
+        assert_eq!(ranks(&latest.into_lines()), vec![MAX_MULTIPV_RANK]);
+    }
+
+    #[test]
+    fn deepest_report_wins_and_instability_is_propagated() {
+        let mut latest = LatestLines::default();
+        latest.record(line(1, 10, 0, "e2e4"));
+        latest.record(line(1, 8, 900, "d2d4"));
+        assert_eq!(latest.into_lines()[0].cp, 0);
+
+        let mut latest = LatestLines::default();
+        latest.record(line(1, 10, 0, "e2e4"));
+        latest.record(line(1, 11, 500, "e2e4"));
+        let deepest = latest.into_lines().remove(0);
+        assert!(deepest.unstable, "a 2pp swing must mark the line unstable");
+
+        let mut latest = LatestLines::default();
+        latest.record(line(1, 10, 0, "e2e4"));
+        latest.record(line(1, 11, 500, "e2e4"));
+        latest.record(line(1, 11, 500, "e2e4"));
+        assert!(
+            latest.into_lines()[0].unstable,
+            "same-depth report inherits it"
+        );
+    }
+
+    #[test]
+    fn principal_depth_is_used_and_missing_principal_has_no_depth() {
+        let mut latest = LatestLines::default();
+        latest.record(line(2, 20, 0, "e2e4"));
+        assert_eq!(latest.depth(), 0);
+        latest.record(line(1, 12, 0, "e2e4"));
+        assert_eq!(latest.depth(), 12);
     }
 }
