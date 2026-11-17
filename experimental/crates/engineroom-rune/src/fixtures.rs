@@ -160,3 +160,34 @@ pub fn workspace_scene() -> State {
     state.activate_review(first);
     state
 }
+
+/// Populate named folders for deterministic sidebar scenes.
+pub fn file_session(s: &mut State, key: u64, color: crate::session_style::SessionColor) {
+    use crate::session_style::{SessionColor, SessionFolder};
+    if color == SessionColor::None {
+        return;
+    }
+    let id = format!("fixture-{}", color.slug());
+    if !s
+        .preferences
+        .sessions
+        .folders
+        .iter()
+        .any(|folder| folder.id == id)
+    {
+        s.preferences.sessions.folders.push(SessionFolder {
+            id: id.clone(),
+            name: match color {
+                SessionColor::Blue => "Aberturas",
+                SessionColor::Amber => "Torneios",
+                SessionColor::Violet => "Estudos",
+                SessionColor::Green => "Finais",
+                SessionColor::Red => "Revisar",
+                SessionColor::None => "Sem pasta",
+            }
+            .into(),
+            color,
+        });
+    }
+    s.move_session(key, Some(id));
+}

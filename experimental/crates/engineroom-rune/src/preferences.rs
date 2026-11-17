@@ -173,4 +173,32 @@ mod tests {
         assert_eq!(read(&path).unwrap(), Some(p));
         std::fs::remove_file(path).unwrap();
     }
+
+    #[test]
+    fn session_presentation_roundtrips_with_existing_preferences() {
+        use crate::session_style::SessionColor;
+
+        let path = path();
+        std::fs::write(&path, br#"{"version":1,"preferences":{"sound":false}}"#).unwrap();
+        let mut preferences = read(&path).unwrap().unwrap();
+        assert!(
+            !preferences.sound,
+            "older documents keep their existing settings"
+        );
+        preferences
+            .sessions
+            .folders
+            .push(crate::session_style::SessionFolder {
+                id: "openings".into(),
+                name: "Aberturas".into(),
+                color: SessionColor::Violet,
+            });
+        preferences
+            .sessions
+            .collapsed_folders
+            .insert("openings".into());
+        write(&path, preferences.clone()).unwrap();
+        assert_eq!(read(&path).unwrap(), Some(preferences));
+        std::fs::remove_file(path).unwrap();
+    }
 }

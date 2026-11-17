@@ -7,6 +7,8 @@ use engineroom_backend::review::types::{ReviewConfig, ReviewResult};
 pub(crate) struct WorkspaceReview {
     pub key: u64,
     pub title: String,
+    /// Session-local membership: a newly opened review always starts unfiled.
+    pub folder_id: Option<String>,
     pub config: ReviewConfig,
     game: Game,
     ply: usize,
@@ -52,6 +54,11 @@ impl State {
     fn snapshot(&self, key: u64, config: ReviewConfig) -> WorkspaceReview {
         WorkspaceReview {
             key,
+            folder_id: self
+                .workspace
+                .iter()
+                .find(|entry| entry.key == key)
+                .and_then(|entry| entry.folder_id.clone()),
             title: format!("{} × {}", self.game.white, self.game.black),
             config,
             game: self.game.clone(),
@@ -89,6 +96,7 @@ impl State {
         self.cancel_review();
     }
     pub fn activate_review(&mut self, key: u64) {
+        self.session_menu = None;
         if !self.workspace.iter().any(|review| review.key == key) {
             return;
         }
@@ -156,6 +164,14 @@ impl State {
         }
     }
     pub fn close_review(&mut self, key: u64) {
+        if self
+            .session_drag
+            .as_ref()
+            .is_some_and(|drag| drag.item == crate::session_style::DragItem::Session(key))
+        {
+            self.session_drag = None;
+        }
+        self.session_menu = None;
         self.invalidate_history_load();
         let original_page = self.page;
         let Some(index) = self.workspace.iter().position(|s| s.key == key) else {
@@ -166,6 +182,7 @@ impl State {
             self.cancel_review();
             self.active_workspace = None;
         }
+        self.forget_session_order(key);
         self.workspace.remove(index);
         if active && original_page != Page::Review {
             self.real_result = None;

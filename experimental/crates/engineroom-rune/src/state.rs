@@ -2,11 +2,13 @@
 use crate::{
     game::{self, Game},
     review_data,
+    session_style::SessionPresentation,
     variation::Variation,
 };
-use rune::TextEdit;
+use rune::{PointerPress, TextEdit};
 use rune_kit::shell::PaneState;
 use shakmaty::{Chess, Position, Role, Square};
+use std::collections::BTreeMap;
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Page {
     #[default]
@@ -75,6 +77,8 @@ pub struct Preferences {
     pub search_seconds: usize,
     pub threads_auto: bool,
     pub chess_username: String,
+    #[serde(default)]
+    pub sessions: SessionPresentation,
 }
 impl Default for Preferences {
     fn default() -> Self {
@@ -91,6 +95,7 @@ impl Default for Preferences {
             search_seconds: 3,
             threads_auto: true,
             chess_username: String::new(),
+            sessions: SessionPresentation::default(),
         }
     }
 }
@@ -109,6 +114,14 @@ pub struct State {
     avatars: Option<crate::avatar::Avatars>,
     pub workspace: Vec<WorkspaceReview>,
     pub active_workspace: Option<u64>,
+    /// Complete visual order for each folder whose sessions have been reordered.
+    /// Moves and closes update these lists alongside workspace membership.
+    pub session_order: BTreeMap<String, Vec<u64>>,
+    pub session_drag: Option<crate::session_style::SessionDrag>,
+    pub folder_menu: Option<(String, PointerPress)>,
+    pub folder_editor: Option<crate::session_style::FolderEditor>,
+    /// Secondary-press target for the sidebar's context menu: session key and anchor point.
+    pub session_menu: Option<(u64, PointerPress)>,
     next_workspace_key: u64,
     preference_store: Option<crate::preferences::Store>,
     preference_saved: Option<Preferences>,
@@ -191,6 +204,11 @@ impl Default for State {
             avatars: None,
             workspace: Vec::new(),
             active_workspace: None,
+            session_order: BTreeMap::new(),
+            session_drag: None,
+            folder_menu: None,
+            folder_editor: None,
+            session_menu: None,
             next_workspace_key: 0,
             preference_store: None,
             preference_saved: None,
@@ -855,6 +873,10 @@ impl State {
         }
     }
     pub fn navigate(&mut self, page: Page) {
+        self.session_drag = None;
+        self.session_menu = None;
+        self.folder_editor = None;
+        self.folder_menu = None;
         self.invalidate_history_load();
         if page == Page::Home && self.page != Page::Home {
             self.park_review();

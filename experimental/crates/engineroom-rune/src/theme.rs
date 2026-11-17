@@ -2,7 +2,7 @@
 
 use crate::state::Appearance;
 
-pub use engineroom_ui::{FAMILIES, FONTS};
+pub use engineroom_ui::{FAMILIES, FONTS, session_swatch};
 
 pub fn kit(appearance: Appearance) -> rune_kit::Kit {
     let theme = match appearance {

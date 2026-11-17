@@ -1,6 +1,6 @@
 //! OpenCode-based color themes and EngineRoom typography.
 
-use rune::{TextStyle, color::hex};
+use rune::{Color, TextStyle, color::hex};
 use rune_kit::Kit;
 
 /// Selects the light or dark EngineRoom appearance.
@@ -124,6 +124,22 @@ pub fn kit(theme: Theme) -> Kit {
     kit.ty.text_xsmall_medium = kit.ty.small_medium;
     kit.ty.mono = TextStyle::new(13.0, 400.0).mono().lh(20.0);
     kit
+}
+
+/// A discreet, theme-aware accent from the app's own colour scales for a named swatch.
+/// Unknown names are transparent so callers can keep the marker's layout without ink.
+pub fn session_swatch(name: &str, dark: bool) -> Color {
+    // Step 9 reads on dark surfaces; step 11 keeps the same hues legible on light ones.
+    let step = if dark { 9 } else { 11 };
+    let scale = |name: &str| rune_theme_opencode::scale(name, dark, step);
+    match name {
+        "blue" => scale("blue"),
+        "green" => scale("mint"),
+        "amber" => scale("amber"),
+        "red" => scale("ember"),
+        "violet" => scale("lilac"),
+        _ => Color::TRANSPARENT,
+    }
 }
 
 #[cfg(test)]
