@@ -10,6 +10,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -292,6 +293,169 @@ class StrobeCacheHarnessTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         result = subprocess.run(
             [str(self.binary), "short", str(self.fixtures / "missing.pgn")],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertNotEqual(result.returncode, 0)
+
+
+# Window-owned sessions harness: searches are 1/2/2 and the exclusive lease is
+# always released (acquires == shutdowns, active == 0, permits == 1).
+SESSIONS_CASES = {
+    "cancel-analysis": {
+        "sessions_opened": 1,
+        "jobs_enqueued": 1,
+        "searches": 1,
+        "acquires": 1,
+        "shutdowns": 1,
+        "live_started": 1,
+        "live_completed": 0,
+        "latest_completed": 0,
+        "stale_events": 0,
+        "accepted_events": 2,
+        "max_sequence": 2,
+        "cancels_acked": 1,
+        "closes_acked": 1,
+        "auth_rejected": 0,
+        "shutdown_rejects": 0,
+        "repo_drained": 1,
+    },
+    "navigation-latest-wins": {
+        "sessions_opened": 1,
+        "jobs_enqueued": 4,
+        "searches": 2,
+        "acquires": 2,
+        "shutdowns": 2,
+        "live_started": 2,
+        "live_completed": 1,
+        "latest_completed": 1,
+        "stale_events": 1,
+        "accepted_events": 3,
+        "max_sequence": 4,
+        "cancels_acked": 0,
+        "closes_acked": 1,
+        "auth_rejected": 0,
+        "shutdown_rejects": 0,
+        "repo_drained": 1,
+    },
+    "session-lifecycle": {
+        "sessions_opened": 2,
+        "jobs_enqueued": 2,
+        "searches": 2,
+        "acquires": 2,
+        "shutdowns": 2,
+        "live_started": 1,
+        "live_completed": 1,
+        "latest_completed": 1,
+        "stale_events": 0,
+        "accepted_events": 3,
+        "max_sequence": 3,
+        "cancels_acked": 0,
+        "closes_acked": 3,
+        "auth_rejected": 2,
+        "shutdown_rejects": 1,
+        "repo_drained": 1,
+    },
+}
+SESSIONS_GLOBAL = {
+    "fake_engine": 1,
+    "peak_active": 1,
+    "active": 0,
+    "permits": 1,
+    "stale_completed": 0,
+    "wrong_session": 0,
+    "sequence_violations": 0,
+}
+SESSIONS_HIGHER = {
+    "fake_engine",
+    "sessions_opened",
+    "jobs_enqueued",
+    "searches",
+    "acquires",
+    "shutdowns",
+    "permits",
+    "live_started",
+    "live_completed",
+    "latest_completed",
+    "stale_events",
+    "accepted_events",
+    "max_sequence",
+    "cancels_acked",
+    "closes_acked",
+    "auth_rejected",
+    "shutdown_rejects",
+    "repo_drained",
+}
+SESSIONS_NAMES = sorted(SESSIONS_CASES["cancel-analysis"] | SESSIONS_GLOBAL)
+
+
+class StrobeSessionsHarnessTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.binary = example_path("pipeline_strobe_sessions", "STROBE_SESSIONS_HARNESS")
+        cls.fixture = ROOT / "perf" / "fixtures" / "short.pgn"
+        if not cls.binary.is_file():
+            raise unittest.SkipTest(f"sessions harness not built: {cls.binary}")
+        if not cls.fixture.is_file():
+            raise unittest.SkipTest(f"missing fixture: {cls.fixture}")
+
+    def run_scenario(self, scenario: str, *args: str) -> dict[str, tuple[int, str]]:
+        metrics = run_binary(self, self.binary, scenario, *args)
+        self.assertEqual(sorted(metrics), SESSIONS_NAMES, f"{scenario}: unexpected metric names")
+        return metrics
+
+    def test_session_scenarios_are_deterministic(self):
+        for scenario, expected in SESSIONS_CASES.items():
+            with self.subTest(scenario=scenario):
+                metrics = self.run_scenario(scenario, str(self.fixture))
+                for name, value in expected.items():
+                    self.assertEqual(metrics[name][0], value, f"{scenario}: {name}")
+                for name, value in SESSIONS_GLOBAL.items():
+                    self.assertEqual(metrics[name][0], value, f"{scenario}: {name}")
+                self.assertEqual(
+                    metrics["acquires"][0],
+                    metrics["shutdowns"][0],
+                    f"{scenario}: every port must be shut down",
+                )
+
+    def test_session_metric_directions_are_stable(self):
+        for scenario in SESSIONS_CASES:
+            with self.subTest(scenario=scenario):
+                metrics = self.run_scenario(scenario, str(self.fixture))
+                for name, (_, direction) in metrics.items():
+                    self.assertEqual(
+                        direction,
+                        "higher" if name in SESSIONS_HIGHER else "lower",
+                        f"{scenario}: {name}",
+                    )
+
+    def test_default_pgn_is_usable(self):
+        # The fixture is optional: each scenario has a deterministic inline PGN.
+        for scenario in SESSIONS_CASES:
+            with self.subTest(scenario=scenario):
+                metrics = self.run_scenario(scenario)
+                for name, value in SESSIONS_GLOBAL.items():
+                    self.assertEqual(metrics[name][0], value, f"{scenario}: {name}")
+
+    def test_navigation_rejects_pgn_with_fewer_than_five_fens(self):
+        with tempfile.TemporaryDirectory() as folder:
+            short = Path(folder) / "short.pgn"
+            short.write_text("1. e4 e5 *\n", encoding="utf-8")
+            result = subprocess.run(
+                [str(self.binary), "navigation-latest-wins", str(short)],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("exige pelo menos 5 FENs", result.stderr)
+
+    def test_unknown_scenario_fails(self):
+        result = subprocess.run(
+            [str(self.binary), "nope", str(self.fixture)],
             cwd=ROOT,
             capture_output=True,
             text=True,
