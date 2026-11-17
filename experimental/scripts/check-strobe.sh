@@ -11,7 +11,7 @@ if [[ ! -x "$strobe" ]]; then
 fi
 
 (cd "$here" && cargo build --release --locked -p engineroom-backend \
-  --example pipeline_strobe --example strobe_review)
+  --example pipeline_strobe --example pipeline_strobe_cache --example strobe_review)
 
 (cd "$here" && python3 scripts/test-strobe-harness.py)
 

@@ -41,13 +41,19 @@ como referência versionada neste documento, conforme a versão fixada no lockfi
 | [`pipeline.bench.ts`](pipeline.bench.ts) | Casos determinísticos da pipeline com engine falsa e cache SQLite isolado. |
 | [`real-game.bench.ts`](real-game.bench.ts) | Casos com Stockfish real, reaproveitando `crates/engineroom-backend/examples/strobe_review.rs`. |
 | [`../crates/engineroom-backend/examples/pipeline_strobe.rs`](../crates/engineroom-backend/examples/pipeline_strobe.rs) | Harness: dirige o `Pipeline` de produção pelas portas públicas `EnginePort`/`EngineFactory`/`Repository` e imprime contadores `strobe:metric`. |
-| [`../scripts/test-strobe-harness.py`](../scripts/test-strobe-harness.py) | Sete testes que validam os contadores de cada estágio. |
-| [`../scripts/check-strobe.sh`](../scripts/check-strobe.sh) | Comando único: build, testes, `--check` dos dois benches. |
+| [`../crates/engineroom-backend/examples/pipeline_strobe_cache.rs`](../crates/engineroom-backend/examples/pipeline_strobe_cache.rs) | Harness de cache parcial e retomada: interrompe uma revisão no barreira, confirma o flush parcial e relê o resultado com um segundo `Pipeline`. |
+| [`fixtures/`](fixtures/) | Fixtures `short.pgn` (8 posições), `long.pgn` (45) e `fen.pgn` (6, com FEN inicial). |
+| [`../scripts/test-strobe-harness.py`](../scripts/test-strobe-harness.py) | Testes que validam os contadores de cada estágio, incluindo os três fixtures de cache. |
+| [`../scripts/check-strobe.sh`](../scripts/check-strobe.sh) | Comando único: build, testes, `--check` dos benches determinístico e real. |
 
-O harness não altera o núcleo nem as portas: a engine falsa é implementada no
-próprio example, o cache é um `SqliteRepository` apontando para um diretório
-temporário removido ao final, e o PGN é o fixture
-[`perf/data/immortal.pgn`](data/immortal.pgn) (46 posições, 45 lances).
+Os harnesses não alteram o núcleo nem as portas: a engine falsa é implementada
+em cada example, o cache é um `SqliteRepository` apontando para um diretório
+temporário removido ao final, e o PGN do harness original é o fixture
+[`perf/data/immortal.pgn`](data/immortal.pgn) (46 posições, 45 lances). O
+harness de cache usa os próprios fixtures e gera um PV **legal para cada FEN**
+a partir da posição, para que a asserção de PV teste o transporte UCI e não
+repita uma constante como `e2e4` (ilegal fora da posição inicial). Ambos os
+harnesses emitem `fake_engine=1`: nenhum deles mede Stockfish.
 
 ## Como rodar
 
@@ -55,7 +61,7 @@ A partir de `experimental/`:
 
 ```sh
 bun install --frozen-lockfile          # instala @hona/strobe 0.32.0 do lockfile
-./scripts/check-strobe.sh              # build release + testes + 5 casos --check
+./scripts/check-strobe.sh              # build release + testes + 8 casos --check
 ```
 
 Para incluir o Stockfish real (o sidecar pode vir do downloader do app principal):
@@ -90,6 +96,13 @@ ENGINE_ROOM_STOCKFISH=/caminho/stockfish \
 | `manual-warm` | duas revisões no mesmo SQLite | `cached=45`, `searched=0`, `searches=45` |
 | `live` | `Pipeline::live` com feedback de lance | `live=1`, `classifications=1`, `searches=2` |
 | `automatic` | perfil `auto-fast` / fila adaptativa | `positions=46`, `moves=45`, `searched=51` |
+| `cache-partial-short` | interrompe após 2 buscas, retoma 5 | `fixture_positions=8`, `interrupt_completed=2`, `partial_cache_entries=2`, `resume_searched=5`, `ports=2/2 active=0` |
+| `cache-partial-long` | interrompe após 15 buscas (cruza o flush de 8), retoma 30 | `fixture_positions=45`, `interrupt_completed=15`, `partial_cache_entries=15`, `resume_searched=30` |
+| `cache-partial-fen` | fixture com FEN inicial; interrompe após 2, retoma 4 | `fixture_positions=6`, `resume_searched=4` |
+
+`ports_*` conta **portas da trait** (`EnginePort`/`EngineFactory`), não processos
+do sistema: a engine é falsa e `shutdown()` não encerra nenhum PID. O contador
+`fake_engine=1` deixa isso explícito no `--json`.
 
 `searches` conta chamadas efetivas à engine; `searched`/`cached` vêm do último
 `Event::Progress`. A engine falsa devolve uma avaliação determinística derivada
