@@ -45,7 +45,9 @@ como referência versionada neste documento, conforme a versão fixada no lockfi
 | [`../crates/engineroom-backend/examples/pipeline_strobe_sessions.rs`](../crates/engineroom-backend/examples/pipeline_strobe_sessions.rs) | Harness de `ReviewSessions`: cancelamento, navegação latest-wins e ciclo de vida com portas e lease falsos. |
 | [`fixtures/`](fixtures/) | Fixtures `short.pgn` (8 posições), `long.pgn` (45) e `fen.pgn` (6, com FEN inicial). |
 | [`../scripts/test-strobe-harness.py`](../scripts/test-strobe-harness.py) | Testes que validam os contadores de cada estágio, incluindo os três fixtures de cache. |
-| [`../scripts/check-strobe.sh`](../scripts/check-strobe.sh) | Comando único: build, testes, `--check` dos benches determinístico e real. |
+| [`../crates/engineroom-uci/tests/real_process_lifecycle.rs`](../crates/engineroom-uci/tests/real_process_lifecycle.rs) | Teste `#[ignore]` com Stockfish real: verifica PIDs em `/proc` após `shutdown()`/cancelamento e a readquisição do lease. |
+| [`measurement-contract.md`](measurement-contract.md) | Contrato de nomes, unidades e escopos: app, trabalho Stockfish e render headless não são comparáveis. |
+| [`../scripts/check-strobe.sh`](../scripts/check-strobe.sh) | Comando único: build, testes, `--check` dos benches e, com `ENGINE_ROOM_STOCKFISH`, o gate de lifecycle real. |
 
 Os harnesses não alteram o núcleo nem as portas: a engine falsa é implementada
 em cada example, o cache é um `SqliteRepository` apontando para um diretório
@@ -72,6 +74,27 @@ cd ../app && node scripts/fetch-stockfish.mjs && cd ../experimental
 ENGINE_ROOM_STOCKFISH="$PWD/../app/src-tauri/binaries/stockfish-x86_64-unknown-linux-gnu" \
   ./scripts/check-strobe.sh
 ```
+
+Com a variável definida, o script também roda o gate `#[ignore]` de lifecycle
+real (somente Linux): ele confirma que os PIDs do Stockfish desaparecem de
+`/proc` após `shutdown()` e após o cancelamento de uma busca, e que o lease é
+readquirido. Sem a variável, bench real **e** gate são pulados — nunca são
+reportados como passados.
+
+## Contrato de medição
+
+[`perf/measurement-contract.md`](measurement-contract.md) fixa o que cada
+métrica significa e, sobretudo, o que não se pode concluir dela:
+
+- `cpu.work` do harness com engine falsa e o do bench com Stockfish medem
+  **árvores de processos diferentes**; não vão na mesma frase de conclusão.
+- Soma de CPU de workers concorrentes **não** é wall time: não subtrair
+  `cpu.work` de `run.duration` nem somar CPU paralela para chamar isso de tempo.
+- Render headless é outro escopo: `frames.*`/latência são recusados
+  (`Headless`), e o custo da cena se mede com `cpu.work`/`run.duration`.
+- `--check` prova que o cenário roda e que os contadores são lidos; um veredito
+  vem de `series[].primary.verdict_kind` em `--json` com ≥8 pares e máquina
+  silenciosa.
 
 O script invoca o Strobe a partir da **raiz do repositório**, porque é assim
 que ele resolve variantes de diretório/git; os caminhos nos arquivos `.bench.ts`

@@ -22,8 +22,12 @@ cd "$root"
 
 if [[ -n "${ENGINE_ROOM_STOCKFISH:-}" ]]; then
   "$strobe" bench experimental/perf/real-game.bench.ts --head . --check
+  # OS-level teardown evidence (Linux only): PIDs must disappear from /proc.
+  # It is #[ignore] in `cargo test`, so it must be requested explicitly here.
+  (cd "$here" && cargo test --locked -p engineroom-uci real_process_lifecycle \
+    -- --ignored --nocapture)
 else
-  echo "skip: real-game bench (defina ENGINE_ROOM_STOCKFISH)" >&2
+  echo "skip: real-game bench e lifecycle real (defina ENGINE_ROOM_STOCKFISH)" >&2
 fi
 
 if [[ "${1:-}" == "--timed" ]]; then
