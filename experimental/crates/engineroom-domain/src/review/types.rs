@@ -1,6 +1,11 @@
 use crate::db::mode::Mode;
 use serde::{Deserialize, Serialize};
 
+/// Default movetime budget, in milliseconds, for manual time reviews that do not
+/// specify one. Shared by the analysis pipeline and persistence so the budget
+/// used for a review matches the one recorded for its saved game.
+pub const DEFAULT_MOVETIME_MS: u32 = 5000;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ReviewErrorCode {
