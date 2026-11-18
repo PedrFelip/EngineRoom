@@ -95,3 +95,37 @@ fn history_retry_keeps_the_failed_operation_and_cursor() {
     state.retry_history();
     assert_eq!(state.history_operation, Some(HistoryOperation::List));
 }
+
+#[test]
+fn new_and_history_reviews_start_unfiled_without_changing_existing_sessions() {
+    use crate::{session_style::SessionColor, state::Page};
+    let mut state = State::fixture();
+    let first = state.workspace[0].key;
+    let config = state.workspace[0].config.clone();
+    crate::fixtures::file_session(&mut state, first, SessionColor::Blue);
+    state.navigate(Page::Home);
+    state.pgn.replace_text(&config.pgn);
+    state.prepare();
+    state.start_review();
+    assert!(
+        state
+            .session_folder(state.active_workspace.unwrap())
+            .is_none()
+    );
+    assert_eq!(state.session_folder(first).unwrap().id, "fixture-blue");
+    for reanalyze in [false, true] {
+        state.navigate(Page::History);
+        state.history_open(7, reanalyze);
+        state.apply_history_load(
+            state.history_load_id,
+            Ok(Some(Box::new(config.clone()))),
+            reanalyze,
+        );
+        assert!(
+            state
+                .session_folder(state.active_workspace.unwrap())
+                .is_none()
+        );
+        assert_eq!(state.session_folder(first).unwrap().id, "fixture-blue");
+    }
+}

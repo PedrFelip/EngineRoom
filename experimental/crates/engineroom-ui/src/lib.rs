@@ -8,4 +8,4 @@ pub use primitives::{
     button, button_icon, button_trailing, group, heading, integer_slider, label, mono, page, rule,
     section, setting, slider,
 };
-pub use theme::{FAMILIES, FONTS, Theme, kit};
+pub use theme::{FAMILIES, FONTS, Theme, kit, session_swatch};

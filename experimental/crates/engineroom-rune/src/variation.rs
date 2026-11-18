@@ -1,10 +1,13 @@
 //! Legal board exploration and candidate playback; no analysis is performed here.
+use engineroom_backend::review::core;
 use shakmaty::{Chess, Move, Position, san::SanPlus};
 #[derive(Clone)]
 pub struct Variation {
     pub root_ply: usize,
     pub branch_from: Option<(usize, usize)>,
     pub positions: Vec<Chess>,
+    /// FEN for each position, parallel to `positions`.
+    pub fens: Vec<String>,
     pub moves: Vec<Move>,
     pub san: Vec<String>,
     pub classifications: Vec<Option<engineroom_backend::review::types::Classification>>,
@@ -15,6 +18,7 @@ impl Variation {
         Self {
             root_ply,
             branch_from: None,
+            fens: vec![core::fen(&position)],
             positions: vec![position],
             moves: Vec::new(),
             san: Vec::new(),
@@ -24,6 +28,7 @@ impl Variation {
     }
     pub fn append(&mut self, m: Move) {
         self.positions.truncate(self.cursor + 1);
+        self.fens.truncate(self.cursor + 1);
         self.moves.truncate(self.cursor);
         self.san.truncate(self.cursor);
         self.classifications.truncate(self.cursor);
@@ -32,11 +37,16 @@ impl Variation {
             .push(SanPlus::from_move_and_play_unchecked(&mut position, m).to_string());
         self.moves.push(m);
         self.classifications.push(None);
+        self.fens.push(core::fen(&position));
         self.positions.push(position);
         self.cursor += 1;
     }
     pub fn position(&self) -> &Chess {
         &self.positions[self.cursor]
+    }
+    /// Cached FEN for the current cursor position.
+    pub fn fen(&self) -> &str {
+        &self.fens[self.cursor]
     }
 }
 pub fn board(position: &Chess) -> [char; 64] {

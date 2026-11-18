@@ -2,11 +2,13 @@
 use crate::{
     game::{self, Game},
     review_data,
+    session_style::SessionPresentation,
     variation::Variation,
 };
-use rune::TextEdit;
+use rune::{PointerPress, TextEdit};
 use rune_kit::shell::PaneState;
 use shakmaty::{Chess, Position, Role, Square};
+use std::collections::BTreeMap;
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Page {
     #[default]
@@ -75,6 +77,8 @@ pub struct Preferences {
     pub search_seconds: usize,
     pub threads_auto: bool,
     pub chess_username: String,
+    #[serde(default)]
+    pub sessions: SessionPresentation,
 }
 impl Default for Preferences {
     fn default() -> Self {
@@ -91,12 +95,13 @@ impl Default for Preferences {
             search_seconds: 3,
             threads_auto: true,
             chess_username: String::new(),
+            sessions: SessionPresentation::default(),
         }
     }
 }
 #[path = "workspace.rs"]
 mod workspace;
-pub(crate) use workspace::WorkspaceReview;
+pub(crate) use workspace::{RenderStatus, WorkspaceReview};
 
 #[derive(Clone, Debug, PartialEq)]
 enum HistoryOperation {
@@ -109,6 +114,14 @@ pub struct State {
     avatars: Option<crate::avatar::Avatars>,
     pub workspace: Vec<WorkspaceReview>,
     pub active_workspace: Option<u64>,
+    /// Complete visual order for each folder whose sessions have been reordered.
+    /// Moves and closes update these lists alongside workspace membership.
+    pub session_order: BTreeMap<String, Vec<u64>>,
+    pub session_drag: Option<crate::session_style::SessionDrag>,
+    pub folder_menu: Option<(String, PointerPress)>,
+    pub folder_editor: Option<crate::session_style::FolderEditor>,
+    /// Secondary-press target for the sidebar's context menu: session key and anchor point.
+    pub session_menu: Option<(u64, PointerPress)>,
     next_workspace_key: u64,
     preference_store: Option<crate::preferences::Store>,
     preference_saved: Option<Preferences>,
@@ -191,6 +204,11 @@ impl Default for State {
             avatars: None,
             workspace: Vec::new(),
             active_workspace: None,
+            session_order: BTreeMap::new(),
+            session_drag: None,
+            folder_menu: None,
+            folder_editor: None,
+            session_menu: None,
             next_workspace_key: 0,
             preference_store: None,
             preference_saved: None,
@@ -855,6 +873,10 @@ impl State {
         }
     }
     pub fn navigate(&mut self, page: Page) {
+        self.session_drag = None;
+        self.session_menu = None;
+        self.folder_editor = None;
+        self.folder_menu = None;
         self.invalidate_history_load();
         if page == Page::Home && self.page != Page::Home {
             self.park_review();
@@ -1312,6 +1334,13 @@ impl State {
             None => &self.game.positions[self.ply],
         }
     }
+    /// FEN of the current position from the flat mainline/variation arrays.
+    pub(crate) fn current_fen(&self) -> &str {
+        match self.active_variation {
+            Some(i) => self.variations[i].fen(),
+            None => self.game.fen(self.ply),
+        }
+    }
     pub fn visible_variation_cursor(&self) -> Option<(usize, usize)> {
         let mut index = self.active_variation?;
         let cursor = self.variations[index].cursor;
@@ -1411,9 +1440,9 @@ impl State {
     pub fn position_analysis(
         &self,
     ) -> Option<&engineroom_backend::review::types::PositionAnalysis> {
-        let fen = engineroom_backend::review::core::fen(self.position());
-        let original = self.original_analysis(&fen, self.current_mainline_ply());
-        match (original, self.live_positions.get(&fen)) {
+        let fen = self.current_fen();
+        let original = self.original_analysis(fen, self.current_mainline_ply());
+        match (original, self.live_positions.get(fen)) {
             (Some(a), Some(b)) => Some(if prefer_incoming(a, b) { b } else { a }),
             (Some(a), None) => Some(a),
             (None, live) => live,
@@ -1435,9 +1464,9 @@ impl State {
         }
     }
     fn candidate_analysis(&self) -> Option<&engineroom_backend::review::types::PositionAnalysis> {
-        let fen = engineroom_backend::review::core::fen(self.position());
-        let original = self.original_analysis(&fen, self.current_mainline_ply());
-        let live = self.live_positions.get(&fen);
+        let fen = self.current_fen();
+        let original = self.original_analysis(fen, self.current_mainline_ply());
+        let live = self.live_positions.get(fen);
         match (original, live) {
             (Some(a), Some(b)) if (b.lines.len(), b.depth) > (a.lines.len(), a.depth) => Some(b),
             (Some(a), _) => Some(a),
@@ -1759,6 +1788,7 @@ mod council_regressions {
     fn mainline_repeated_fen_uses_its_ply_and_live_candidate_policy() {
         let mut state = State::fixture();
         state.game.positions[1] = state.game.positions[0].clone();
+        state.game.fens[1] = state.game.fens[0].clone();
         let positions = &mut state.real_result.as_mut().unwrap().positions;
         positions[1].fen = positions[0].fen.clone();
         positions[0].cp = 10;
@@ -1929,6 +1959,42 @@ mod council_regressions {
         state.apply_history_load(latest, Ok(Some(Box::new(config))), false);
         assert_eq!(state.page, Page::Settings);
         assert_eq!(state.workspace.len(), 2);
+    }
+    #[test]
+    fn cached_fen_matches_serialized_position_across_mainline_and_variations() {
+        let mut state = State::fixture();
+        for ply in 0..=state.game.moves.len() {
+            state.go_to(ply);
+            assert_eq!(
+                state.current_fen(),
+                engineroom_backend::review::core::fen(state.position()),
+                "mainline ply {ply}"
+            );
+        }
+        state.go_to(1);
+        state.explore_candidate();
+        let index = state.active_variation.expect("fixture has a candidate");
+        for cursor in 0..state.variations[index].moves.len() {
+            state.variations[index].cursor = cursor;
+            assert_eq!(
+                state.current_fen(),
+                engineroom_backend::review::core::fen(state.position()),
+                "variation cursor {cursor}"
+            );
+        }
+        let mut setup = State::fixture();
+        setup.game = crate::game::parse(
+            "[SetUp \"1\"]\n[FEN \"7k/P7/8/8/8/8/4K3/8 w - - 0 1\"]\n\n1. a8=Q+ *",
+        )
+        .expect("FEN setup PGN");
+        for ply in 0..=setup.game.moves.len() {
+            setup.go_to(ply);
+            assert_eq!(
+                setup.current_fen(),
+                engineroom_backend::review::core::fen(setup.position()),
+                "FEN setup ply {ply}"
+            );
+        }
     }
 }
 
