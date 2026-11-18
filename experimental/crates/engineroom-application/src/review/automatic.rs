@@ -10,14 +10,15 @@ use super::{
     types::*,
 };
 use crate::db::mode::Mode;
-use std::collections::{HashMap, VecDeque};
+use shakmaty::Position;
+use std::collections::VecDeque;
 use tokio::{
     sync::{mpsc, oneshot},
     task::JoinSet,
 };
 
 mod scheduler;
-use scheduler::{Demand, Scheduler};
+use scheduler::{BitSet, Demand, FenId, Scheduler};
 
 pub(super) struct LiveDemand {
     pub fen: String,
@@ -31,10 +32,15 @@ pub(super) struct NativeLive<'a> {
     pub demands: &'a mut mpsc::Receiver<LiveDemand>,
 }
 
-struct Native<'a> {
-    scheduler: Scheduler,
+struct PendingLive {
+    id: FenId,
+    request: LiveDemand,
+}
+
+struct Native<'game, 'a> {
+    scheduler: Scheduler<'game>,
     demands: &'a mut mpsc::Receiver<LiveDemand>,
-    latest: Option<LiveDemand>,
+    latest: Option<PendingLive>,
     receiving: bool,
     // Replacing a subscriber leaves its unrestricted search and reservation
     // in place. Its completed evidence can still serve review or navigation.
@@ -42,7 +48,7 @@ struct Native<'a> {
     latest_dispatched: bool,
 }
 
-impl Native<'_> {
+impl Native<'_, '_> {
     fn refresh(&mut self, mut latest: Option<LiveDemand>) {
         while let Ok(request) = self.demands.try_recv() {
             latest = Some(request);
@@ -53,7 +59,7 @@ impl Native<'_> {
         if self
             .latest
             .as_ref()
-            .is_some_and(|request| request.reply.is_closed())
+            .is_some_and(|live| live.request.reply.is_closed())
         {
             self.latest = None;
             self.latest_dispatched = false;
@@ -66,19 +72,25 @@ impl Native<'_> {
         if request.reply.is_closed() {
             return;
         }
-        let terminal = if request.fen.contains(['\r', '\n']) {
+        let position = if request.fen.contains(['\r', '\n']) {
             Err(ReviewError::new(
                 ReviewErrorCode::InvalidPgn,
                 "review.live",
                 "FEN inválido.",
             ))
         } else {
-            core::terminal(&request.fen)
+            core::position(&request.fen)
         };
-        match terminal {
-            Ok(None) => self.latest = Some(request),
-            Ok(Some(cp)) => {
-                let _ = request.reply.send(Ok(core::terminal_raw(&request.fen, cp)));
+        match position {
+            Ok(position) => {
+                if let Some(cp) = core::terminal_position(&position) {
+                    let _ = request.reply.send(Ok(core::terminal_raw(&request.fen, cp)));
+                } else {
+                    let id = self
+                        .scheduler
+                        .intern_live(&request.fen, || position.legal_moves().len());
+                    self.latest = Some(PendingLive { id, request });
+                }
             }
             Err(error) => {
                 let _ = request.reply.send(Err(error));
@@ -87,28 +99,28 @@ impl Native<'_> {
     }
 
     fn resolve_live(&mut self) {
-        let Some(request) = self.latest.as_ref().filter(|_| !self.latest_dispatched) else {
+        let Some(live) = self.latest.as_ref().filter(|_| !self.latest_dispatched) else {
             return;
         };
-        let demand = Demand::time(request.value, request.multipv);
-        if let Some(raw) = self.scheduler.lookup(&request.fen, demand)
-            && let Some(request) = self.latest.take()
+        let demand = Demand::time(live.request.value, live.request.multipv);
+        if let Some(raw) = self.scheduler.lookup(live.id, demand)
+            && let Some(live) = self.latest.take()
         {
-            let _ = request.reply.send(Ok(raw));
+            let _ = live.request.reply.send(Ok(raw));
         }
     }
 
     fn next_live(&mut self, worker: usize) -> Option<Job> {
-        let request = self.latest.as_ref()?;
-        if self.live_running || !self.scheduler.available(&request.fen) {
+        let live = self.latest.as_ref()?;
+        if self.live_running || !self.scheduler.available(live.id) {
             return None;
         }
-        let demand = Demand::time(request.value, request.multipv);
+        let demand = Demand::time(live.request.value, live.request.multipv);
         self.live_running = true;
         self.latest_dispatched = true;
         Some(Job {
             worker,
-            purpose: Purpose::Live(request.fen.clone()),
+            purpose: Purpose::Live,
             demand,
         })
     }
@@ -119,9 +131,9 @@ impl Native<'_> {
         // The original consumer can use its own result even if the engine
         // returned partial MultiPV. Replacement consumers need full coverage.
         if std::mem::take(&mut self.latest_dispatched)
-            && let Some(request) = self.latest.take()
+            && let Some(live) = self.latest.take()
         {
-            let _ = request.reply.send(Ok(raw));
+            let _ = live.request.reply.send(Ok(raw));
         }
     }
 }
@@ -129,7 +141,7 @@ impl Native<'_> {
 enum Purpose {
     Triage(usize),
     Refinement(usize),
-    Live(String),
+    Live,
 }
 struct Job {
     worker: usize,
@@ -137,13 +149,6 @@ struct Job {
     demand: Demand,
 }
 impl Job {
-    fn fen<'a>(&'a self, game: &'a Game) -> &'a str {
-        match &self.purpose {
-            Purpose::Triage(index) | Purpose::Refinement(index) => &game.fens[*index],
-            Purpose::Live(fen) => fen,
-        }
-    }
-
     fn triage(worker: usize, index: usize, profile: Profile) -> Self {
         Self {
             worker,
@@ -177,8 +182,7 @@ impl State<'_> {
         self.final_targets.as_deref().unwrap_or(&self.ready_targets)
     }
     fn satisfied(&self, target: &Target) -> bool {
-        self.budgets[target.position_index]
-            .is_some_and(|b| b.ms >= target.search.ms && b.multipv >= target.search.multipv)
+        self.budgets[target.position_index].is_some_and(|b| covers(b, target.search))
     }
     fn baseline(&self, index: usize) -> Result<&RawPosition> {
         self.baseline
@@ -235,26 +239,22 @@ impl State<'_> {
     }
     fn share_triage(
         &mut self,
-        fen: &str,
-        scheduler: &Scheduler,
-        waiting: &mut HashMap<&str, Vec<usize>>,
+        id: FenId,
+        scheduler: &Scheduler<'_>,
         emit: &mut (dyn FnMut(Event) + Send),
     ) -> Result<()> {
-        if let Some(indexes) = waiting.get_mut(fen) {
-            indexes.retain(|&index| self.baseline[index].is_none());
-            let demand = Demand::time(self.profile.triage_ms, self.profile.triage_multipv);
-            if !indexes.is_empty()
-                && let Some(raw) = scheduler.lookup(fen, demand)
-            {
-                for index in indexes.drain(..) {
+        let demand = Demand::time(self.profile.triage_ms, self.profile.triage_multipv);
+        let mut plies = scheduler.plies(id);
+        if let Some(index) = plies.find(|&index| self.baseline[index].is_none())
+            && let Some(raw) = scheduler.lookup(id, demand)
+        {
+            for index in std::iter::once(index).chain(plies) {
+                if self.baseline[index].is_none() {
                     self.baseline[index] = Some(raw.clone());
                     self.cached += 1;
                     self.discover(index);
                     self.progress(index, Some(self.baseline(index)?), emit);
                 }
-            }
-            if indexes.is_empty() {
-                waiting.remove(fen);
             }
         }
         Ok(())
@@ -349,7 +349,7 @@ pub(super) async fn review_native(
     emit: &mut (dyn FnMut(Event) + Send),
 ) -> Result<ReviewResult> {
     let mut native = Native {
-        scheduler: Scheduler::default(),
+        scheduler: Scheduler::new(game),
         demands: live.demands,
         latest: None,
         receiving: true,
@@ -377,7 +377,7 @@ async fn run_review(
     profile: Profile,
     sizing: Option<(u32, u32)>,
     emit: &mut (dyn FnMut(Event) + Send),
-    native: Option<&mut Native<'_>>,
+    native: Option<&mut Native<'_, '_>>,
 ) -> Result<ReviewResult> {
     let count = game.fens.len();
     let mut state = State {
@@ -434,7 +434,7 @@ async fn execute(
     state: &mut State<'_>,
     pool: &mut Option<Pool>,
     pending: &mut Vec<(u32, u32, Vec<RawPosition>)>,
-    mut native: Option<&mut Native<'_>>,
+    mut native: Option<&mut Native<'_, '_>>,
 ) -> Result<ReviewResult> {
     let game = state.game;
     let profile = state.profile;
@@ -454,7 +454,6 @@ async fn execute(
         return Err(invalid_cache_count());
     }
     let mut queue = VecDeque::new();
-    let mut triage_waiting: HashMap<&str, Vec<usize>> = HashMap::new();
     for (i, hit) in hits.iter_mut().enumerate() {
         cancel.check()?;
         state.baseline[i] = if let Some(cp) = state.terminals[i] {
@@ -464,9 +463,6 @@ async fn execute(
             Some(hit)
         } else {
             queue.push_back(i);
-            if native.is_some() {
-                triage_waiting.entry(&game.fens[i]).or_default().push(i);
-            }
             None
         };
         if let Some(raw) = &state.baseline[i] {
@@ -474,11 +470,16 @@ async fn execute(
         }
         state.discover(i);
     }
+    if !queue.is_empty()
+        && let Some(native) = &mut native
+    {
+        native.scheduler.prepare();
+    }
     let mut waiters = JoinSet::new();
     let mut blocks: Vec<VecDeque<usize>> = vec![];
-    let mut busy = vec![];
-    let mut refining = vec![false; count];
-    let mut cache_checked = vec![None; count];
+    let mut busy = BitSet::default();
+    let mut refining = BitSet::default();
+    let mut cache_misses = CacheMisses::default();
     loop {
         cancel.check()?;
         if let Some(native) = &mut native {
@@ -494,40 +495,41 @@ async fn execute(
                     .collect(),
             );
         }
-        let targets = state.targets().to_vec();
         if state.complete() && !state.refinement_stage {
             state.refinement_stage = true;
-            if let Some(target) = targets.first() {
+            if let Some(target) = state.targets().first() {
                 state.progress(target.position_index, None, emit);
             }
         }
-        // Query only selected positions, grouped by budget. Recheck only if a
-        // later overlapping decision raises the required coverage.
+        // Query selected positions in budget groups, skipping requests
+        // already ruled out by a miss at an equal or broader lookup.
         let mut groups: Vec<(SearchBudget, Vec<usize>)> = vec![];
-        for target in &targets {
+        for slot in 0..state.targets().len() {
+            let target = &state.targets()[slot];
             let i = target.position_index;
-            if state.satisfied(target) || refining[i] {
+            if state.satisfied(target) || refining.contains(i) {
                 continue;
             }
-            let demand = Demand::time(target.search.ms, target.search.multipv);
+            let search = target.search;
+            let demand = Demand::time(search.ms, search.multipv);
             if let Some(raw) = native
                 .as_ref()
-                .and_then(|n| n.scheduler.lookup(&game.fens[i], demand))
+                .and_then(|n| n.scheduler.lookup(n.scheduler.ply_id(i)?, demand))
             {
-                state.budgets[i] = Some(target.search);
+                state.budgets[i] = Some(search);
                 state.refined[i] = Some(raw);
                 state.cached += 1;
                 state.progress(i, Some(state.evaluation(i)?), emit);
                 continue;
             }
-            if cache_checked[i] == Some(target.search) {
+            if cache_misses.rules_out(i, search) {
                 continue;
             }
             let slot = groups
                 .iter()
-                .position(|(budget, _)| *budget == target.search)
+                .position(|(budget, _)| *budget == search)
                 .unwrap_or_else(|| {
-                    groups.push((target.search, vec![]));
+                    groups.push((search, vec![]));
                     groups.len() - 1
                 });
             groups[slot].1.push(i);
@@ -543,18 +545,20 @@ async fn execute(
                 return Err(invalid_cache_count());
             }
             for (i, hit) in indexes.into_iter().zip(hits) {
-                cache_checked[i] = Some(budget);
                 if let Some(raw) = hit {
                     state.budgets[i] = Some(budget);
                     state.refined[i] = Some(raw);
                     state.cached += 1;
                     state.progress(i, Some(state.evaluation(i)?), emit);
+                } else {
+                    cache_misses.record(i, budget, count);
                 }
             }
         }
-        let needs_refinement = targets
+        let needs_refinement = state
+            .targets()
             .iter()
-            .any(|t| !state.satisfied(t) && !refining[t.position_index]);
+            .any(|t| !state.satisfied(t) && !refining.contains(t.position_index));
         let needs_live = native
             .as_ref()
             .is_some_and(|native| native.latest.is_some());
@@ -563,23 +567,25 @@ async fn execute(
             let workers = acquired.len();
             *pool = Some(acquired);
             blocks = (0..workers).map(|_| VecDeque::new()).collect();
-            busy = vec![false; workers];
         }
         if let Some(pool) = pool.as_ref() {
             for worker in 0..pool.len() {
-                if busy[worker] {
+                if busy.contains(worker) {
                     continue;
                 }
                 let prefer_refinement =
                     state.complete() || (pool.len() > 1 && worker == pool.len() - 1);
                 let target = if prefer_refinement {
-                    targets.iter().find(|t| {
+                    state.targets().iter().find(|t| {
                         let i = t.position_index;
                         !state.satisfied(t)
-                            && !refining[i]
+                            && !refining.contains(i)
                             && native
                                 .as_ref()
-                                .is_none_or(|n| n.scheduler.available(&game.fens[i]))
+                                .and_then(|n| {
+                                    n.scheduler.ply_id(i).map(|id| n.scheduler.available(id))
+                                })
+                                .unwrap_or(true)
                     })
                 } else {
                     None
@@ -597,7 +603,7 @@ async fn execute(
                     std::iter::from_fn(|| {
                         native
                             .scheduler
-                            .take_triage(worker, &mut queue, &mut blocks, &game.fens)
+                            .take_triage(worker, &mut queue, &mut blocks)
                     })
                     .find(|&index| state.baseline[index].is_none())
                     .map(|index| Job::triage(worker, index, profile))
@@ -628,18 +634,33 @@ async fn execute(
                         .map(|index| Job::triage(worker, index, profile))
                 };
                 if let Some(job) = job {
-                    let fen = job.fen(game);
-                    if let Some(native) = &mut native {
-                        native.scheduler.reserve(fen);
+                    let (fen, fen_id) = match job.purpose {
+                        Purpose::Triage(index) | Purpose::Refinement(index) => {
+                            let id = native
+                                .as_mut()
+                                .map(|native| native.scheduler.intern_ply(index));
+                            (&game.fens[index], id)
+                        }
+                        Purpose::Live => {
+                            let live = native
+                                .as_ref()
+                                .and_then(|native| native.latest.as_ref())
+                                .expect("live job has a pending request");
+                            (&live.request.fen, Some(live.id))
+                        }
+                    };
+                    let fen = fen.clone();
+                    if let (Some(native), Some(id)) = (&mut native, fen_id) {
+                        native.scheduler.reserve(id);
                     }
                     let receiver = pool
-                        .submit(worker, fen.to_owned(), job.demand.value, job.demand.multipv)
+                        .submit(worker, fen, job.demand.value, job.demand.multipv)
                         .await?;
-                    busy[worker] = true;
+                    busy.insert(worker);
                     if let Purpose::Refinement(index) = job.purpose {
-                        refining[index] = true;
+                        refining.insert(index);
                     }
-                    waiters.spawn(async move { (job, receiver.await) });
+                    waiters.spawn(async move { (job, fen_id, receiver.await) });
                 }
             }
         }
@@ -681,7 +702,7 @@ async fn execute(
             },
             result = waiters.join_next() => result.ok_or_else(|| queue_error("Fila encerrou sem resultado."))?.map_err(|e| ReviewError::with_source(ReviewErrorCode::EngineExited, "review.queue", e))?,
         };
-        let (job, reply) = result;
+        let (job, fen_id, reply) = result;
         let pool = pool
             .as_ref()
             .ok_or_else(|| queue_error("Pool indisponível."))?;
@@ -689,13 +710,12 @@ async fn execute(
         let completed: Completed = reply
             .map_err(|_| disconnected_worker_error(failure.clone(), cancel))?
             .map_err(|e| failure.unwrap_or(e))?;
-        busy[job.worker] = false;
+        busy.remove(job.worker);
         let raw = completed.raw;
-        let shared_fen = native.is_some().then(|| raw.fen.clone());
-        if let Some(native) = &mut native {
+        if let (Some(native), Some(id)) = (&mut native, fen_id) {
             native
                 .scheduler
-                .complete(Demand::time(completed.value, job.demand.multipv), &raw);
+                .complete(id, Demand::time(completed.value, job.demand.multipv), &raw);
         }
         // Both stages use unrestricted searches and can populate the FEN cache.
         let buffer = pending
@@ -711,7 +731,7 @@ async fn execute(
         match job.purpose {
             Purpose::Refinement(index) => {
                 state.searched += 1;
-                refining[index] = false;
+                refining.remove(index);
                 state.budgets[index] = Some(SearchBudget {
                     ms: completed.value,
                     multipv: job.demand.multipv,
@@ -725,15 +745,15 @@ async fn execute(
                 state.discover(index);
                 state.progress(index, Some(state.baseline(index)?), emit);
             }
-            Purpose::Live(_) => {
+            Purpose::Live => {
                 cancel.check()?;
                 if let Some(native) = &mut native {
                     native.complete_live(raw);
                 }
             }
         }
-        if let (Some(native), Some(fen)) = (&native, shared_fen) {
-            state.share_triage(&fen, &native.scheduler, &mut triage_waiting, emit)?;
+        if let (Some(native), Some(id)) = (&native, fen_id) {
+            state.share_triage(id, &native.scheduler, emit)?;
         }
     }
     flush(repository, pending).await?;
@@ -768,6 +788,31 @@ async fn execute(
     }
     Ok(result)
 }
+#[derive(Default)]
+struct CacheMisses(Vec<Vec<SearchBudget>>);
+
+impl CacheMisses {
+    fn rules_out(&self, ply: usize, budget: SearchBudget) -> bool {
+        self.0
+            .get(ply)
+            .is_some_and(|misses| misses.iter().any(|&miss| covers(budget, miss)))
+    }
+
+    fn record(&mut self, ply: usize, budget: SearchBudget, count: usize) {
+        if self.0.is_empty() {
+            self.0.resize_with(count, Vec::new);
+        }
+        let misses = &mut self.0[ply];
+        // Keep only the least restrictive misses in the two-dimensional order.
+        misses.retain(|&miss| !covers(miss, budget));
+        misses.push(budget);
+    }
+}
+
+fn covers(available: SearchBudget, requested: SearchBudget) -> bool {
+    available.ms >= requested.ms && available.multipv >= requested.multipv
+}
+
 async fn flush(
     repository: &dyn Repository,
     pending: &mut [(u32, u32, Vec<RawPosition>)],

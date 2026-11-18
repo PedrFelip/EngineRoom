@@ -216,7 +216,8 @@ async fn pending_navigation_attaches_to_matching_search_or_queues_stronger_budge
     for demand in [Demand::time(180, 1), Demand::time(500, 3)] {
         let (sender, mut receiver) = mpsc::channel(1);
         let (reply, mut result) = oneshot::channel();
-        let fen = core::extract("1. e4").unwrap().fens[0].clone();
+        let game = core::extract("1. e4").unwrap();
+        let fen = game.fens[0].clone();
         sender
             .try_send(LiveDemand {
                 fen: fen.clone(),
@@ -226,7 +227,7 @@ async fn pending_navigation_attaches_to_matching_search_or_queues_stronger_budge
             })
             .unwrap();
         let mut native = Native {
-            scheduler: Scheduler::default(),
+            scheduler: Scheduler::new(&game),
             demands: &mut receiver,
             latest: None,
             receiving: true,
@@ -234,7 +235,8 @@ async fn pending_navigation_attaches_to_matching_search_or_queues_stronger_budge
             latest_dispatched: false,
         };
         native.refresh(None);
-        native.scheduler.reserve(&fen);
+        let id = native.scheduler.ply_id(0).unwrap();
+        native.scheduler.reserve(id);
         native.resolve_live();
         assert!(native.next_live(1).is_none());
         assert!(matches!(
@@ -244,7 +246,7 @@ async fn pending_navigation_attaches_to_matching_search_or_queues_stronger_budge
 
         let mut raw = core::terminal_raw(&fen, 0);
         raw.depth = 10;
-        native.scheduler.complete(Demand::time(180, 1), &raw);
+        native.scheduler.complete(id, Demand::time(180, 1), &raw);
         native.resolve_live();
         if demand.value == 180 {
             assert_eq!(result.try_recv().unwrap().unwrap().fen, fen);
@@ -262,9 +264,10 @@ async fn pending_navigation_attaches_to_matching_search_or_queues_stronger_budge
 #[test]
 fn superseded_running_navigation_detaches_and_replacement_requires_coverage() {
     let (sender, mut receiver) = mpsc::channel(1);
-    let fen = core::extract("1. e4").unwrap().fens[0].clone();
+    let game = core::extract("1. e4").unwrap();
+    let fen = game.fens[0].clone();
     let mut native = Native {
-        scheduler: Scheduler::default(),
+        scheduler: Scheduler::new(&game),
         demands: &mut receiver,
         latest: None,
         receiving: true,
@@ -279,7 +282,8 @@ fn superseded_running_navigation_detaches_and_replacement_requires_coverage() {
         reply,
     });
     let first = native.next_live(0).unwrap();
-    native.scheduler.reserve(&fen);
+    let id = native.scheduler.ply_id(0).unwrap();
+    native.scheduler.reserve(id);
 
     let (reply, mut replacement) = oneshot::channel();
     sender
@@ -295,18 +299,18 @@ fn superseded_running_navigation_detaches_and_replacement_requires_coverage() {
         original.try_recv(),
         Err(oneshot::error::TryRecvError::Closed)
     ));
-    assert!(!native.scheduler.available(&fen));
+    assert!(!native.scheduler.available(id));
     assert!(native.next_live(1).is_none());
 
     let raw = core::terminal_raw(&fen, 0);
-    native.scheduler.complete(first.demand, &raw);
+    native.scheduler.complete(id, first.demand, &raw);
     native.complete_live(raw);
     native.resolve_live();
     assert!(matches!(
         replacement.try_recv(),
         Err(oneshot::error::TryRecvError::Empty)
     ));
-    assert!(native.scheduler.available(&fen));
+    assert!(native.scheduler.available(id));
     assert!(native.next_live(1).is_some());
 }
 
@@ -383,4 +387,111 @@ async fn native_failure_and_cancellation_drain_the_pool_before_detaching_live() 
         assert_eq!(factory.state.lock().unwrap().searches, 1);
         assert!(repo.writes.lock().unwrap().is_empty());
     }
+}
+
+#[tokio::test]
+async fn fully_cached_native_review_leaves_fen_index_uninitialized() {
+    use crate::review::tests::{FakeState, MemoryRepo, factory};
+
+    let game = core::extract("1. e4 e5").unwrap();
+    let repo = MemoryRepo {
+        hits: game
+            .fens
+            .iter()
+            .map(|fen| (fen.clone(), core::terminal_raw(fen, 0)))
+            .collect::<std::collections::HashMap<_, _>>()
+            .into(),
+        ..MemoryRepo::default()
+    };
+    let factory = factory(FakeState::default());
+    let (_closed, receiver) = tokio::sync::watch::channel(false);
+    let cancel = Cancellation {
+        closed: receiver,
+        revision: None,
+    };
+    let (_live_tx, mut demands) = mpsc::channel(1);
+    let mut native = Native {
+        scheduler: Scheduler::new(&game),
+        demands: &mut demands,
+        latest: None,
+        receiving: true,
+        live_running: false,
+        latest_dispatched: false,
+    };
+    run_review(
+        Resources {
+            factory: factory.as_ref(),
+            repository: &repo,
+            cancel: &cancel,
+        },
+        &game,
+        adaptive::profile(AnalysisKind::Fast).unwrap().unwrap(),
+        None,
+        &mut |_| {},
+        Some(&mut native),
+    )
+    .await
+    .unwrap();
+
+    assert!(native.scheduler.ply_id(0).is_none());
+    assert!(factory.state.lock().unwrap().sent.is_empty());
+}
+
+#[test]
+fn only_valid_nonterminal_live_demand_initializes_fen_index() {
+    let game = core::extract("1. e4").unwrap();
+    let (_sender, mut demands) = mpsc::channel(1);
+    let mut native = Native {
+        scheduler: Scheduler::new(&game),
+        demands: &mut demands,
+        latest: None,
+        receiving: true,
+        live_running: false,
+        latest_dispatched: false,
+    };
+    let mut request = |fen: &str| {
+        let (reply, result) = oneshot::channel();
+        native.accept(LiveDemand {
+            fen: fen.into(),
+            value: 180,
+            multipv: 1,
+            reply,
+        });
+        (
+            result,
+            native.scheduler.ply_id(0),
+            native.latest.as_ref().map(|live| live.id),
+        )
+    };
+
+    let (mut malformed, mainline, live) = request("invalid\n");
+    assert!(malformed.try_recv().unwrap().is_err());
+    assert!(mainline.is_none() && live.is_none());
+
+    let (mut terminal, mainline, live) = request("7k/8/8/8/8/8/8/K7 w - - 0 1");
+    assert_eq!(terminal.try_recv().unwrap().unwrap().cp, 0);
+    assert!(mainline.is_none() && live.is_none());
+
+    let off_mainline = core::extract("1. d4").unwrap();
+    let (_result, mainline, live) = request(&off_mainline.fens[1]);
+    assert!(mainline.is_some() && live.is_some());
+    assert_ne!(mainline, live);
+    let (_replacement, _, repeated) = request(&off_mainline.fens[1]);
+    assert_eq!(live, repeated);
+}
+
+#[test]
+fn sqlite_time_misses_only_rule_out_stricter_demands_on_the_same_ply() {
+    let budget = |ms, multipv| SearchBudget { ms, multipv };
+    let mut misses = CacheMisses::default();
+    misses.record(0, budget(100, 3), 2);
+    misses.record(0, budget(200, 1), 2);
+    assert!(misses.rules_out(0, budget(150, 3)));
+    assert!(misses.rules_out(0, budget(300, 2)));
+    assert!(!misses.rules_out(0, budget(150, 2)));
+    assert!(!misses.rules_out(1, budget(300, 3)));
+
+    misses.record(0, budget(100, 1), 2);
+    assert_eq!(misses.0[0], [budget(100, 1)]);
+    assert!(misses.rules_out(0, budget(150, 2)));
 }

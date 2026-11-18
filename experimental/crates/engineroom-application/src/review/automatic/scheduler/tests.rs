@@ -1,5 +1,5 @@
 use super::*;
-use crate::review::types::RawLine;
+use crate::review::{core, types::RawLine};
 
 fn evidence(fen: &str, depths: &[u32]) -> RawPosition {
     RawPosition {
@@ -24,39 +24,33 @@ fn evidence(fen: &str, depths: &[u32]) -> RawPosition {
 
 #[test]
 fn exact_fen_reservation_skips_blocked_work_and_resumes_stronger_demand() {
-    let game = core::extract("1. e4 e5").unwrap();
-    let first = &game.fens[0];
-    let different_clock = first.replace(" 0 1", " 1 1");
-    let fens = vec![
-        first.clone(),
-        first.clone(),
-        different_clock,
-        game.fens[1].clone(),
-    ];
-    let mut scheduler = Scheduler::default();
-    let mut queue = VecDeque::from([1, 2, 3]);
+    let mut game = core::extract("1. Nf3 Nf6 2. Ng1 Ng8").unwrap();
+    game.fens[4] = game.fens[0].clone();
+    game.fens[2] = game.fens[0].replace(" 0 1", " 1 1");
+    game.positions[2] = core::position(&game.fens[2]).unwrap();
+    let mut scheduler = Scheduler::new(&game);
+    scheduler.prepare();
+    let first = scheduler.ply_id(0).unwrap();
+    let different_clock = scheduler.ply_id(2).unwrap();
+    assert_eq!(scheduler.plies(first).collect::<Vec<_>>(), [0, 4]);
+    assert_ne!(first, different_clock);
+
+    let mut queue = VecDeque::from([4, 2, 3]);
     let mut blocks = vec![VecDeque::new(); 2];
     scheduler.reserve(first);
-    assert_eq!(
-        scheduler.take_triage(0, &mut queue, &mut blocks, &fens),
-        Some(2)
-    );
-    assert_eq!(
-        scheduler.take_triage(1, &mut queue, &mut blocks, &fens),
-        Some(3)
-    );
-    assert_eq!(
-        scheduler.take_triage(1, &mut queue, &mut blocks, &fens),
-        None
-    );
-    scheduler.complete(Demand::time(180, 1), &evidence(first, &[12]));
+    assert_eq!(scheduler.take_triage(0, &mut queue, &mut blocks), Some(2));
+    assert_eq!(scheduler.take_triage(1, &mut queue, &mut blocks), Some(3));
+    assert_eq!(scheduler.take_triage(1, &mut queue, &mut blocks), None);
+
+    scheduler.complete(first, Demand::time(180, 1), &evidence(&game.fens[0], &[12]));
     assert!(scheduler.lookup(first, Demand::time(180, 1)).is_some());
-    assert!(scheduler.lookup(&fens[2], Demand::time(180, 1)).is_none());
-    assert!(scheduler.lookup(first, Demand::time(500, 1)).is_none());
-    assert_eq!(
-        scheduler.take_triage(1, &mut queue, &mut blocks, &fens),
-        Some(1)
+    assert!(
+        scheduler
+            .lookup(different_clock, Demand::time(180, 1))
+            .is_none()
     );
+    assert!(scheduler.lookup(first, Demand::time(500, 1)).is_none());
+    assert_eq!(scheduler.take_triage(1, &mut queue, &mut blocks), Some(4));
 }
 
 #[test]
@@ -68,22 +62,54 @@ fn coverage_uses_actual_contiguous_pvs_and_sql_budget_semantics() {
         value,
         multipv,
     };
-    let mut scheduler = Scheduler::default();
-    scheduler.reserve(fen);
-    scheduler.complete(Demand::time(500, 3), &evidence(fen, &[19, 17]));
+    let mut scheduler = Scheduler::new(&game);
+    scheduler.prepare();
+    let id = scheduler.ply_id(0).unwrap();
+    scheduler.reserve(id);
+    scheduler.complete(id, Demand::time(500, 3), &evidence(fen, &[19, 17]));
     assert_eq!(
         scheduler
-            .lookup(fen, Demand::time(400, 1))
+            .lookup(id, Demand::time(400, 1))
             .unwrap()
             .lines
             .len(),
         1
     );
-    assert!(scheduler.lookup(fen, Demand::time(400, 3)).is_none());
-    assert!(scheduler.lookup(fen, depth(17, 2)).is_some());
-    assert!(scheduler.lookup(fen, depth(18, 2)).is_none());
-    scheduler.reserve(fen);
-    scheduler.complete(depth(24, 3), &evidence(fen, &[25, 24, 24]));
-    assert!(scheduler.lookup(fen, depth(24, 3)).is_some());
-    assert!(scheduler.lookup(fen, Demand::time(1, 3)).is_none());
+    assert!(scheduler.lookup(id, Demand::time(400, 3)).is_none());
+    assert!(scheduler.lookup(id, depth(17, 2)).is_some());
+    assert!(scheduler.lookup(id, depth(18, 2)).is_none());
+    scheduler.reserve(id);
+    scheduler.complete(id, depth(24, 3), &evidence(fen, &[25, 24, 24]));
+    assert!(scheduler.lookup(id, depth(24, 3)).is_some());
+    assert!(scheduler.lookup(id, Demand::time(1, 3)).is_none());
+}
+
+#[test]
+fn arena_keeps_first_covering_evidence_and_uses_seeded_move_count() {
+    let game = core::extract("[FEN \"8/7k/5KQ1/8/8/8/8/8 b - - 0 1\"]\n1... Kh8").unwrap();
+    let fen = &game.fens[0];
+    let mut scheduler = Scheduler::new(&game);
+    assert!(scheduler.index.is_none());
+    scheduler.prepare();
+    let id = scheduler.ply_id(0).unwrap();
+    assert_eq!(scheduler.index.as_ref().unwrap().legal_moves[id.index()], 1);
+    for depth in [12, 20] {
+        scheduler.reserve(id);
+        scheduler.complete(id, Demand::time(500, 3), &evidence(fen, &[depth]));
+    }
+    let hit = scheduler.lookup(id, Demand::time(500, 3)).unwrap();
+    assert_eq!(hit.depth, 12);
+    assert_eq!(hit.lines.len(), 1);
+}
+
+#[test]
+fn activity_bitset_keeps_high_indices_independent() {
+    let mut active = BitSet::default();
+    for index in [0, 63, 64, 129] {
+        active.insert(index);
+    }
+    active.remove(64);
+    assert!(!active.contains(64));
+    assert!(!active.contains(192));
+    assert!([0, 63, 129].into_iter().all(|index| active.contains(index)));
 }
