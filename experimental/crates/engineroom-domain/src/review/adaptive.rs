@@ -5,7 +5,7 @@ use super::{
 };
 use fixedbitset::FixedBitSet;
 use shakmaty::{Chess, Color, Position, Role};
-use std::sync::LazyLock;
+use std::{cmp::Reverse, sync::LazyLock};
 #[derive(Debug, Clone, Copy, serde::Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Profile {
@@ -191,7 +191,7 @@ pub fn rank_move(
     let mate = before.cp.unsigned_abs() >= 90000 || after.cp.unsigned_abs() >= 90000;
     let mut score =
         ((loss / 20.0) * 24.0).clamp(0.0, 24.0) + ((swing / 20.0) * 11.0).clamp(0.0, 11.0);
-    let mut reasons = Vec::new();
+    let mut reasons = Vec::with_capacity(4);
     if loss >= 5.0 {
         reasons.push(Reason::Loss);
     }
@@ -252,17 +252,17 @@ pub fn rank_move(
     }
 }
 
+fn priority(m: &Critical) -> (bool, RefinementKind, u32) {
+    (m.hard, refinement_kind(m), m.score)
+}
+
 pub fn targets(critical: &[Critical], count: usize, profile: Profile) -> Vec<Target> {
     let mut ranked: Vec<_> = critical
         .iter()
         .filter(|m| m.score >= 32 || m.hard || m.reasons.contains(&Reason::UnstableSearch))
+        .map(|m| (priority(m), m.ply))
         .collect();
-    ranked.sort_by(|a, b| {
-        b.hard
-            .cmp(&a.hard)
-            .then_with(|| refinement_kind(b).cmp(&refinement_kind(a)))
-            .then(b.score.cmp(&a.score))
-    });
+    ranked.sort_by_key(|&(priority, _)| Reverse(priority));
     let limit = profile
         .minimum
         .max((count as f64 * profile.fraction).ceil() as usize);
@@ -297,14 +297,14 @@ pub fn targets(critical: &[Critical], count: usize, profile: Profile) -> Vec<Tar
                 chosen += 1;
                 Target {
                     position_index: i,
-                    score: m.score,
-                    hard: m.hard,
+                    score,
+                    hard,
                     kind,
                     search,
                 }
             });
-            target.score = target.score.max(m.score);
-            target.hard |= m.hard;
+            target.score = target.score.max(score);
+            target.hard |= hard;
             target.kind = target.kind.max(kind);
             target.search.ms = target.search.ms.max(search.ms);
             target.search.multipv = target.search.multipv.max(search.multipv);
@@ -366,6 +366,19 @@ pub fn review_targets(game: &Game, raw: &[RawPosition], profile: Profile) -> Vec
     let limit = profile
         .minimum
         .max((raw.len() as f64 * profile.fraction).ceil() as usize);
+    const WORD_BITS: usize = u64::BITS as usize;
+    let word_and_mask = |index: usize| (index / WORD_BITS, 1_u64 << (index % WORD_BITS));
+    let mut selected_positions = vec![0_u64; raw.len().div_ceil(WORD_BITS)];
+    for target in &selected {
+        let (word, mask) = word_and_mask(target.position_index);
+        selected_positions[word] |= mask;
+    }
+    let contains = |index| {
+        let (word, mask) = word_and_mask(index);
+        selected_positions
+            .get(word)
+            .is_some_and(|bits| bits & mask != 0)
+    };
     let mut seeds: Vec<_> = critical
         .iter()
         .filter(|m| {
@@ -375,23 +388,15 @@ pub fn review_targets(game: &Game, raw: &[RawPosition], profile: Profile) -> Vec
                 && (forcing.contains(i)
                     || sacrifices.contains(i)
                     || m.reasons.contains(&Reason::Mate))
-                && selected
-                    .iter()
-                    .any(|t| t.position_index == i && t.kind != RefinementKind::Context)
-                && selected
-                    .iter()
-                    .any(|t| t.position_index == i + 1 && t.kind != RefinementKind::Context)
+                && contains(i)
+                && contains(i + 1)
         })
+        .map(|m| (priority(m), m.ply))
         .collect();
-    seeds.sort_by(|a, b| {
-        b.hard
-            .cmp(&a.hard)
-            .then(refinement_kind(b).cmp(&refinement_kind(a)))
-            .then(b.score.cmp(&a.score))
-    });
-    for seed in seeds {
-        let mut left = seed.ply - 1;
-        let mut right = seed.ply;
+    seeds.sort_by_key(|&(priority, _)| Reverse(priority));
+    for ((_, _, score), ply) in seeds {
+        let mut left = ply - 1;
+        let mut right = ply;
         let mut left_open = true;
         let mut right_open = true;
         for step in 0..profile.context_plies {
@@ -418,12 +423,15 @@ pub fn review_targets(game: &Game, raw: &[RawPosition], profile: Profile) -> Vec
             if !left_open && !right_open {
                 break;
             }
-            if let Some(index) = next
-                && !selected.iter().any(|t| t.position_index == index)
-            {
+            if let Some(index) = next {
+                let (word, mask) = word_and_mask(index);
+                if selected_positions[word] & mask != 0 {
+                    continue;
+                }
+                selected_positions[word] |= mask;
                 selected.push(Target {
                     position_index: index,
-                    score: seed.score,
+                    score,
                     hard: false,
                     kind: RefinementKind::Context,
                     search: profile.budget(RefinementKind::Context),
@@ -589,5 +597,85 @@ mod profile_tests {
         assert!(profile(AnalysisKind::Manual).unwrap().is_none());
         assert!(profile(AnalysisKind::Fast).unwrap().is_some());
         assert!(profile(AnalysisKind::Deep).unwrap().is_some());
+    }
+
+    #[test]
+    fn targets_preserve_tie_order_and_allow_a_pair_to_cross_the_soft_quota() {
+        let profile = Profile {
+            fraction: 0.0,
+            minimum: 1,
+            ..profile(AnalysisKind::Fast).unwrap().unwrap()
+        };
+        let critical = [5, 2].map(|ply| Critical {
+            ply,
+            score: 32,
+            hard: false,
+            reasons: vec![Reason::Tactical],
+        });
+        let selected = targets(&critical, 6, profile);
+        assert_eq!(
+            selected
+                .iter()
+                .map(|t| t.position_index)
+                .collect::<Vec<_>>(),
+            [4, 5]
+        );
+
+        let unlimited = Profile {
+            minimum: 6,
+            ..profile
+        };
+        let selected = targets(&critical, 6, unlimited);
+        assert_eq!(
+            selected
+                .iter()
+                .map(|t| t.position_index)
+                .collect::<Vec<_>>(),
+            [4, 5, 1, 2]
+        );
+    }
+
+    #[test]
+    fn context_skips_already_selected_positions_across_bitset_words() {
+        let mut game = super::super::core::extract("1. Nf3 *").unwrap();
+        // Synthetic forcing sequence isolates context selection from chess tactics.
+        game.moves = (1..=66)
+            .map(|ply| PlayedMove {
+                ply,
+                san: match ply {
+                    62 | 65 => "e8=Q",
+                    63 | 64 => "exd5",
+                    _ => "e4",
+                }
+                .into(),
+                ..game.moves[0].clone()
+            })
+            .collect();
+        game.positions.resize(67, Chess::default());
+        let raw = vec![
+            RawPosition {
+                fen: String::new(),
+                cp: 0,
+                depth: 0,
+                pv: Vec::new(),
+                lines: Vec::new(),
+            };
+            67
+        ];
+        let profile = Profile {
+            fraction: 0.0,
+            minimum: 7,
+            context_plies: 6,
+            ..profile(AnalysisKind::Fast).unwrap().unwrap()
+        };
+        let selected = review_targets(&game, &raw, profile);
+        assert_eq!(
+            selected
+                .iter()
+                .map(|t| t.position_index)
+                .collect::<Vec<_>>(),
+            [61, 62, 64, 65, 63]
+        );
+        assert_eq!(selected[4].kind, RefinementKind::Context);
     }
 }
