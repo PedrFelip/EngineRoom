@@ -3,6 +3,9 @@
 //   ENGINE_ROOM_STOCKFISH=/path/to/stockfish \
 //     bunx strobe bench perf/real-game.bench.ts --head . --check
 // Timed verdicts need a quiet machine and a git base with the same bench file.
+// `cpu.work` here is the sum over the whole tree, including every Stockfish
+// child; it is NOT comparable to the fake-engine cases in pipeline.bench.ts.
+// See perf/measurement-contract.md for units and scopes.
 import { bench, cli } from "@hona/strobe"
 
 // The existing example resolves its PGN fixture from its own directory, so the
