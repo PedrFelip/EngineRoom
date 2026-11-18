@@ -3,7 +3,7 @@ use engineroom_backend::review::{
     engine::EngineFactory,
     native_engine::NativeEngineFactory,
     repository::{Repository, SqliteRepository},
-    session::ReviewSessions,
+    session::{Resources, ReviewSessions, SchedulerMode},
     types::{Envelope, LiveRequest, LiveSettings, ReviewConfig, ReviewError},
 };
 use std::{
@@ -92,6 +92,7 @@ pub enum DataEvent {
 }
 
 pub struct Bridge {
+    scheduler: SchedulerMode,
     runtime: tokio::runtime::Runtime,
     import_actor: Option<tokio::task::JoinHandle<()>>,
     import_intents: Option<tokio::sync::mpsc::UnboundedSender<ImportIntent>>,
@@ -110,7 +111,7 @@ pub struct Bridge {
     probe_wake: Arc<dyn Fn() + Send + Sync>,
 }
 impl Bridge {
-    pub fn new(wake: rune::Waker) -> Result<Self, String> {
+    pub fn new_with_scheduler(wake: rune::Waker, scheduler: SchedulerMode) -> Result<Self, String> {
         // A missing engine must not disable storage, history, file and Chess.com
         // imports: the acquisition error is reported only when a review starts.
         let engine = engine_path();
@@ -129,13 +130,31 @@ impl Bridge {
             Arc::new(move || (wake)()),
             http,
             Some(db),
+            None,
+            scheduler,
         )
+    }
+
+    #[must_use]
+    pub fn scheduler(&self) -> SchedulerMode {
+        self.scheduler
     }
 
     #[cfg(test)]
     pub fn with_ports(
         factory: Arc<dyn EngineFactory>,
         repository: Arc<dyn Repository>,
+        wake: Arc<dyn Fn() + Send + Sync>,
+    ) -> Result<Self, String> {
+        Self::with_ports_and_scheduler(factory, repository, None, SchedulerMode::Pipeline, wake)
+    }
+
+    #[cfg(test)]
+    pub fn with_ports_and_scheduler(
+        factory: Arc<dyn EngineFactory>,
+        repository: Arc<dyn Repository>,
+        resources: Option<Resources>,
+        scheduler: SchedulerMode,
         wake: Arc<dyn Fn() + Send + Sync>,
     ) -> Result<Self, String> {
         Self::with_data_ports(
@@ -145,8 +164,14 @@ impl Bridge {
             wake,
             Arc::new(engineroom_backend::imports::ChessComHttp::new().map_err(|e| e.to_string())?),
             None,
+            resources,
+            scheduler,
         )
     }
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "internal bridge constructor wires all injected native ports"
+    )]
     fn with_data_ports(
         factory: Arc<dyn EngineFactory>,
         repository: Arc<dyn Repository>,
@@ -154,6 +179,8 @@ impl Bridge {
         wake: Arc<dyn Fn() + Send + Sync>,
         http: Arc<dyn engineroom_backend::imports::Http>,
         db_path: Option<PathBuf>,
+        resources: Option<Resources>,
+        scheduler: SchedulerMode,
     ) -> Result<Self, String> {
         let runtime = tokio::runtime::Runtime::new().map_err(|e| e.to_string())?;
         let (import_tx, import_events) = mpsc::channel();
@@ -191,7 +218,9 @@ impl Bridge {
                 shutdown.await;
             }
         });
-        let sessions = Arc::new(ReviewSessions::new(factory.clone(), repository, None));
+        let sessions = Arc::new(
+            ReviewSessions::new(factory.clone(), repository, resources).with_scheduler(scheduler),
+        );
         let (sender, events) = mpsc::channel();
         let (lifecycle_tx, lifecycle) = mpsc::channel();
         let (files_tx, files) = mpsc::channel();
@@ -280,7 +309,8 @@ impl Bridge {
                         }
                     }
                     Intent::Cancel { id, request_id } => {
-                        if let Err(error) = sessions.cancel_live(&id, "window", request_id).await {
+                        if let Err(error) = sessions.enqueue_live_cancel(&id, "window", request_id)
+                        {
                             publish_lifecycle(
                                 &lifecycle_tx,
                                 &wake,
@@ -393,6 +423,7 @@ impl Bridge {
             sessions.shutdown().await;
         });
         Ok(Self {
+            scheduler,
             runtime,
             import_actor: Some(import_actor),
             import_intents: Some(import_intents),
@@ -530,6 +561,68 @@ impl Bridge {
         self.lifecycle.try_iter().collect()
     }
 }
+/// Resolves the review scheduler mode from CLI arguments or `ENGINE_ROOM_SCHEDULER`.
+///
+/// Keeps [`SchedulerMode::Pipeline`] as the default unless explicitly opted in.
+pub fn resolve_scheduler_mode() -> Result<SchedulerMode, String> {
+    let env = match std::env::var_os("ENGINE_ROOM_SCHEDULER") {
+        Some(value) => Some(
+            value
+                .into_string()
+                .map_err(|_| "ENGINE_ROOM_SCHEDULER não é UTF-8 válido.".to_string())?,
+        ),
+        None => None,
+    };
+    parse_scheduler_mode(
+        rune::extra_args().iter().map(String::as_str),
+        env.as_deref(),
+    )
+}
+
+pub(crate) fn parse_scheduler_mode<'a>(
+    args: impl IntoIterator<Item = &'a str>,
+    env: Option<&str>,
+) -> Result<SchedulerMode, String> {
+    let mut cli = None;
+    let mut iter = args.into_iter();
+    while let Some(arg) = iter.next() {
+        match arg {
+            "--native-scheduler" => cli = Some(SchedulerMode::Native),
+            "--pipeline-scheduler" => cli = Some(SchedulerMode::Pipeline),
+            "--scheduler" => {
+                let value = iter
+                    .next()
+                    .ok_or_else(|| "Valor ausente para --scheduler.".to_string())?;
+                cli = Some(parse_scheduler_label(value, "--scheduler")?);
+            }
+            _ if arg.starts_with("--scheduler=") => {
+                let value = &arg["--scheduler=".len()..];
+                cli = Some(parse_scheduler_label(value, "--scheduler")?);
+            }
+            _ => {}
+        }
+    }
+    if let Some(mode) = cli {
+        return Ok(mode);
+    }
+    match env.map(str::trim).filter(|value| !value.is_empty()) {
+        None => Ok(SchedulerMode::Pipeline),
+        Some(value) => parse_scheduler_label(value, "ENGINE_ROOM_SCHEDULER"),
+    }
+}
+
+fn parse_scheduler_label(value: &str, source: &str) -> Result<SchedulerMode, String> {
+    if value.eq_ignore_ascii_case("native") {
+        Ok(SchedulerMode::Native)
+    } else if value.eq_ignore_ascii_case("pipeline") {
+        Ok(SchedulerMode::Pipeline)
+    } else {
+        Err(format!(
+            "Modo de agendador inválido em {source}: '{value}' (use 'pipeline' ou 'native')."
+        ))
+    }
+}
+
 /// Resolves Stockfish without making a missing executable fatal for the bridge.
 fn engine_path() -> PathBuf {
     crate::desktop_paths::stockfish_path().unwrap_or_else(|_| {

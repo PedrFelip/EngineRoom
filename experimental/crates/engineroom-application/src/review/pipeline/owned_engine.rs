@@ -31,6 +31,10 @@ impl OwnedEngine {
         self.factory.as_ref()
     }
 
+    pub(super) fn factory_arc(&self) -> Arc<dyn EngineFactory> {
+        self.factory.clone()
+    }
+
     pub(super) async fn discard(&mut self) {
         if let Some(mut port) = self.port.take() {
             port.shutdown().await;

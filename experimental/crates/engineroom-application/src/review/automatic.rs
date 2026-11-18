@@ -10,15 +10,147 @@ use super::{
     types::*,
 };
 use crate::db::mode::Mode;
-use std::collections::VecDeque;
-use tokio::task::JoinSet;
+use std::collections::{HashMap, VecDeque};
+use tokio::{
+    sync::{mpsc, oneshot},
+    task::JoinSet,
+};
 
+mod scheduler;
+use scheduler::{Demand, Scheduler};
+
+pub(super) struct LiveDemand {
+    pub fen: String,
+    pub value: u32,
+    pub multipv: u32,
+    pub reply: oneshot::Sender<Result<RawPosition>>,
+}
+
+pub(super) struct NativeLive<'a> {
+    pub cancel: &'a Cancellation,
+    pub demands: &'a mut mpsc::Receiver<LiveDemand>,
+}
+
+struct Native<'a> {
+    scheduler: Scheduler,
+    demands: &'a mut mpsc::Receiver<LiveDemand>,
+    latest: Option<LiveDemand>,
+    receiving: bool,
+    // Replacing a subscriber leaves its unrestricted search and reservation
+    // in place. Its completed evidence can still serve review or navigation.
+    live_running: bool,
+    latest_dispatched: bool,
+}
+
+impl Native<'_> {
+    fn refresh(&mut self, mut latest: Option<LiveDemand>) {
+        while let Ok(request) = self.demands.try_recv() {
+            latest = Some(request);
+        }
+        if let Some(request) = latest {
+            self.accept(request);
+        }
+        if self
+            .latest
+            .as_ref()
+            .is_some_and(|request| request.reply.is_closed())
+        {
+            self.latest = None;
+            self.latest_dispatched = false;
+        }
+    }
+
+    fn accept(&mut self, request: LiveDemand) {
+        self.latest = None;
+        self.latest_dispatched = false;
+        if request.reply.is_closed() {
+            return;
+        }
+        let terminal = if request.fen.contains(['\r', '\n']) {
+            Err(ReviewError::new(
+                ReviewErrorCode::InvalidPgn,
+                "review.live",
+                "FEN inválido.",
+            ))
+        } else {
+            core::terminal(&request.fen)
+        };
+        match terminal {
+            Ok(None) => self.latest = Some(request),
+            Ok(Some(cp)) => {
+                let _ = request.reply.send(Ok(core::terminal_raw(&request.fen, cp)));
+            }
+            Err(error) => {
+                let _ = request.reply.send(Err(error));
+            }
+        }
+    }
+
+    fn resolve_live(&mut self) {
+        let Some(request) = self.latest.as_ref().filter(|_| !self.latest_dispatched) else {
+            return;
+        };
+        let demand = Demand::time(request.value, request.multipv);
+        if let Some(raw) = self.scheduler.lookup(&request.fen, demand)
+            && let Some(request) = self.latest.take()
+        {
+            let _ = request.reply.send(Ok(raw));
+        }
+    }
+
+    fn next_live(&mut self, worker: usize) -> Option<Job> {
+        let request = self.latest.as_ref()?;
+        if self.live_running || !self.scheduler.available(&request.fen) {
+            return None;
+        }
+        let demand = Demand::time(request.value, request.multipv);
+        self.live_running = true;
+        self.latest_dispatched = true;
+        Some(Job {
+            worker,
+            purpose: Purpose::Live(request.fen.clone()),
+            demand,
+        })
+    }
+
+    fn complete_live(&mut self, raw: RawPosition) {
+        self.refresh(None);
+        self.live_running = false;
+        // The original consumer can use its own result even if the engine
+        // returned partial MultiPV. Replacement consumers need full coverage.
+        if std::mem::take(&mut self.latest_dispatched)
+            && let Some(request) = self.latest.take()
+        {
+            let _ = request.reply.send(Ok(raw));
+        }
+    }
+}
+
+enum Purpose {
+    Triage(usize),
+    Refinement(usize),
+    Live(String),
+}
 struct Job {
     worker: usize,
-    index: usize,
-    refinement: bool,
-    value: u32,
-    multipv: u32,
+    purpose: Purpose,
+    demand: Demand,
+}
+impl Job {
+    fn fen<'a>(&'a self, game: &'a Game) -> &'a str {
+        match &self.purpose {
+            Purpose::Triage(index) | Purpose::Refinement(index) => &game.fens[*index],
+            Purpose::Live(fen) => fen,
+        }
+    }
+
+    fn triage(worker: usize, index: usize, profile: Profile) -> Self {
+        Self {
+            worker,
+            purpose: Purpose::Triage(index),
+            demand: Demand::time(profile.triage_ms, profile.triage_multipv),
+        }
+    }
 }
 struct State<'a> {
     game: &'a Game,
@@ -101,6 +233,33 @@ impl State<'_> {
             }
         }
     }
+    fn share_triage(
+        &mut self,
+        fen: &str,
+        scheduler: &Scheduler,
+        waiting: &mut HashMap<&str, Vec<usize>>,
+        emit: &mut (dyn FnMut(Event) + Send),
+    ) -> Result<()> {
+        if let Some(indexes) = waiting.get_mut(fen) {
+            indexes.retain(|&index| self.baseline[index].is_none());
+            let demand = Demand::time(self.profile.triage_ms, self.profile.triage_multipv);
+            if !indexes.is_empty()
+                && let Some(raw) = scheduler.lookup(fen, demand)
+            {
+                for index in indexes.drain(..) {
+                    self.baseline[index] = Some(raw.clone());
+                    self.cached += 1;
+                    self.discover(index);
+                    self.progress(index, Some(self.baseline(index)?), emit);
+                }
+            }
+            if indexes.is_empty() {
+                waiting.remove(fen);
+            }
+        }
+        Ok(())
+    }
+
     fn progress(
         &self,
         index: usize,
@@ -150,6 +309,12 @@ impl State<'_> {
     }
 }
 
+struct Resources<'a> {
+    factory: &'a dyn EngineFactory,
+    repository: &'a dyn Repository,
+    cancel: &'a Cancellation,
+}
+
 pub(super) async fn review(
     factory: &dyn EngineFactory,
     repository: &dyn Repository,
@@ -158,6 +323,61 @@ pub(super) async fn review(
     sizing: Option<(u32, u32)>,
     cancel: &Cancellation,
     emit: &mut (dyn FnMut(Event) + Send),
+) -> Result<ReviewResult> {
+    run_review(
+        Resources {
+            factory,
+            repository,
+            cancel,
+        },
+        game,
+        profile,
+        sizing,
+        emit,
+        None,
+    )
+    .await
+}
+
+pub(super) async fn review_native(
+    factory: &dyn EngineFactory,
+    repository: &dyn Repository,
+    game: &Game,
+    profile: Profile,
+    sizing: Option<(u32, u32)>,
+    live: NativeLive<'_>,
+    emit: &mut (dyn FnMut(Event) + Send),
+) -> Result<ReviewResult> {
+    let mut native = Native {
+        scheduler: Scheduler::default(),
+        demands: live.demands,
+        latest: None,
+        receiving: true,
+        live_running: false,
+        latest_dispatched: false,
+    };
+    run_review(
+        Resources {
+            factory,
+            repository,
+            cancel: live.cancel,
+        },
+        game,
+        profile,
+        sizing,
+        emit,
+        Some(&mut native),
+    )
+    .await
+}
+
+async fn run_review(
+    resources: Resources<'_>,
+    game: &Game,
+    profile: Profile,
+    sizing: Option<(u32, u32)>,
+    emit: &mut (dyn FnMut(Event) + Send),
+    native: Option<&mut Native<'_>>,
 ) -> Result<ReviewResult> {
     let count = game.fens.len();
     let mut state = State {
@@ -180,13 +400,12 @@ pub(super) async fn review(
     let mut pool: Option<Pool> = None;
     let mut pending: Vec<(u32, u32, Vec<RawPosition>)> = vec![];
     let mut run = execute(
-        factory,
-        repository,
-        cancel,
+        &resources,
         emit,
         &mut state,
         &mut pool,
         &mut pending,
+        native,
     )
     .await;
     if let Some(pool) = &mut pool
@@ -199,20 +418,23 @@ pub(super) async fn review(
         }
     }
     if run.is_err()
-        && let Err(error) = flush(repository, &mut pending).await
+        && let Err(error) = flush(resources.repository, &mut pending).await
     {
         emit(Event::Warning { error });
     }
     run
 }
 async fn execute(
-    factory: &dyn EngineFactory,
-    repository: &dyn Repository,
-    cancel: &Cancellation,
+    &Resources {
+        factory,
+        repository,
+        cancel,
+    }: &Resources<'_>,
     emit: &mut (dyn FnMut(Event) + Send),
     state: &mut State<'_>,
     pool: &mut Option<Pool>,
     pending: &mut Vec<(u32, u32, Vec<RawPosition>)>,
+    mut native: Option<&mut Native<'_>>,
 ) -> Result<ReviewResult> {
     let game = state.game;
     let profile = state.profile;
@@ -232,6 +454,7 @@ async fn execute(
         return Err(invalid_cache_count());
     }
     let mut queue = VecDeque::new();
+    let mut triage_waiting: HashMap<&str, Vec<usize>> = HashMap::new();
     for (i, hit) in hits.iter_mut().enumerate() {
         cancel.check()?;
         state.baseline[i] = if let Some(cp) = state.terminals[i] {
@@ -241,6 +464,9 @@ async fn execute(
             Some(hit)
         } else {
             queue.push_back(i);
+            if native.is_some() {
+                triage_waiting.entry(&game.fens[i]).or_default().push(i);
+            }
             None
         };
         if let Some(raw) = &state.baseline[i] {
@@ -255,6 +481,10 @@ async fn execute(
     let mut cache_checked = vec![None; count];
     loop {
         cancel.check()?;
+        if let Some(native) = &mut native {
+            native.refresh(None);
+            native.resolve_live();
+        }
         if state.complete() && state.final_targets.is_none() {
             let raw: Vec<_> = state.baseline.iter().flatten().cloned().collect();
             state.final_targets = Some(
@@ -276,7 +506,21 @@ async fn execute(
         let mut groups: Vec<(SearchBudget, Vec<usize>)> = vec![];
         for target in &targets {
             let i = target.position_index;
-            if state.satisfied(target) || refining[i] || cache_checked[i] == Some(target.search) {
+            if state.satisfied(target) || refining[i] {
+                continue;
+            }
+            let demand = Demand::time(target.search.ms, target.search.multipv);
+            if let Some(raw) = native
+                .as_ref()
+                .and_then(|n| n.scheduler.lookup(&game.fens[i], demand))
+            {
+                state.budgets[i] = Some(target.search);
+                state.refined[i] = Some(raw);
+                state.cached += 1;
+                state.progress(i, Some(state.evaluation(i)?), emit);
+                continue;
+            }
+            if cache_checked[i] == Some(target.search) {
                 continue;
             }
             let slot = groups
@@ -311,7 +555,10 @@ async fn execute(
         let needs_refinement = targets
             .iter()
             .any(|t| !state.satisfied(t) && !refining[t.position_index]);
-        if pool.is_none() && (!queue.is_empty() || needs_refinement) {
+        let needs_live = native
+            .as_ref()
+            .is_some_and(|native| native.latest.is_some());
+        if pool.is_none() && (!queue.is_empty() || needs_refinement || needs_live) {
             let acquired = Pool::acquire(factory, state.sizing, count, cancel).await?;
             let workers = acquired.len();
             *pool = Some(acquired);
@@ -326,20 +573,34 @@ async fn execute(
                 let prefer_refinement =
                     state.complete() || (pool.len() > 1 && worker == pool.len() - 1);
                 let target = if prefer_refinement {
-                    targets
-                        .iter()
-                        .find(|t| !state.satisfied(t) && !refining[t.position_index])
+                    targets.iter().find(|t| {
+                        let i = t.position_index;
+                        !state.satisfied(t)
+                            && !refining[i]
+                            && native
+                                .as_ref()
+                                .is_none_or(|n| n.scheduler.available(&game.fens[i]))
+                    })
                 } else {
                     None
                 };
-                let job = if let Some(target) = target {
+                let live = native.as_mut().and_then(|native| native.next_live(worker));
+                let job = if live.is_some() {
+                    live
+                } else if let Some(target) = target {
                     Some(Job {
                         worker,
-                        index: target.position_index,
-                        refinement: true,
-                        value: target.search.ms,
-                        multipv: target.search.multipv,
+                        purpose: Purpose::Refinement(target.position_index),
+                        demand: Demand::time(target.search.ms, target.search.multipv),
                     })
+                } else if let Some(native) = &native {
+                    std::iter::from_fn(|| {
+                        native
+                            .scheduler
+                            .take_triage(worker, &mut queue, &mut blocks, &game.fens)
+                    })
+                    .find(|&index| state.baseline[index].is_none())
+                    .map(|index| Job::triage(worker, index, profile))
                 } else {
                     if blocks[worker].is_empty() {
                         // Claim at most four consecutive positions. Missing cache
@@ -362,21 +623,21 @@ async fn execute(
                     if blocks[worker].is_empty() && worker != preferred {
                         blocks[worker] = std::mem::take(&mut blocks[preferred]);
                     }
-                    blocks[worker].pop_front().map(|index| Job {
-                        worker,
-                        index,
-                        refinement: false,
-                        value: profile.triage_ms,
-                        multipv: profile.triage_multipv,
-                    })
+                    blocks[worker]
+                        .pop_front()
+                        .map(|index| Job::triage(worker, index, profile))
                 };
                 if let Some(job) = job {
+                    let fen = job.fen(game);
+                    if let Some(native) = &mut native {
+                        native.scheduler.reserve(fen);
+                    }
                     let receiver = pool
-                        .submit(worker, game.fens[job.index].clone(), job.value, job.multipv)
+                        .submit(worker, fen.to_owned(), job.demand.value, job.demand.multipv)
                         .await?;
                     busy[worker] = true;
-                    if job.refinement {
-                        refining[job.index] = true;
+                    if let Purpose::Refinement(index) = job.purpose {
+                        refining[index] = true;
                     }
                     waiters.spawn(async move { (job, receiver.await) });
                 }
@@ -402,8 +663,22 @@ async fn execute(
             }
             break;
         }
+        let incoming = native.as_mut().filter(|native| native.receiving);
         let result = tokio::select! {
             _ = cancel.cancelled() => return Err(ReviewError::cancelled()),
+            (native, request) = async {
+                let Some(native) = incoming else {
+                    return std::future::pending().await;
+                };
+                let request = native.demands.recv().await;
+                (native, request)
+            } => {
+                match request {
+                    Some(request) => native.refresh(Some(request)),
+                    None => native.receiving = false,
+                }
+                continue;
+            },
             result = waiters.join_next() => result.ok_or_else(|| queue_error("Fila encerrou sem resultado."))?.map_err(|e| ReviewError::with_source(ReviewErrorCode::EngineExited, "review.queue", e))?,
         };
         let (job, reply) = result;
@@ -415,29 +690,51 @@ async fn execute(
             .map_err(|_| disconnected_worker_error(failure.clone(), cancel))?
             .map_err(|e| failure.unwrap_or(e))?;
         busy[job.worker] = false;
-        state.searched += 1;
         let raw = completed.raw;
+        let shared_fen = native.is_some().then(|| raw.fen.clone());
+        if let Some(native) = &mut native {
+            native
+                .scheduler
+                .complete(Demand::time(completed.value, job.demand.multipv), &raw);
+        }
         // Both stages use unrestricted searches and can populate the FEN cache.
         let buffer = pending
             .iter()
-            .position(|(value, multipv, _)| *value == completed.value && *multipv == job.multipv)
+            .position(|(value, multipv, _)| {
+                *value == completed.value && *multipv == job.demand.multipv
+            })
             .unwrap_or_else(|| {
-                pending.push((completed.value, job.multipv, vec![]));
+                pending.push((completed.value, job.demand.multipv, vec![]));
                 pending.len() - 1
             });
         pending[buffer].2.push(raw.clone());
-        if job.refinement {
-            refining[job.index] = false;
-            state.budgets[job.index] = Some(SearchBudget {
-                ms: completed.value,
-                multipv: job.multipv,
-            });
-            state.refined[job.index] = Some(raw);
-        } else {
-            state.baseline[job.index] = Some(raw);
-            state.discover(job.index);
+        match job.purpose {
+            Purpose::Refinement(index) => {
+                state.searched += 1;
+                refining[index] = false;
+                state.budgets[index] = Some(SearchBudget {
+                    ms: completed.value,
+                    multipv: job.demand.multipv,
+                });
+                state.refined[index] = Some(raw);
+                state.progress(index, Some(state.evaluation(index)?), emit);
+            }
+            Purpose::Triage(index) => {
+                state.searched += 1;
+                state.baseline[index] = Some(raw);
+                state.discover(index);
+                state.progress(index, Some(state.baseline(index)?), emit);
+            }
+            Purpose::Live(_) => {
+                cancel.check()?;
+                if let Some(native) = &mut native {
+                    native.complete_live(raw);
+                }
+            }
         }
-        state.progress(job.index, Some(state.evaluation(job.index)?), emit);
+        if let (Some(native), Some(fen)) = (&native, shared_fen) {
+            state.share_triage(&fen, &native.scheduler, &mut triage_waiting, emit)?;
+        }
     }
     flush(repository, pending).await?;
     cancel.check()?;

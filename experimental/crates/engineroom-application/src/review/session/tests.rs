@@ -117,6 +117,7 @@ async fn only_latest_navigation_runs_and_close_finishes_all_resources() {
             super::task::Completion { finished, done },
             Pipeline::new(factory, repo),
             None,
+            SchedulerMode::Pipeline,
             &mut |e| tx.send(e).is_ok(),
         )
         .await;
@@ -174,6 +175,7 @@ async fn replacing_live_search_waits_for_discard_and_does_not_emit_old_result() 
             super::task::Completion { finished, done },
             Pipeline::new(factory, Arc::new(MemoryRepo::default())),
             None,
+            SchedulerMode::Pipeline,
             &mut |e| tx.send(e).is_ok(),
         )
         .await;
@@ -236,6 +238,7 @@ async fn provisional_progress_handles_maximum_untrusted_ply_count() {
                 Arc::new(MemoryRepo::default()),
             ),
             None,
+            SchedulerMode::Pipeline,
             &mut |event| tx.send(event).is_ok(),
         )
         .await;
@@ -283,6 +286,7 @@ async fn persistence_failure_does_not_invalidate_completed_review() {
             super::task::Completion { finished, done },
             Pipeline::new(factory, repo),
             None,
+            SchedulerMode::Pipeline,
             &mut |e| tx.send(e).is_ok(),
         )
         .await;
@@ -364,4 +368,86 @@ async fn stale_intents_cannot_replace_the_latest_request() {
     );
     done.send_replace(true);
     manager.close("session", "owner").await.unwrap();
+}
+
+#[tokio::test]
+async fn native_navigation_detaches_from_an_active_review_without_releasing_its_lease() {
+    use std::sync::atomic::Ordering;
+
+    let f = factory(FakeState {
+        stall: true,
+        ..Default::default()
+    });
+    let manager = ReviewSessions::new(
+        f.clone(),
+        Arc::new(MemoryRepo::default()),
+        Some(Resources {
+            threads: 1,
+            memory_mb: 2048,
+        }),
+    );
+    assert_eq!(manager.scheduler(), SchedulerMode::Pipeline);
+    let manager = manager.with_scheduler(SchedulerMode::Native);
+    let pgn = "1. f3 e5 2. g4 Qh4#";
+    let game = super::super::core::extract(pgn).unwrap();
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    manager
+        .open(
+            "native",
+            "window",
+            config(pgn, AnalysisKind::Fast),
+            move |event| tx.send(event).is_ok(),
+        )
+        .unwrap();
+
+    tokio::time::timeout(Duration::from_secs(3), async {
+        while f.state.lock().unwrap().searches == 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("the review should start a search");
+
+    manager
+        .analyze_position("native", "window", 1, request(&game.fens[0]), settings())
+        .unwrap();
+    receive(&mut rx, |event| {
+        event.request_id == Some(1) && matches!(event.event, Event::LiveStarted { .. })
+    })
+    .await;
+
+    tokio::time::timeout(
+        Duration::from_secs(3),
+        manager.cancel_live("native", "window", 2),
+    )
+    .await
+    .expect("live detach should finish while the review engine is still busy")
+    .unwrap();
+    let terminal = game.fens.last().unwrap();
+    manager
+        .analyze_position("native", "window", 3, request(terminal), settings())
+        .unwrap();
+    let event = receive(&mut rx, |event| {
+        matches!(
+            event.event,
+            Event::Completed { .. } | Event::LiveCompleted { .. }
+        )
+    })
+    .await;
+    assert_eq!(event.request_id, Some(3));
+    assert!(matches!(event.event, Event::LiveCompleted { fen, .. } if fen == *terminal));
+    assert_eq!(f.acquired.load(Ordering::SeqCst), 1);
+    assert_eq!(f.permit.available_permits(), 0);
+    {
+        let state = f.state.lock().unwrap();
+        assert_eq!(state.searches, 1);
+        assert_eq!(state.stopped, 0);
+    }
+
+    tokio::time::timeout(Duration::from_secs(3), manager.close("native", "window"))
+        .await
+        .expect("close should await native worker shutdown")
+        .unwrap();
+    assert_eq!(f.state.lock().unwrap().stopped, 1);
+    assert_eq!(f.permit.available_permits(), 1);
 }

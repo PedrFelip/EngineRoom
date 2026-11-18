@@ -514,7 +514,10 @@ fn spec() -> AppSpec<State> {
                 })
             {
                 s.setup_avatars(wake.clone());
-                s.setup_bridge(wake.clone());
+                match bridge::resolve_scheduler_mode() {
+                    Ok(scheduler) => s.setup_bridge_with_scheduler(wake.clone(), scheduler),
+                    Err(error) => s.bridge_error = Some(error),
+                }
                 s.setup_preferences(wake.clone());
                 s.setup_file_dialog(wake);
             }

@@ -50,11 +50,22 @@ impl Session {
     }
 }
 
+/// Execution strategy for review sessions.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum SchedulerMode {
+    /// Runs the review pipeline to completion before serving live board requests.
+    #[default]
+    Pipeline,
+    /// Shares the native automatic worker pool and session coverage with live navigation.
+    Native,
+}
+
 pub struct ReviewSessions {
     sessions: Arc<Mutex<HashMap<String, Arc<Session>>>>,
     factory: Arc<dyn EngineFactory>,
     repository: Arc<dyn Repository>,
     resources: Option<Resources>,
+    scheduler: SchedulerMode,
     exiting: AtomicBool,
 }
 
@@ -67,7 +78,7 @@ pub struct Resources {
     pub memory_mb: u32,
 }
 impl ReviewSessions {
-    /// Creates a registry with shared engine and persistence ports.
+    /// Creates a registry with shared engine and persistence ports using the default pipeline.
     pub fn new(
         factory: Arc<dyn EngineFactory>,
         repository: Arc<dyn Repository>,
@@ -78,8 +89,20 @@ impl ReviewSessions {
             factory,
             repository,
             resources,
+            scheduler: SchedulerMode::Pipeline,
             exiting: AtomicBool::new(false),
         }
+    }
+    /// Selects the session execution strategy while preserving shared engine and persistence ports.
+    #[must_use]
+    pub fn with_scheduler(mut self, scheduler: SchedulerMode) -> Self {
+        self.scheduler = scheduler;
+        self
+    }
+    /// Returns the configured session execution strategy.
+    #[must_use]
+    pub fn scheduler(&self) -> SchedulerMode {
+        self.scheduler
     }
     /// Starts a session and delivers ordered events through the callback.
     pub fn open(
@@ -95,6 +118,7 @@ impl ReviewSessions {
         let id = session_id.to_owned();
         let pipeline = Pipeline::new(self.factory.clone(), self.repository.clone());
         let resources = self.resources;
+        let scheduler = self.scheduler;
         tokio::spawn(async move {
             task::run_session(
                 &id,
@@ -103,6 +127,7 @@ impl ReviewSessions {
                 task::Completion { finished, done },
                 pipeline,
                 resources,
+                scheduler,
                 &mut publish,
             )
             .await;
@@ -130,6 +155,16 @@ impl ReviewSessions {
             }),
         )
     }
+    /// Records a live cancellation without waiting for the session to acknowledge it.
+    pub fn enqueue_live_cancel(
+        &self,
+        session_id: &str,
+        owner: &str,
+        request_id: u64,
+    ) -> Result<()> {
+        update(self.get(session_id, owner)?.as_ref(), request_id, None)
+    }
+
     /// Cancels older live work and waits for cleanup.
     pub async fn cancel_live(&self, session_id: &str, owner: &str, request_id: u64) -> Result<()> {
         self.get(session_id, owner)?.cancel_live(request_id).await

@@ -135,6 +135,8 @@ fn data_bridge_with_engine(
         }),
         Arc::new(FakeImports),
         Some(db),
+        None,
+        SchedulerMode::Pipeline,
     )
     .expect("create test runtime");
     (bridge, repo, rx)
@@ -796,6 +798,8 @@ fn import_bridge_search_cancel_and_replace() {
         }),
         Arc::new(FakeImports),
         None,
+        None,
+        SchedulerMode::Pipeline,
     )
     .expect("test bridge");
     let request = |id: &str| SearchRequest {
@@ -880,6 +884,8 @@ fn chess_controller_fetches_next_page() {
         }),
         Arc::new(PagedImports),
         None,
+        None,
+        SchedulerMode::Pipeline,
     )
     .expect("test bridge");
     let mut state = crate::state::State::default();
@@ -1221,4 +1227,134 @@ fn history_keyboard_retry_recovers_initial_and_paginated_failures() {
     drop(rt);
     drop(repo);
     std::fs::remove_dir_all(dir).expect("remove temporary database");
+}
+
+#[test]
+fn scheduler_selection_defaults_to_pipeline_and_honors_explicit_opt_in() {
+    assert_eq!(
+        parse_scheduler_mode([], None).unwrap(),
+        SchedulerMode::Pipeline
+    );
+    assert_eq!(
+        parse_scheduler_mode(["--scheduler=native"], None).unwrap(),
+        SchedulerMode::Native
+    );
+    assert_eq!(
+        parse_scheduler_mode([], Some("native")).unwrap(),
+        SchedulerMode::Native
+    );
+    assert_eq!(
+        parse_scheduler_mode(["--scheduler", "pipeline"], Some("native")).unwrap(),
+        SchedulerMode::Pipeline
+    );
+    assert!(parse_scheduler_mode(["--scheduler"], None).is_err());
+    assert!(parse_scheduler_mode(["--scheduler=invalid"], None).is_err());
+}
+
+#[test]
+fn cancelling_navigation_does_not_delay_closing_a_busy_pipeline_review() {
+    let (started, received) = mpsc::channel();
+    let stopped = Arc::new(AtomicUsize::new(0));
+    let (bridge, wake) = bridge(
+        Arc::new(WaitingProbe {
+            started,
+            stopped: stopped.clone(),
+        }),
+        Arc::new(MemoryRepo::default()),
+    );
+    bridge.open("busy", config(false)).unwrap();
+    received
+        .recv_timeout(Duration::from_secs(3))
+        .expect("the review should acquire its engine");
+
+    bridge.cancel_live("busy".into(), 1);
+    bridge.close("busy".into());
+    let deadline = Instant::now() + Duration::from_secs(3);
+    loop {
+        if bridge
+            .drain_lifecycle()
+            .iter()
+            .any(|event| matches!(event, BridgeLifecycle::Closed { id } if id == "busy"))
+        {
+            break;
+        }
+        wake.recv_timeout(deadline.saturating_duration_since(Instant::now()))
+            .expect("close should run before the stalled engine handshake times out");
+    }
+    assert_eq!(stopped.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+#[ignore = "requires ENGINE_ROOM_STOCKFISH; verifies live navigation through the shared review pool"]
+fn real_stockfish_native_scheduler_serves_navigation_before_review_completion() {
+    let engine = PathBuf::from(
+        std::env::var_os("ENGINE_ROOM_STOCKFISH").expect("set ENGINE_ROOM_STOCKFISH"),
+    );
+    let (tx, wake) = mpsc::channel();
+    let bridge = Bridge::with_ports_and_scheduler(
+        Arc::new(NativeEngineFactory::new(engine)),
+        Arc::new(MemoryRepo::default()),
+        None,
+        SchedulerMode::Native,
+        Arc::new(move || {
+            let _ = tx.send(());
+        }),
+    )
+    .unwrap();
+    let pgn = "1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6 5. O-O Be7 6. Re1 b5 7. Bb3 d6 *";
+    let mut review = config(false);
+    review.pgn = pgn.into();
+    review.meta = core::extract(pgn).unwrap().meta;
+    review.analysis_kind = AnalysisKind::Fast;
+    bridge.open("native", review).unwrap();
+
+    let fen = core::extract("1. d4 *").unwrap().fens.pop().unwrap();
+    bridge
+        .analyze(
+            "native",
+            1,
+            LiveRequest {
+                fen: fen.clone(),
+                variation_node_id: None,
+                source_fen: None,
+                source_analysis: None,
+            },
+            LiveSettings {
+                search_seconds: 1,
+                lines: 1,
+                threads_auto: false,
+                threads: 1,
+                memory_mb: 16,
+                move_feedback_enabled: false,
+                fast_pass: true,
+            },
+        )
+        .unwrap();
+    until(&bridge, &wake, |events, lifecycle| {
+        assert!(
+            !lifecycle
+                .iter()
+                .any(|e| matches!(e, BridgeLifecycle::Error { .. })),
+            "bridge failure: {lifecycle:?}"
+        );
+        for envelope in events {
+            match envelope.event {
+                Event::LiveCompleted { fen: analyzed, .. } => {
+                    assert_eq!(envelope.request_id, Some(1));
+                    assert_eq!(analyzed, fen);
+                    return true;
+                }
+                Event::Completed { .. } => panic!("review completed before live navigation"),
+                Event::Error { error, .. } => panic!("analysis failed: {error}"),
+                _ => {}
+            }
+        }
+        false
+    });
+    bridge.close("native".into());
+    until(&bridge, &wake, |_, lifecycle| {
+        lifecycle
+            .iter()
+            .any(|event| matches!(event, BridgeLifecycle::Closed { id } if id == "native"))
+    });
 }
