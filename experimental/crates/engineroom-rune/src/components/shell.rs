@@ -13,7 +13,7 @@ use rune_kit::{
     TextInput, context_menu,
     shell::{Sidebar, SidebarRow, SidebarSection},
 };
-use std::sync::{Arc, LazyLock, mpsc};
+use std::sync::{Arc, LazyLock};
 
 const SESSIONS_TITLE: &str = "SESSÕES ABERTAS";
 const LOGO_WIDTH: f32 = 116.0;
@@ -30,13 +30,10 @@ static LIGHT_LOGO: LazyLock<rune::Image> = LazyLock::new(|| {
 });
 
 fn decode_logo(bytes: &'static [u8]) -> rune::Image {
-    let (ready, decoded) = mpsc::channel();
-    let cache = rune::ImageCache::new(Arc::new(move || {
-        let _ = ready.send(());
-    }));
+    let cache = rune::ImageCache::new(Arc::new(|| {}));
     let image = cache.svg(bytes, LOGO_WIDTH, 3.0);
-    // Rune wakes after publishing the pixels, so even the first headless frame has the logo.
-    decoded.recv().expect("EngineRoom logo decoder must finish");
+    // wait() publishes the pixels before returning, so the first headless frame has the logo
+    // without depending on a cache wake.
     image.wait().expect("embedded EngineRoom logo must decode");
     image
 }
@@ -873,6 +870,25 @@ mod tests {
         state::{Page, State},
     };
     use rune::{Env, Key, KeyEvent, Mods, Runtime};
+
+    #[test]
+    fn embedded_logos_decode_before_the_first_frame() {
+        for (bytes, name) in [
+            (
+                &include_bytes!("../../../../../docs/brand/engineroom-logo.svg")[..],
+                "dark",
+            ),
+            (
+                &include_bytes!("../../../../../docs/brand/engineroom-logo-light.svg")[..],
+                "light",
+            ),
+        ] {
+            let logo = super::decode_logo(bytes);
+            let [width, height] = logo.wait().expect("embedded logo must decode");
+            assert!(width > 0 && height > 0, "{name} logo has pixels");
+            assert!(logo.is_ready(), "{name} logo is ready synchronously");
+        }
+    }
 
     #[test]
     #[ignore = "opt-in sidebar benchmark"]
