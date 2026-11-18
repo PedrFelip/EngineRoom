@@ -1,9 +1,6 @@
 //! Rust owns the entire UCI exchange and exclusive process lease.
-use super::{
-    scoring::win_pct,
-    types::{RawLine, RawPosition, Result, ReviewError, ReviewErrorCode},
-};
-use std::{future::Future, pin::Pin, time::Duration};
+use super::types::*;
+use std::{future::Future, ops::Range, pin::Pin, time::Duration};
 use tokio::sync::watch;
 pub type Task<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
@@ -136,6 +133,45 @@ pub async fn configure(
     Ok(())
 }
 pub fn parse_info(line: &str) -> Option<RawLine> {
+    let info = parse_info_header(line)?;
+    Some(info.into_raw(line, false))
+}
+
+struct InfoHeader {
+    depth: u32,
+    multipv: u32,
+    cp: i32,
+    pv: Range<usize>,
+    first_move_end: usize,
+}
+
+impl InfoHeader {
+    fn first_move<'a>(&self, line: &'a str) -> Option<&'a str> {
+        (self.pv.start < self.first_move_end).then(|| &line[self.pv.start..self.first_move_end])
+    }
+
+    fn into_raw(self, line: &str, unstable: bool) -> RawLine {
+        RawLine {
+            unstable,
+            depth: Some(self.depth),
+            multipv: self.multipv,
+            cp: self.cp,
+            pv: line[self.pv]
+                .split_whitespace()
+                .map(str::to_owned)
+                .collect(),
+            san: None,
+        }
+    }
+}
+
+struct LatestInfo {
+    line: String,
+    header: InfoHeader,
+    unstable: bool,
+}
+
+fn parse_info_header(line: &str) -> Option<InfoHeader> {
     let mut words = line.split_whitespace();
     if words.next()? != "info" {
         return None;
@@ -143,7 +179,8 @@ pub fn parse_info(line: &str) -> Option<RawLine> {
     let mut depth = 0;
     let mut multipv = 1;
     let mut cp = None;
-    let mut pv = Vec::new();
+    let mut pv = line.len()..line.len();
+    let mut first_move_end = line.len();
     while let Some(token) = words.next() {
         match token {
             "depth" => depth = words.next()?.parse().ok()?,
@@ -170,7 +207,12 @@ pub fn parse_info(line: &str) -> Option<RawLine> {
                 });
             }
             "pv" => {
-                pv.extend(words.by_ref().map(str::to_owned));
+                if let Some(first_move) = words.next() {
+                    // The token is a slice of line, so its address gives its byte offset.
+                    let start = first_move.as_ptr() as usize - line.as_ptr() as usize;
+                    pv = start..line.len();
+                    first_move_end = start + first_move.len();
+                }
                 break;
             }
             // Bounds from an unfinished aspiration window are not exact
@@ -180,71 +222,14 @@ pub fn parse_info(line: &str) -> Option<RawLine> {
             _ => {}
         }
     }
-    Some(RawLine {
-        unstable: false,
-        depth: Some(depth),
+    Some(InfoHeader {
+        depth,
         multipv,
         cp: cp?,
         pv,
-        san: None,
+        first_move_end,
     })
 }
-/// `MultiPV` rank is 1-based; higher ranks are malformed reports and discarded.
-/// Stockfish caps `MultiPV` at 256, so this bound keeps the slot vector bounded
-/// without rejecting any rank a configured search can produce.
-const MAX_MULTIPV_RANK: u32 = 256;
-
-/// Latest completed report per `MultiPV` rank, stored in a flat slot vector.
-///
-/// `MultiPV` ranks are dense in practice, so a `Vec<Option<RawLine>>` gives O(1)
-/// updates and ascending-rank iteration without a tree node per rank. Gaps stay
-/// empty and are skipped when the lines are collected, preserving sparse and
-/// malformed reports exactly as the previous ordered map did.
-#[derive(Default)]
-struct LatestLines {
-    slots: Vec<Option<RawLine>>,
-}
-impl LatestLines {
-    fn record(&mut self, mut line: RawLine) {
-        let Some(slot) = line
-            .multipv
-            .checked_sub(1)
-            .filter(|_| line.multipv <= MAX_MULTIPV_RANK)
-            .map(|rank| rank as usize)
-        else {
-            return;
-        };
-        if self.slots.len() <= slot {
-            self.slots.resize_with(slot + 1, || None);
-        }
-        if self.slots[slot]
-            .as_ref()
-            .is_some_and(|previous| line.depth < previous.depth)
-        {
-            return;
-        }
-        if let Some(previous) = self.slots[slot].as_ref() {
-            line.unstable = if line.depth > previous.depth {
-                (win_pct(line.cp) - win_pct(previous.cp)).abs() >= 2.0
-                    || line.pv.first() != previous.pv.first()
-            } else {
-                previous.unstable
-            };
-        }
-        self.slots[slot] = Some(line);
-    }
-    fn depth(&self) -> u32 {
-        self.slots
-            .first()
-            .and_then(|slot| slot.as_ref())
-            .and_then(|line| line.depth)
-            .unwrap_or(0)
-    }
-    fn into_lines(self) -> Vec<RawLine> {
-        self.slots.into_iter().flatten().collect()
-    }
-}
-
 pub async fn evaluate(
     port: &mut dyn EnginePort,
     fen: &str,
@@ -265,19 +250,60 @@ pub async fn evaluate(
     let read = async {
         port.send(&format!("position fen {fen}")).await?;
         port.send(&go).await?;
-        let mut latest = LatestLines::default();
+        // Stockfish supports up to 500 PVs. Keep larger ranks from custom
+        // engines sparse so one rank cannot force an unbounded resize.
+        const DENSE_MULTIPV: u32 = 500;
+        let mut latest: Vec<Option<LatestInfo>> = Vec::new();
+        let mut extra: Vec<(u32, Option<LatestInfo>)> = Vec::new();
         loop {
             let line = port.next().await?;
-            if let Some(info) = parse_info(&line) {
-                latest.record(info);
-            }
             if line.trim().starts_with("bestmove") {
                 break;
             }
+            let Some(header) = parse_info_header(&line) else {
+                continue;
+            };
+            let slot = if header.multipv <= DENSE_MULTIPV {
+                let index = (header.multipv - 1) as usize;
+                if index >= latest.len() {
+                    latest.resize_with(index + 1, || None);
+                }
+                &mut latest[index]
+            } else {
+                let index = match extra.binary_search_by_key(&header.multipv, |entry| entry.0) {
+                    Ok(index) => index,
+                    Err(index) => {
+                        extra.insert(index, (header.multipv, None));
+                        index
+                    }
+                };
+                &mut extra[index].1
+            };
+            let unstable = match slot {
+                Some(previous) if header.depth < previous.header.depth => continue,
+                Some(previous) if header.depth == previous.header.depth => previous.unstable,
+                Some(previous) => {
+                    (super::scoring::win_pct(header.cp)
+                        - super::scoring::win_pct(previous.header.cp))
+                    .abs()
+                        >= 2.0
+                        || header.first_move(&line) != previous.header.first_move(&previous.line)
+                }
+                None => false,
+            };
+            *slot = Some(LatestInfo {
+                line,
+                header,
+                unstable,
+            });
         }
-        let depth = latest.depth();
-        let lines = latest.into_lines();
-        let principal = lines.iter().find(|l| l.multipv == 1).ok_or_else(|| {
+        let lines: Vec<_> = latest
+            .into_iter()
+            .chain(extra.into_iter().map(|(_, info)| info))
+            .flatten()
+            .map(|info| info.header.into_raw(&info.line, info.unstable))
+            .collect();
+        let principal = lines.first().filter(|l| l.multipv == 1).ok_or_else(|| {
             ReviewError::new(
                 ReviewErrorCode::MissingEvaluation,
                 "engine.evaluate",
@@ -287,7 +313,7 @@ pub async fn evaluate(
         Ok(RawPosition {
             fen: fen.into(),
             cp: principal.cp,
-            depth,
+            depth: principal.depth.unwrap_or_default(),
             pv: principal.pv.clone(),
             lines,
         })
@@ -299,71 +325,78 @@ pub async fn evaluate(
 }
 
 #[cfg(test)]
-mod latest_lines_tests {
+mod tests {
     use super::*;
 
-    fn line(rank: u32, depth: u32, cp: i32, pv: &str) -> RawLine {
-        RawLine {
-            unstable: false,
-            multipv: rank,
-            cp,
-            pv: pv.split_whitespace().map(str::to_owned).collect(),
-            san: None,
-            depth: Some(depth),
+    struct Transcript(std::vec::IntoIter<&'static str>);
+
+    impl EnginePort for Transcript {
+        fn send<'a>(&'a mut self, _command: &'a str) -> Task<'a, Result<()>> {
+            Box::pin(async { Ok(()) })
+        }
+
+        fn next(&mut self) -> Task<'_, Result<String>> {
+            Box::pin(async { Ok(self.0.next().expect("transcript includes bestmove").into()) })
+        }
+
+        fn shutdown(&mut self) -> Task<'_, ()> {
+            Box::pin(async {})
         }
     }
-    fn ranks(lines: &[RawLine]) -> Vec<u32> {
-        lines.iter().map(|line| line.multipv).collect()
-    }
 
-    #[test]
-    fn ranks_are_sorted_ascending_and_sparse_gaps_are_skipped() {
-        let mut latest = LatestLines::default();
-        for rank in [3, 1, 5, 2] {
-            latest.record(line(rank, 12, 0, "e2e4"));
-        }
-        assert_eq!(ranks(&latest.into_lines()), vec![1, 2, 3, 5]);
-    }
-
-    #[test]
-    fn zero_and_out_of_range_ranks_are_discarded() {
-        let mut latest = LatestLines::default();
-        latest.record(line(0, 12, 0, "e2e4"));
-        latest.record(line(MAX_MULTIPV_RANK + 1, 12, 0, "e2e4"));
-        latest.record(line(u32::MAX, 12, 0, "e2e4"));
-        latest.record(line(MAX_MULTIPV_RANK, 12, 0, "e2e4"));
-        assert_eq!(ranks(&latest.into_lines()), vec![MAX_MULTIPV_RANK]);
-    }
-
-    #[test]
-    fn deepest_report_wins_and_instability_is_propagated() {
-        let mut latest = LatestLines::default();
-        latest.record(line(1, 10, 0, "e2e4"));
-        latest.record(line(1, 8, 900, "d2d4"));
-        assert_eq!(latest.into_lines()[0].cp, 0);
-
-        let mut latest = LatestLines::default();
-        latest.record(line(1, 10, 0, "e2e4"));
-        latest.record(line(1, 11, 500, "e2e4"));
-        let deepest = latest.into_lines().remove(0);
-        assert!(deepest.unstable, "a 2pp swing must mark the line unstable");
-
-        let mut latest = LatestLines::default();
-        latest.record(line(1, 10, 0, "e2e4"));
-        latest.record(line(1, 11, 500, "e2e4"));
-        latest.record(line(1, 11, 500, "e2e4"));
-        assert!(
-            latest.into_lines()[0].unstable,
-            "same-depth report inherits it"
+    #[tokio::test]
+    async fn retains_latest_exact_depth_and_instability_per_rank() {
+        let mut port = Transcript(
+            vec![
+                "info depth 5 multipv 3 score cp 0 pv d2d4",
+                "info depth 5 score cp 0 pv e2e4 e7e5",
+                "info depth 6 multipv 3 score cp 150 pv d2d4 d7d5",
+                "info depth 7 multipv 3 score cp 150 pv d2d4 g8f6",
+                "info depth 6 score cp 0 pv c2c4",
+                "info depth 6 score cp 0 pv c2c4   e7e5",
+                "info depth 5 score cp 500 pv g2g4",
+                "info depth 7 score cp 500 lowerbound pv g2g4",
+                "info depth 7 score cp 500 upperbound pv g2g4",
+                "info depth 7 multipv 0 score cp 500 pv g2g4",
+                "info depth 5 multipv 4 score cp 0",
+                "info depth 6 multipv 4 score cp 150 pv",
+                "info depth 9 multipv 4294967295 score cp -25 pv g1f3",
+                "bestmove c2c4",
+            ]
+            .into_iter(),
         );
-    }
+        let (_closed, receiver) = watch::channel(false);
+        let cancel = Cancellation {
+            closed: receiver,
+            revision: None,
+        };
 
-    #[test]
-    fn principal_depth_is_used_and_missing_principal_has_no_depth() {
-        let mut latest = LatestLines::default();
-        latest.record(line(2, 20, 0, "e2e4"));
-        assert_eq!(latest.depth(), 0);
-        latest.record(line(1, 12, 0, "e2e4"));
-        assert_eq!(latest.depth(), 12);
+        let result = evaluate(
+            &mut port,
+            "",
+            crate::db::mode::Mode::Depth,
+            7,
+            1000,
+            &cancel,
+        )
+        .await
+        .expect("transcript contains exact principal evaluation");
+        assert_eq!((result.depth, result.cp), (6, 0));
+        assert_eq!(result.pv, ["c2c4", "e7e5"]);
+        assert_eq!(
+            result
+                .lines
+                .iter()
+                .map(|line| (line.multipv, line.depth, line.unstable))
+                .collect::<Vec<_>>(),
+            [
+                (1, Some(6), true),
+                (3, Some(7), false),
+                (4, Some(6), true),
+                (u32::MAX, Some(9), false),
+            ]
+        );
+        assert_eq!(result.lines[1].pv, ["d2d4", "g8f6"]);
+        assert!(result.lines[2].pv.is_empty());
     }
 }

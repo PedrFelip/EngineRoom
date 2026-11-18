@@ -1,8 +1,12 @@
-//! Local PGN preview only; analysis and persistence remain the Tauri backend's responsibility.
+//! Local PGN preview. Analysis and persistence remain the backend's responsibility.
 use engineroom_backend::review::core;
 use pgn_reader::{RawTag, Reader, SanPlus, Visitor};
-use shakmaty::{CastlingMode, Chess, Position, Square, fen::Fen};
+use shakmaty::{Chess, Position, Square};
 use std::{collections::HashMap, io::Cursor, ops::ControlFlow};
+
+// Share the strict token check with core::extract without replaying its mainline.
+#[path = "../../engineroom-domain/src/review/core/pgn_tokens.rs"]
+mod pgn_tokens;
 
 pub const DEMO_PGN: &str = "[Event \"Estudo de abertura\"]\n[White \"Jogador de brancas\"]\n[Black \"Jogador de pretas\"]\n[Result \"*\"]\n\n1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6 5. O-O Be7 6. Re1 b5 7. Bb3 d6 8. c3 O-O *";
 #[derive(Clone)]
@@ -59,7 +63,12 @@ impl Game {
         })
     }
 }
-struct Preview;
+const MAX_HALF_MOVES: usize = 2000;
+
+#[derive(Default)]
+struct Preview {
+    over_limit: bool,
+}
 impl Visitor for Preview {
     type Tags = HashMap<String, String>;
     type Movetext = Game;
@@ -79,14 +88,11 @@ impl Visitor for Preview {
         );
         ControlFlow::Continue(())
     }
-    fn begin_movetext(&mut self, tags: Self::Tags) -> ControlFlow<Self::Output, Game> {
-        let position = match tags.get("FEN") {
-            Some(fen) => match fen.parse::<Fen>().and_then(|fen| {
-                fen.into_position::<Chess>(CastlingMode::Standard)
-                    .map_err(|_| shakmaty::fen::ParseFenError::InvalidBoard)
-            }) {
+    fn begin_movetext(&mut self, mut tags: Self::Tags) -> ControlFlow<Self::Output, Game> {
+        let position = match tags.remove("FEN") {
+            Some(fen) => match core::position(&fen) {
                 Ok(position) => position,
-                Err(_) => return ControlFlow::Break(Err("A posição FEN é inválida.".into())),
+                Err(error) => return ControlFlow::Break(Err(error.to_string())),
             },
             None => Chess::default(),
         };
@@ -101,40 +107,42 @@ impl Visitor for Preview {
                 .cloned()
                 .unwrap_or_else(|| "Pretas".into()),
             event: tags
-                .get("Event")
-                .cloned()
+                .remove("Event")
                 .unwrap_or_else(|| "Partida importada".into()),
             avatar_key: None,
-            ratings: [tags.get("WhiteElo").cloned(), tags.get("BlackElo").cloned()],
+            ratings: [tags.remove("WhiteElo"), tags.remove("BlackElo")],
             positions: vec![position],
             moves: Vec::new(),
         })
     }
     fn san(&mut self, game: &mut Game, san: SanPlus) -> ControlFlow<Self::Output> {
-        let mut position = game
+        let previous = game
             .positions
-            .last()
-            .expect("preview always has a starting position")
-            .clone();
-        match san.san.to_move(&position) {
+            .last_mut()
+            .expect("preview always has a starting position");
+        match san.san.to_move(previous) {
+            Ok(m) if game.moves.len() == MAX_HALF_MOVES => {
+                // Continue checking legality to preserve backend error precedence,
+                // reusing the last position because this preview will be rejected.
+                previous.play_unchecked(m);
+                self.over_limit = true;
+            }
             Ok(m) => {
+                let mut position = previous.clone();
                 position.play_unchecked(m);
                 game.fens.push(core::fen(&position));
                 game.positions.push(position);
                 game.moves.push(san.to_string());
             }
-            Err(_) => return ControlFlow::Break(Err(format!("Lance inválido: {san}."))),
-        }
-        if game.moves.len() > 2000 {
-            return ControlFlow::Break(Err(
-                "A partida ultrapassa o limite de 2000 meios-lances.".into()
-            ));
+            Err(error) => {
+                return ControlFlow::Break(Err(format!("pgn: Lance inválido: {error}")));
+            }
         }
         ControlFlow::Continue(())
     }
     fn end_game(&mut self, game: Game) -> Self::Output {
         if game.moves.is_empty() {
-            Err("O PGN não contém lances.".into())
+            Err("pgn: O PGN não contém lances.".into())
         } else {
             Ok(game)
         }
@@ -144,18 +152,18 @@ pub fn parse(pgn: &str) -> Result<Game, String> {
     if pgn.len() > 1_000_000 {
         return Err("O PGN deve ter no máximo 1 MB.".into());
     }
-    engineroom_backend::review::core::extract(pgn).map_err(|error| error.to_string())?;
+    pgn_tokens::validate(pgn).map_err(|error| format!("pgn: {error}"))?;
     let mut reader = Reader::new(Cursor::new(pgn.as_bytes()));
+    let mut preview = Preview::default();
     let game = reader
-        .read_game(&mut Preview)
-        .map_err(|e| e.to_string())?
-        .ok_or("Cole um PGN para continuar.")??;
-    if reader
-        .read_game(&mut Preview)
-        .map_err(|e| e.to_string())?
-        .is_some()
-    {
-        return Err("Importe uma partida por vez.".into());
+        .read_game(&mut preview)
+        .map_err(|error| format!("pgn: {error}"))?
+        .ok_or("pgn: PGN inválido.")??;
+    if reader.has_more().map_err(|error| format!("pgn: {error}"))? {
+        return Err("pgn: Importe apenas uma partida por revisão.".into());
+    }
+    if preview.over_limit {
+        return Err("A partida ultrapassa o limite de 2000 meios-lances.".into());
     }
     Ok(game)
 }
@@ -177,5 +185,57 @@ mod tests {
         let game = parse("[SetUp \"1\"]\n[FEN \"8/8/8/8/8/8/4K3/7k w - - 0 1\"]\n\n1. Kf3 *")
             .expect("legal FEN game");
         assert_eq!(game.board(1)[45], 'K');
+    }
+
+    #[test]
+    fn preserves_preview_metadata_and_supplied_san() {
+        let pgn = "[White \" Alice \"]\n[Black \"?\"]\n[Event \"?\"]\n[WhiteElo \"1400\"]\n[BlackElo \"?\"]\n\n1. e4+ $1 { comment } e5 (1... c5 (1... d5)) 2. Nf3!? *";
+        let game = parse(pgn).expect("legal mainline with annotations");
+        let extracted = core::extract(pgn).expect("backend accepts the same mainline");
+        assert_eq!(
+            (&*game.white, &*game.black, &*game.event),
+            (" Alice ", "?", "?")
+        );
+        assert_eq!(game.ratings, [Some("1400".into()), Some("?".into())]);
+        assert_eq!(game.moves, ["e4+", "e5", "Nf3"]);
+        assert_eq!(game.positions, extracted.positions);
+    }
+
+    #[test]
+    fn preserves_backend_validation_errors() {
+        for pgn in [
+            "",
+            "{ only a comment }",
+            "[Event \"Empty\"]\n\n*",
+            "[FEN \"bad\"]\n\n1. e4 *",
+            "1. e4 e5 2. Ke5 *",
+            "1. e4 e5 2. Invalid *",
+            "1. e4 *\n\n[Event \"Second\"]\n\n*",
+        ] {
+            let expected = core::extract(pgn).err().expect("backend rejects PGN");
+            assert_eq!(
+                parse(pgn).err().as_deref(),
+                Some(expected.to_string().as_str())
+            );
+        }
+    }
+
+    #[test]
+    fn enforces_byte_and_half_move_limits() {
+        let at_byte_limit = format!("1. e4 {{{}}} *", "é".repeat(499_995));
+        assert_eq!(at_byte_limit.len(), 1_000_000);
+        assert!(parse(&at_byte_limit).is_ok());
+        assert_eq!(
+            parse(&(at_byte_limit + " ")).err().as_deref(),
+            Some("O PGN deve ter no máximo 1 MB.")
+        );
+
+        let at_ply_limit = "Nf3 Nf6 Ng1 Ng8 ".repeat(500);
+        let game = parse(&(at_ply_limit.clone() + "*")).expect("2000 half-moves are allowed");
+        assert_eq!((game.moves.len(), game.positions.len()), (2000, 2001));
+        assert_eq!(
+            parse(&(at_ply_limit + "Nf3 *")).err().as_deref(),
+            Some("A partida ultrapassa o limite de 2000 meios-lances.")
+        );
     }
 }
