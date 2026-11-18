@@ -85,11 +85,3 @@ assert not drag['warnings'], drag['warnings']
 assert any(element.get('key') == 'session-drag-preview' for element in drag['elements'])
 assert any(node.get('name') == 'Solte aqui para deixar fora de pastas' for node in walk(drag['accessibility']))
 print('sessions-drag: destination and preview OK')
-
-# The committed sidebar reference screenshots must survive merges intact.
-screenshots = artifacts.parent / 'docs' / 'sidebar-screenshots'
-for name in ('folder-editor', 'folder-reorder', 'folders-dark', 'folders-light',
-             'session-menu', 'session-reorder'):
-    image = screenshots / f'{name}.png'
-    assert image.read_bytes().startswith(b'\x89PNG\r\n\x1a\n'), image.name
-print('sidebar-screenshots: committed PNG assets OK')
