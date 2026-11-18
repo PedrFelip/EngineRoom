@@ -20,14 +20,25 @@ fi
 cd "$root"
 "$strobe" bench experimental/perf/pipeline.bench.ts --head . --check
 
+# The real-game bench needs a real engine on any OS.
 if [[ -n "${ENGINE_ROOM_STOCKFISH:-}" ]]; then
   "$strobe" bench experimental/perf/real-game.bench.ts --head . --check
-  # OS-level teardown evidence (Linux only): PIDs must disappear from /proc.
-  # It is #[ignore] in `cargo test`, so it must be requested explicitly here.
+else
+  echo "skip: real-game bench (defina ENGINE_ROOM_STOCKFISH)" >&2
+fi
+
+# OS-level teardown evidence is opt-in and Linux-only: it reads /proc and is
+# #[ignore]d, so it must be requested explicitly. It asserts awaited
+# EnginePort::shutdown() (graceful + cancel-then-shutdown) only — it is NOT a
+# check of Drop cleanup and NOT a CI gate. Cancellation is gated on observed
+# `go movetime`/`info` evidence, never on a sleep.
+if [[ -z "${ENGINE_ROOM_STOCKFISH:-}" ]]; then
+  echo "skip: lifecycle real (defina ENGINE_ROOM_STOCKFISH)" >&2
+elif [[ "$(uname -s)" != "Linux" ]]; then
+  echo "skip: lifecycle real é Linux-only (/proc); não é uma passagem" >&2
+else
   (cd "$here" && cargo test --locked -p engineroom-uci real_process_lifecycle \
     -- --ignored --nocapture)
-else
-  echo "skip: real-game bench e lifecycle real (defina ENGINE_ROOM_STOCKFISH)" >&2
 fi
 
 if [[ "${1:-}" == "--timed" ]]; then
