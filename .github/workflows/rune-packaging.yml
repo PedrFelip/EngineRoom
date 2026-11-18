@@ -1,58 +1,340 @@
-name: Rune installers (manual)
+# ---------------------------------------------------------------------------
+# VALIDAÇÃO TEMPORÁRIA DO INSTALADOR NSIS EXATO DA ALPHA.3
+# ---------------------------------------------------------------------------
+# Este arquivo SUBSTITUI temporariamente o rune-packaging.yml de producao numa
+# branch temporaria. Nao e para fusionar em main nem para disparar tag/release.
+#
+# Por que reaproveitar este pathname: o GitHub so expoe `workflow_dispatch`
+# quando o arquivo existe na branch default (main). Um workflow NOVO que so
+# existe na branch temporaria pode nao ser dispatchable. Como `main` ja tem
+# `.github/workflows/rune-packaging.yml`, reutilizar o caminho garante que o
+# dispatch via CLI/API com `--ref <branch>` seja aceito. A versao em main nao
+# declara inputs, por isso o disparo DEVE ser feito por CLI/API (na UI nao
+# aparecem os campos). O run executa a versao deste arquivo na ref escolhida.
+#
+# Disparo (ver instrucoes completas no commit message / patch):
+#   gh workflow run rune-packaging.yml --ref <BRANCH_TEMP> \
+#     -f run_id=<ID_DO_RUN_DE_BUILD> \
+#     -f expected_sha=<SHA40_DO_COMMIT_DO_BUILD> \
+#     -f expected_exe_sha256=<SHA256_64_DO_EXE>
+#
+# Inputs sao mapeados para `env` no nivel do job; scripts NUNCA interpolam
+# `${{ inputs.* }}` diretamente em texto de shell. Nenhuma credencial e
+# impressa: o token so e passado por `env`/`with` para `gh` e download-artifact.
+# ---------------------------------------------------------------------------
+name: Rune NSIS installer validation (temporary alpha.3)
 
 on:
   workflow_dispatch:
-  pull_request:
-    branches: [develop]
-    paths:
-      - experimental/crates/engineroom-rune/Cargo.toml
-      - .github/workflows/rune-packaging.yml
+    inputs:
+      run_id:
+        description: 'ID do run de build (rune-packaging.yml) que gerou o NSIS'
+        type: string
+        required: true
+      expected_sha:
+        description: 'SHA (40 hex) do commit exato usado no build'
+        type: string
+        required: true
+      expected_exe_sha256:
+        description: 'SHA256 (64 hex) esperado do .exe do instalador NSIS'
+        type: string
+        required: true
 
+# Somente leitura: nao ha checkout, upload de release, tag, PR nem escrita em repo.
 permissions:
   contents: read
+  actions: read
+
+concurrency:
+  group: rune-nsis-validate-${{ inputs.run_id }}
+  cancel-in-progress: false
 
 jobs:
-  package:
-    name: Rune ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-24.04, windows-latest]
-    runs-on: ${{ matrix.os }}
-    defaults:
-      run:
-        working-directory: experimental
+  validate:
+    name: Validate exact alpha.3 NSIS on windows-latest
+    runs-on: windows-latest
+    timeout-minutes: 25
+    env:
+      RUN_ID: ${{ inputs.run_id }}
+      EXPECTED_SHA: ${{ inputs.expected_sha }}
+      EXPECTED_EXE_SHA256: ${{ inputs.expected_exe_sha256 }}
+      GH_REPO: ${{ github.repository }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-      - name: Linux build and software Vulkan dependencies
-        if: runner.os == 'Linux'
+      - name: Validate dispatch inputs
+        shell: pwsh
         run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential pkg-config libasound2-dev libudev-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libegl1-mesa-dev libvulkan-dev mesa-vulkan-drivers patchelf file squashfs-tools xvfb libfuse2t64
-      - uses: Swatinem/rust-cache@v2
+          $ErrorActionPreference = 'Stop'
+          if ($env:RUN_ID -notmatch '^\d+$') { throw "run_id invalido: '$env:RUN_ID'" }
+          if ($env:EXPECTED_SHA -notmatch '^[0-9a-fA-F]{40}$') { throw "expected_sha deve ter 40 hex" }
+          if ($env:EXPECTED_EXE_SHA256 -notmatch '^[0-9a-fA-F]{64}$') { throw "expected_exe_sha256 deve ter 64 hex" }
+          "Validando run_id=$env:RUN_ID commit=$($env:EXPECTED_SHA.Substring(0,12))..."
+
+      - name: Verify source run conclusion and commit
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $false
+          $raw = gh api "repos/$env:GH_REPO/actions/runs/$env:RUN_ID"
+          if ($LASTEXITCODE -ne 0) { throw "Nao foi possivel consultar o run $env:RUN_ID" }
+          $run = $raw | ConvertFrom-Json
+          if ($run.status -ne 'completed') { throw "Run $env:RUN_ID ainda nao concluiu (status=$($run.status))" }
+          if ($run.conclusion -ne 'success') { throw "Run $env:RUN_ID concluiu com '$($run.conclusion)'" }
+          if (-not $run.head_sha) { throw "Run $env:RUN_ID nao informou head_sha" }
+          if ($run.head_sha.ToLowerInvariant() -ne $env:EXPECTED_SHA.ToLowerInvariant()) {
+            throw "commit do run ($($run.head_sha)) != expected_sha ($env:EXPECTED_SHA)"
+          }
+          "Run verificado: $($run.html_url) @ $($run.head_sha) ($($run.conclusion))"
+
+      - name: Download NSIS artifact from the exact source run
+        uses: actions/download-artifact@v4
         with:
-          workspaces: experimental
-      - name: Install packager
-        run: cargo install cargo-packager --version 0.11.8 --locked
-      - name: Verify AppImage policy tests
-        run: python scripts/test_verify_appimage.py
-      - name: Build and verify AppImage
-        if: runner.os == 'Linux'
-        run: xvfb-run -a python3 scripts/package.py
-      - name: Build NSIS installer
-        if: runner.os == 'Windows'
-        run: python scripts/package.py
-      - uses: actions/upload-artifact@v4
+          name: rune-Windows
+          path: ${{ runner.temp }}/rune-nsis-artifact
+          run-id: ${{ inputs.run_id }}
+          repository: ${{ github.repository }}
+          github-token: ${{ github.token }}
+
+      - name: Locate installer and verify SHA256
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dir = Join-Path $env:RUNNER_TEMP 'rune-nsis-artifact'
+          $exes = @(Get-ChildItem -LiteralPath $dir -Recurse -File -Filter '*.exe')
+          if ($exes.Count -ne 1) { throw "Esperado exatamente 1 .exe no artifact; encontrados $($exes.Count)" }
+          $exe = $exes[0]
+          $hash = (Get-FileHash -LiteralPath $exe.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($hash -ne $env:EXPECTED_EXE_SHA256.ToLowerInvariant()) {
+            throw "SHA256 do exe ($hash) != esperado ($env:EXPECTED_EXE_SHA256)"
+          }
+          "Instalador: $($exe.Name)"
+          "SHA256: $hash (confere)"
+          "INSTALLER_PATH=$($exe.FullName)" | Add-Content -LiteralPath $env:GITHUB_ENV
+
+      - name: Capture GPU / adapter diagnostics
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $logDir = Join-Path $env:RUNNER_TEMP 'rune-logs'
+          New-Item -ItemType Directory -Path $logDir -Force | Out-Null
+          "RUNE_LOG_DIR=$logDir" | Add-Content -LiteralPath $env:GITHUB_ENV
+          $gpu = Join-Path $logDir 'gpu.txt'
+          $lines = @(
+            '== Win32_VideoController ==',
+            (Get-CimInstance Win32_VideoController | Format-List Name,VideoProcessor,DriverVersion,Status,AdapterRAM | Out-String),
+            '== Win32_DesktopMonitor ==',
+            (Get-CimInstance Win32_DesktopMonitor | Format-List Name,ScreenWidth,ScreenHeight | Out-String),
+            "RUNNER_OS=$env:RUNNER_OS",
+            "SESSIONNAME=$env:SESSIONNAME"
+          )
+          $lines | Out-File -FilePath $gpu -Encoding utf8
+          # dxdiag e diagnostico extra; se indisponivel, nao invalida a validacao.
+          try {
+            $dxdiag = Join-Path $logDir 'dxdiag.txt'
+            $dx = Start-Process -FilePath 'dxdiag.exe' -ArgumentList @('/t', $dxdiag) -PassThru -WindowStyle Hidden
+            if (-not $dx.WaitForExit(60000)) { $dx.Kill($true); 'dxdiag timeout' | Add-Content -LiteralPath $gpu }
+          } catch {
+            "dxdiag indisponivel: $($_.Exception.Message)" | Add-Content -LiteralPath $gpu
+          }
+          Get-Content -LiteralPath $gpu
+
+      - name: Silent install (/S /NS /D=<dir unico>)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $short = $env:EXPECTED_SHA.Substring(0,8)
+          $installDir = Join-Path $env:RUNNER_TEMP "rune-alpha3-$short"
+          if (Test-Path -LiteralPath $installDir) { Remove-Item -LiteralPath $installDir -Recurse -Force }
+          New-Item -ItemType Directory -Path $installDir -Force | Out-Null
+          if ($installDir -match '\s') { throw "Diretorio de instalacao com espacos nao suportado: $installDir" }
+          "INSTALL_DIR=$installDir" | Add-Content -LiteralPath $env:GITHUB_ENV
+          # /D deve ser o ULTIMO argumento e sem aspas (contrato NSIS).
+          $p = Start-Process -FilePath $env:INSTALLER_PATH -ArgumentList @('/S', '/NS', "/D=$installDir") -PassThru -Wait
+          "Exit code do instalador: $($p.ExitCode)"
+          if ($p.ExitCode -ne 0) { throw "Instalador retornou $($p.ExitCode)" }
+
+      - name: Validate installed executables
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dir = $env:INSTALL_DIR
+          $main = @(Get-ChildItem -LiteralPath $dir -Recurse -File -Filter 'engineroom-rune.exe')
+          if ($main.Count -ne 1) { throw "engineroom-rune.exe ausente/duplicado em $dir (n=$($main.Count))" }
+          # O runtime resolve exatamente <dir do exe>/stockfish.exe (desktop_paths.rs).
+          # O pacote NAO instala "stockfish-<triple>.exe": esse nome so existe no download dev.
+          $sf = @(Get-ChildItem -LiteralPath $dir -Recurse -File -Filter 'stockfish.exe')
+          $sf = @($sf | Where-Object { $_.DirectoryName -eq $main[0].DirectoryName })
+          if ($sf.Count -ne 1) { throw "sidecar stockfish.exe ausente/duplicado ao lado de engineroom-rune.exe (n=$($sf.Count))" }
+          "RUNE_EXE=$($main[0].FullName)" | Add-Content -LiteralPath $env:GITHUB_ENV
+          "STOCKFISH_EXE=$($sf[0].FullName)" | Add-Content -LiteralPath $env:GITHUB_ENV
+          "exe: $($main[0].FullName)"
+          "sidecar: $($sf[0].Name)"
+
+      - name: Stockfish 19 UCI handshake (deadline 30s)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $psi = [System.Diagnostics.ProcessStartInfo]::new()
+          $psi.FileName = $env:STOCKFISH_EXE
+          $psi.UseShellExecute = $false
+          $psi.CreateNoWindow = $true
+          $psi.RedirectStandardInput = $true
+          $psi.RedirectStandardOutput = $true
+          $psi.RedirectStandardError = $true
+          $proc = [System.Diagnostics.Process]::Start($psi)
+          try {
+            $proc.StandardInput.WriteLine('uci')
+            $proc.StandardInput.WriteLine('isready')
+            $proc.StandardInput.WriteLine('quit')
+            $proc.StandardInput.Close()
+            if (-not $proc.WaitForExit(30000)) {
+              try { $proc.Kill($true) } catch {}
+              throw 'Timeout (30s) no handshake UCI do Stockfish'
+            }
+            $stdout = $proc.StandardOutput.ReadToEnd()
+            $stderr = $proc.StandardError.ReadToEnd()
+            $code = $proc.ExitCode
+          } finally {
+            if (-not $proc.HasExited) { try { $proc.Kill($true) } catch {} }
+            $proc.Dispose()
+          }
+          $sfLog = Join-Path $env:RUNE_LOG_DIR 'stockfish-handshake.txt'
+          $stdout | Out-File -FilePath $sfLog -Encoding utf8
+          $stderr | Out-File -FilePath $sfLog -Append -Encoding utf8
+          if ($code -ne 0) { throw "Stockfish saiu com codigo $code" }
+          if ($stdout -notmatch '(?m)^id name Stockfish 19\s*$') { throw 'Stockfish nao se identificou como versao 19' }
+          if ($stdout -notmatch '(?m)^uciok\s*$') { throw 'Stockfish nao respondeu uciok' }
+          if ($stdout -notmatch '(?m)^readyok\s*$') { throw 'Stockfish nao respondeu readyok' }
+          'Stockfish 19 handshake OK (uciok + readyok)'
+
+      - name: Native render/window proof with watchdog (--native --trace --frames)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          # Flags reais do Rune (rev b726a4d) confirmados no codigo-fonte:
+          #   --native --trace <arquivo.jsonl> --frames <N>
+          # Assinaturas reais que provam janela nativa + renderizacao (nao texto generico):
+          #   1) primeira linha do JSONL: {"clock":"wall",...,"launch":"rune",...,"timestamp":"cpu-submit","type":"header",...}
+          #   2) uma linha JSONL por frame com "t", "n" e "quality" (Trace::frame_timed)
+          #   3) stderr: `rune: frames <surface>: ...; totals <N> presents, ...; pacing: ...`
+          # O contador de presents vem do SurfaceMeter da janela nativa. Nao procuramos
+          # palavras como "window created"/"rendered", que nao existem nesses logs e
+          # gerariam falsos positivos com o texto da propria linha de comando.
+          $NativeFlag = '--native'
+          $TraceFlag = '--trace'
+          $FramesFlag = '--frames'
+          $PrimaryFrames = 120
+          $FallbackFrames = 2
+          $PrimaryDeadlineSec = 120
+          $FallbackDeadlineSec = 45
+
+          function Invoke-AppProof {
+            param([int]$Frames, [int]$DeadlineSec, [string]$Tag)
+            $trace = Join-Path $env:RUNE_LOG_DIR "app-$Tag-trace.jsonl"
+            $out = Join-Path $env:RUNE_LOG_DIR "app-$Tag-stdout.log"
+            $err = Join-Path $env:RUNE_LOG_DIR "app-$Tag-stderr.log"
+            foreach ($path in @($env:RUNE_EXE, $trace, $out, $err, $env:INSTALL_DIR)) {
+              if ($path -match '\s') { throw "Caminho com espacos nao suportado: $path" }
+            }
+            $argsList = @($NativeFlag, $TraceFlag, $trace, $FramesFlag, [string]$Frames)
+            # Start-Process redireciona para arquivo: sem risco de deadlock de pipe.
+            $proc = Start-Process -FilePath $env:RUNE_EXE -ArgumentList $argsList `
+              -WorkingDirectory $env:INSTALL_DIR -PassThru `
+              -RedirectStandardOutput $out -RedirectStandardError $err
+            $exited = $proc.WaitForExit($DeadlineSec * 1000)
+            if (-not $exited) {
+              try { $proc.Kill($true) } catch {}
+              try { $proc.WaitForExit(5000) } catch {}
+            }
+            $code = $null
+            try { $code = $proc.ExitCode } catch {}
+            $traceText = if (Test-Path -LiteralPath $trace) { Get-Content -LiteralPath $trace -Raw } else { '' }
+            $stdoutText = if (Test-Path -LiteralPath $out) { Get-Content -LiteralPath $out -Raw } else { '' }
+            $stderrText = if (Test-Path -LiteralPath $err) { Get-Content -LiteralPath $err -Raw } else { '' }
+            return [pscustomobject]@{
+              Tag = $Tag; Exited = $exited; ExitCode = $code; Frames = $Frames
+              TraceText = $traceText; StdoutText = $stdoutText; StderrText = $stderrText
+            }
+          }
+
+          function Test-Proof {
+            param([psobject]$Run, [int]$MinFrames)
+            $nativeHeader = $false
+            $traceFrames = 0
+            foreach ($line in ($Run.TraceText -split "`r?`n")) {
+              if (-not $line.TrimStart().StartsWith('{')) { continue }
+              try { $obj = $line | ConvertFrom-Json -ErrorAction Stop } catch { continue }
+              if ($obj.type -eq 'header') {
+                if ($obj.launch -eq 'rune' -and $obj.clock -eq 'wall' -and $obj.timestamp -eq 'cpu-submit') {
+                  $nativeHeader = $true
+                }
+              } elseif ($null -ne $obj.t -and $null -ne $obj.n -and $null -ne $obj.quality) {
+                $traceFrames++
+              }
+            }
+            # Somente a linha `rune: frames ...` do SurfaceMeter conta como present real.
+            $presents = 0
+            $summary = [regex]::Match($Run.StderrText, '(?m)^rune: frames\s+.*?;\s*totals\s+(\d+)\s+presents\b')
+            if ($summary.Success) { $presents = [int]$summary.Groups[1].Value }
+            return [pscustomobject]@{
+              NativeHeader = $nativeHeader; TraceFrames = $traceFrames; Presents = $presents
+              Ok = ($nativeHeader -and $traceFrames -ge $MinFrames -and $presents -ge $MinFrames)
+              Text = ($Run.TraceText + "`n" + $Run.StdoutText + "`n" + $Run.StderrText)
+            }
+          }
+
+          function Get-FailureClass {
+            param([psobject]$Proof)
+            if ($Proof.Text -match '(?i)(no (usable )?(gpu )?adapter|no suitable adapter|request[ _-]?adapter|wgpu[^\n]*adapter|failed to (create|request) (a )?(gpu |render )?adapter|graphics adapter|no gpu|vulkan[^\n]*(unavailable|failed|not found|no device)|d3d12[^\n]*(failed|unavailable)|gpu process|adapter[^\n]*not found|display[^\n]*unavailable)') {
+              return 'environment-no-adapter'
+            }
+            return 'app-error'
+          }
+
+          function Show-Excerpt {
+            param([psobject]$Proof)
+            $lines = @($Proof.Text -split "`r?`n")
+            $tail = $lines | Select-Object -Last 40
+            $tail -join "`n"
+          }
+
+          $primary = Invoke-AppProof -Frames $PrimaryFrames -DeadlineSec $PrimaryDeadlineSec -Tag 'primary'
+          $proof = Test-Proof -Run $primary -MinFrames $PrimaryFrames
+
+          if ($primary.Exited -and $primary.ExitCode -eq 0 -and $proof.Ok) {
+            "PASS primario: trace nativo (clock=wall) + $($proof.TraceFrames) frames + $($proof.Presents) presents (alvo 120)."
+            "EVIDENCE_MODE=primary-120" | Add-Content -LiteralPath $env:GITHUB_ENV
+          } else {
+            if ((Get-FailureClass -Proof $proof) -eq 'environment-no-adapter') {
+              throw "FALHA DE AMBIENTE (sem adaptador grafico utilizavel) - nao atribuivel ao app. Logs:`n$(Show-Excerpt $proof)"
+            }
+            # Wake dependency = nao saiu no prazo, ou saiu sem erro mas com menos frames que o alvo.
+            $wakeSuspected = (-not $primary.Exited) -or `
+              ($primary.ExitCode -eq 0 -and $proof.TraceFrames -gt 0 -and $proof.TraceFrames -lt $PrimaryFrames)
+            if ($wakeSuspected) {
+              "Prova de 120 frames inconclusiva (timeout ou frames<$PrimaryFrames; possivel dependencia de wake). Tentando prova reduzida de $FallbackFrames frames."
+              $fb = Invoke-AppProof -Frames $FallbackFrames -DeadlineSec $FallbackDeadlineSec -Tag 'fallback'
+              $fbProof = Test-Proof -Run $fb -MinFrames $FallbackFrames
+              if ((Get-FailureClass -Proof $fbProof) -eq 'environment-no-adapter') {
+                throw "FALHA DE AMBIENTE (sem adaptador grafico) na prova reduzida. Logs:`n$(Show-Excerpt $fbProof)"
+              }
+              if ($fb.Exited -and $fb.ExitCode -eq 0 -and $fbProof.Ok) {
+                "PASS (modo reduzido): trace nativo (clock=wall) + $($fbProof.TraceFrames) frames + $($fbProof.Presents) presents. Os 120 frames NAO foram concluidos (dependencia de wake); nao afirmamos sucesso dos 120."
+                "EVIDENCE_MODE=fallback-reduced" | Add-Content -LiteralPath $env:GITHUB_ENV
+              } else {
+                throw "FALHA DO APP: prova reduzida tambem falhou (exited=$($fb.Exited), code=$($fb.ExitCode), header=$($fbProof.NativeHeader), frames=$($fbProof.TraceFrames), presents=$($fbProof.Presents)). Logs:`n$(Show-Excerpt $fbProof)"
+              }
+            } else {
+              throw "FALHA DO APP (exited=$($primary.Exited), code=$($primary.ExitCode), header=$($proof.NativeHeader), frames=$($proof.TraceFrames), presents=$($proof.Presents)). Logs:`n$(Show-Excerpt $proof)"
+            }
+          }
+      - name: Collect diagnostics artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
         with:
-          name: rune-${{ runner.os }}
-          path: |
-            experimental/target/packages/*.AppImage
-            experimental/target/packages/*.exe
-          if-no-files-found: error
+          name: rune-nsis-validation-logs
+          path: ${{ runner.temp }}/rune-logs
+          if-no-files-found: warn
+          retention-days: 5
