@@ -10,6 +10,13 @@ pub fn normalize(mut value: serde_json::Value) -> Result<ReviewResult> {
             "Revisão salva inválida.",
         )
     };
+    // Keep the serde cause in `source` while preserving the stable UI message.
+    let invalid_source = |e: serde_json::Error| {
+        let mut error =
+            ReviewError::with_source(ReviewErrorCode::InvalidPayload, "games.normalize", e);
+        error.message = fail().message;
+        error
+    };
     let old_positions = value
         .get("positions")
         .and_then(|v| v.as_array())
@@ -41,7 +48,7 @@ pub fn normalize(mut value: serde_json::Value) -> Result<ReviewResult> {
         .enumerate()
     {
         if p.get("phase").is_none() {
-            p["phase"] = serde_json::to_value(phases[i]).map_err(|_| fail())?;
+            p["phase"] = serde_json::to_value(phases[i]).map_err(invalid_source)?;
         }
     }
     let cps: Vec<_> = value["positions"]
@@ -57,7 +64,7 @@ pub fn normalize(mut value: serde_json::Value) -> Result<ReviewResult> {
                 m["winPctLoss"].as_f64().ok_or_else(fail)?,
                 m["isBook"].as_bool().ok_or_else(fail)?,
             ))
-            .map_err(|_| fail())?;
+            .map_err(invalid_source)?;
         }
         if m.get("cpLoss").is_none() {
             m["cpLoss"] = serde_json::json!(
@@ -74,9 +81,9 @@ pub fn normalize(mut value: serde_json::Value) -> Result<ReviewResult> {
             middlegame: accuracy(&[], &[50.0]),
             endgame: accuracy(&[], &[50.0]),
         })
-        .map_err(|_| fail())?;
+        .map_err(invalid_source)?;
     }
-    let mut review: ReviewResult = serde_json::from_value(value).map_err(|_| fail())?;
+    let mut review: ReviewResult = serde_json::from_value(value).map_err(invalid_source)?;
     validate_review(&review)?;
     if !current {
         let values: Vec<_> = review.positions.iter().map(|p| p.win_pct).collect();

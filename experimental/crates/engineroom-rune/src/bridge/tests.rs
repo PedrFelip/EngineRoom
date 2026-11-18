@@ -12,7 +12,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-struct NoEngine;
+pub(crate) struct NoEngine;
 impl EngineFactory for NoEngine {
     fn acquire<'a>(&'a self, _: &'a Cancellation) -> Task<'a, Result<Box<dyn EnginePort>>> {
         Box::pin(async {
@@ -25,7 +25,7 @@ impl EngineFactory for NoEngine {
     }
 }
 #[derive(Default)]
-struct MemoryRepo {
+pub(crate) struct MemoryRepo {
     drains: AtomicUsize,
 }
 impl Repository for MemoryRepo {
@@ -74,7 +74,7 @@ fn config(restored: bool) -> ReviewConfig {
         initial_result: restored.then(|| core::build(&game, &raw).expect("valid restored review")),
     }
 }
-fn bridge(
+pub(crate) fn bridge(
     factory: Arc<dyn EngineFactory>,
     repo: Arc<dyn Repository>,
 ) -> (Bridge, mpsc::Receiver<()>) {
@@ -404,7 +404,7 @@ fn closing_immediately_and_invalid_open_are_acknowledged() {
     invalid.lines = 0;
     b.open("invalid", invalid).unwrap();
     until(&b, &wake, |_, events| {
-        events.iter().any(|e| matches!(e, BridgeLifecycle::Error { id, error } if id == "invalid" && error.code == ReviewErrorCode::InvalidPayload))
+        events.iter().any(|e| matches!(e, BridgeLifecycle::Error { id, error, .. } if id == "invalid" && error.code == ReviewErrorCode::InvalidPayload))
     });
 }
 #[test]
@@ -423,6 +423,125 @@ fn dropping_bridge_drains_owned_session() {
         "drop returned before repository drain"
     );
 }
+/// Review engine that stalls forever until the test releases it. `acquire` signals
+/// that the initial review is in flight, so no live analysis can have been submitted.
+struct StalledReview {
+    started: mpsc::Sender<()>,
+    release: tokio::sync::watch::Sender<bool>,
+}
+struct StalledPort {
+    release: tokio::sync::watch::Receiver<bool>,
+    replies: std::collections::VecDeque<String>,
+}
+impl EngineFactory for StalledReview {
+    fn acquire<'a>(&'a self, _: &'a Cancellation) -> Task<'a, Result<Box<dyn EnginePort>>> {
+        let _ = self.started.send(());
+        let port = StalledPort {
+            release: self.release.subscribe(),
+            replies: std::collections::VecDeque::new(),
+        };
+        Box::pin(async move { Ok(Box::new(port) as Box<dyn EnginePort>) })
+    }
+}
+impl EnginePort for StalledPort {
+    fn send<'a>(&'a mut self, command: &'a str) -> Task<'a, Result<()>> {
+        Box::pin(async move {
+            match command {
+                "uci" => self.replies.push_back("uciok".into()),
+                "isready" => self.replies.push_back("readyok".into()),
+                _ => {}
+            }
+            Ok(())
+        })
+    }
+    fn next(&mut self) -> Task<'_, Result<String>> {
+        let mut release = self.release.clone();
+        let replies = &mut self.replies;
+        Box::pin(async move {
+            if let Some(reply) = replies.pop_front() {
+                return Ok(reply);
+            }
+            // No queued handshake reply: this is the search, which stays
+            // stalled until the test releases it.
+            while !*release.borrow() {
+                if release.changed().await.is_err() {
+                    break;
+                }
+            }
+            replies.push_back("bestmove e2e4".into());
+            Ok("info depth 1 score cp 0 pv e2e4".into())
+        })
+    }
+    fn shutdown(&mut self) -> Task<'_, ()> {
+        Box::pin(async {})
+    }
+}
+
+/// A live cancel must not block the bridge actor's Close while the initial review
+/// is still stalled: no live search was submitted, so there is nothing to cancel.
+#[test]
+fn close_during_stalled_initial_review_is_not_blocked_by_live_cancel() {
+    let (started, started_rx) = mpsc::channel();
+    let (release_tx, _) = tokio::sync::watch::channel(false);
+    let (bridge, wake) = bridge(
+        Arc::new(StalledReview {
+            started,
+            release: release_tx.clone(),
+        }),
+        Arc::new(MemoryRepo::default()),
+    );
+    let mut state = crate::state::State::default();
+    state.bridge = Some(bridge);
+    state.pgn.replace_text("1. e4 e5 *");
+    state.prepare();
+    state.profile = crate::state::Profile::Manual;
+    state.depth = 3;
+    state.start_review();
+
+    // Wait until the initial review has acquired the stalled engine, so no
+    // Completed event exists and no live analysis could have been submitted.
+    started_rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("stalled review engine acquired");
+
+    // Navigation changes the live key while the initial review is stalled.
+    state.go_to(1);
+    // poll_bridge runs sync_live; before the fix this enqueues cancel_live,
+    // which parks the single bridge actor behind the unfinished review.
+    state.poll_bridge();
+    assert!(
+        state.real_result.is_none(),
+        "initial review must still be in progress"
+    );
+
+    // Close must be acknowledged independently of any live cancel intent.
+    state.cancel_review();
+    let deadline = Instant::now() + Duration::from_secs(3);
+    let mut closed = false;
+    while Instant::now() < deadline {
+        closed = state
+            .bridge
+            .as_ref()
+            .expect("bridge")
+            .drain_lifecycle()
+            .iter()
+            .any(|event| matches!(event, BridgeLifecycle::Closed { .. }));
+        if closed {
+            break;
+        }
+        let _ = wake.recv_timeout(Duration::from_millis(50));
+    }
+    let bridge = state.bridge.take().expect("bridge");
+    // Release the stalled review so the engine and bridge can tear down
+    // before asserting, regardless of the outcome.
+    let _ = release_tx.send(true);
+    drop(bridge);
+    assert!(
+        closed,
+        "close was not acknowledged while a live cancel waited on the stalled review"
+    );
+}
+
 #[test]
 #[ignore = "requires ENGINE_ROOM_STOCKFISH; tests the real review state and variation feedback"]
 fn real_stockfish_state_displays_live_lines_and_variation_feedback() {
@@ -966,6 +1085,36 @@ fn dropping_bridge_cancels_probe_and_awaits_teardown() {
         .expect("probe started");
     drop(bridge);
     assert_eq!(stopped.load(Ordering::SeqCst), 1);
+}
+
+/// A second start while a probe is in flight must be rejected rather than spawn
+/// a task whose JoinHandle overwrites (detaches) the first one from Drop.
+#[test]
+fn duplicate_probe_while_stalled_does_not_detach_the_first_task() {
+    let (started, received) = mpsc::channel();
+    let stopped = Arc::new(AtomicUsize::new(0));
+    let (bridge, _) = bridge(
+        Arc::new(WaitingProbe {
+            started,
+            stopped: stopped.clone(),
+        }),
+        Arc::new(MemoryRepo::default()),
+    );
+    bridge.start_probe();
+    received
+        .recv_timeout(Duration::from_secs(5))
+        .expect("first probe started");
+
+    bridge.start_probe();
+
+    // Drop cancels and awaits the single in-flight task. A detached duplicate
+    // would also run here and shut down, which this count would reveal.
+    drop(bridge);
+    assert_eq!(
+        stopped.load(Ordering::SeqCst),
+        1,
+        "exactly one probe must be cancelled and awaited"
+    );
 }
 
 #[test]

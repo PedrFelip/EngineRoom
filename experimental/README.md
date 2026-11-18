@@ -44,7 +44,8 @@ O workspace separa a aplicação desktop, os componentes reutilizáveis e o back
 - `crates/engineroom-rune/src/layout.rs`: medidas responsivas baseadas na área útil real do shell.
 - `crates/engineroom-rune/src/game.rs`: validação local de PGN/FEN e posições para a prévia.
 - `crates/engineroom-ui/src/primitives.rs`: grupos, linhas de preferência, tipografia e slider acessível.
-- `crates/engineroom-rune/src/components/shell.rs`: shell sem faixa superior, `Sidebar` e `SidebarRow` do kit.
+- `crates/engineroom-rune/src/components/shell.rs`: shell sem faixa superior, `Sidebar`, `SidebarRow` e menu de contexto do kit.
+- `crates/engineroom-rune/src/session_style.rs`: cores, ordenação e agrupamento das sessões na sidebar.
 - `crates/engineroom-rune/src/components/home.rs`: `TextArea`, perfis segmentados e importação/configuração.
 - `crates/engineroom-rune/src/components/board.rs`: tabuleiro e identificação dos jogadores.
 - `crates/engineroom-rune/src/components/review.rs`: layout, playback e momentos críticos da análise.
@@ -88,6 +89,19 @@ orienta layout, escopos de eventos, acessibilidade e testes headless.
 - Alternar entre sessões abertas pela dock, preservando lance, orientação, variações e resultado.
   Uma análise fica ativa por vez; ao trocar, a anterior é encerrada e a revisão
   incompleta pode ser retomada pelo cache. Fechar uma sessão não apaga seu histórico.
+- Organizar sessões em pastas com nome e cor na sidebar. “Nova pasta” cria inclusive
+  pastas vazias; o menu de contexto da pasta permite renomear, trocar a cor ou excluir.
+  Clique com o botão direito (ou Shift+F10/Menu) em uma sessão para movê-la para uma
+  pasta existente, criar uma pasta para ela ou deixá-la fora de pastas, diretamente na lista.
+  Pastas têm identidade própria e podem compartilhar cores; mostram contagem e recolhimento.
+  Arraste uma sessão até uma pasta para movê-la, inclusive se estiver recolhida. Durante
+  o arraste, uma área temporária permite deixá-la fora de pastas. Arraste o cabeçalho
+  de uma pasta ou uma sessão sobre outra da mesma pasta para reordenar a lista.
+  A ordem das pastas é salva nas preferências. Escape cancela o arraste.
+  Excluir uma pasta preserva suas sessões. Novas revisões e aberturas pelo histórico
+  começam sempre fora de pastas; sessões da mesma partida podem ficar em pastas diferentes.
+  Preferências antigas de cor são migradas para pastas com o nome da cor.
+  A organização nunca reordena o workspace usado pelo ciclo de análise.
 - Reabrir, reanalisar e excluir revisões salvas na lista paginada do histórico
   ("Carregar mais").
 - Persistir as preferências em `engineroom-experimental/preferences.json` dentro do
@@ -203,6 +217,17 @@ Para cenários Strobe com uma partida histórica, Stockfish real, cache SQLite
 isolado e abertura da janela nativa, veja [real-game-strobe.md](real-game-strobe.md).
 
 ### Perfil da interface
+
+Para medir a apresentação da sidebar com 12, 128 e 512 sessões, execute:
+
+```sh
+cargo test --locked -p engineroom-rune benchmark_sidebar_presentation -- --ignored --nocapture
+```
+
+O CSV informa a mediana de sete amostras, em nanossegundos por chamada, para montar os grupos,
+resolver um alvo de reordenação dentro da mesma pasta e construir a árvore da sidebar com
+os menus fechados. A medição usa dados sintéticos balanceados e exclui layout, desenho,
+Stockfish e SQLite. Compare os mesmos casos na mesma máquina.
 
 `./scripts/profile-sidebar.sh` mede redimensionamento com revisão curta, partida de
 200 meios-lances e análise em andamento. Executa três capturas por cena em release,

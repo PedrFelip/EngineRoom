@@ -135,7 +135,8 @@ impl Pool {
         // shared lease remains held until the last worker has finished.
         while let Some(result) = self.tasks.join_next().await {
             if let Err(error) = result {
-                let error = ReviewError::new(ReviewErrorCode::EngineExited, "engine.worker", error);
+                let error =
+                    ReviewError::with_source(ReviewErrorCode::EngineExited, "engine.worker", error);
                 let error = record_failure(&self.failure, error.clone())
                     .err()
                     .unwrap_or(error);
