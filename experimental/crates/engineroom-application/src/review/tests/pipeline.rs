@@ -204,7 +204,10 @@ async fn quiet_critical_move_refines_only_pair_and_flushes_before_failure() {
                     .all(|c| c != "go movetime 1800")
             );
         } else {
-            assert_eq!(review.unwrap_err().message, "engine failed");
+            let error = review.unwrap_err();
+            assert_eq!(error.code, ReviewErrorCode::EngineExited);
+            assert_eq!(error.operation, "fake");
+            assert_eq!(error.message, "engine failed");
             let writes = repo.writes.lock().unwrap();
             assert_eq!(writes.iter().map(|(_, count)| count).sum::<usize>(), 12);
             assert!(writes.iter().all(|(value, _)| [180, 2000].contains(value)));
@@ -232,6 +235,8 @@ async fn cache_failures_preserve_root_cause_and_discard_engine() {
             )
             .await
             .unwrap_err();
+        assert_eq!(e.code, ReviewErrorCode::Cache);
+        assert_eq!(e.operation, if read { "lookup" } else { "put" });
         assert_eq!(
             e.message,
             if read {

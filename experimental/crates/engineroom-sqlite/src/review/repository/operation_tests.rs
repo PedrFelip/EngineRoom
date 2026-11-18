@@ -168,6 +168,10 @@ fn history_conversion_preserves_metadata_fallback_and_decode_errors() {
     let error = review_config(stored("1. e4".into(), "{".into())).unwrap_err();
     assert_eq!(error.code, ReviewErrorCode::InvalidPayload);
     assert_eq!(error.operation, "games.decode");
+    assert!(
+        std::error::Error::source(&error).is_some(),
+        "decode failure must preserve its serde_json source"
+    );
 }
 
 #[tokio::test]
@@ -183,10 +187,108 @@ async fn corrupt_cache_is_a_miss_but_database_open_failure_is_fatal() {
     assert!(repo.lookup(&[fen], Mode::Depth, 20, 1).await.unwrap()[0].is_none());
     let invalid_path = temp_path().join("missing").join("database.db");
     let failing = SqliteRepository::new(invalid_path);
+    let error = failing
+        .lookup(&["position".into()], Mode::Depth, 20, 1)
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, ReviewErrorCode::Cache);
+    assert_eq!(error.operation, "cache.lookup");
     assert!(
-        failing
-            .lookup(&["position".into()], Mode::Depth, 20, 1)
-            .await
-            .is_err()
+        std::error::Error::source(&error).is_some(),
+        "database open failure must preserve its rusqlite source"
     );
+}
+
+fn manual_time_config(pgn: String, movetime_ms: Option<u32>) -> ReviewConfig {
+    ReviewConfig {
+        meta: core::extract(&pgn).unwrap().meta,
+        pgn,
+        engine: EngineTier {
+            id: "time".into(),
+            depth: 20,
+            label: String::new(),
+            hint: String::new(),
+        },
+        mode: Mode::Time,
+        analysis_kind: AnalysisKind::Manual,
+        movetime_ms,
+        lines: 3,
+        initial_result: None,
+    }
+}
+
+async fn save_and_reopen(config: &ReviewConfig) -> ReviewConfig {
+    let repo = SqliteRepository::new(temp_path());
+    let game = core::extract(&config.pgn).unwrap();
+    let raw: Vec<_> = game
+        .fens
+        .iter()
+        .map(|fen| core::terminal_raw(fen, 0))
+        .collect();
+    let review = core::build(&game, &raw).unwrap();
+    repo.save(config, &review).await.unwrap();
+    let id = repo.list_games(10, None).await.unwrap().games[0].id;
+    repo.review_config(id).await.unwrap().unwrap()
+}
+
+#[tokio::test]
+async fn manual_time_without_movetime_round_trips_to_the_shared_default() {
+    let reopened =
+        save_and_reopen(&manual_time_config("[White \"Alice\"]\n1. e4".into(), None)).await;
+    assert_eq!(reopened.movetime_ms, Some(DEFAULT_MOVETIME_MS));
+}
+
+#[tokio::test]
+async fn manual_time_explicit_small_budgets_survive_round_trip() {
+    for budget in [100, 1000, 4999] {
+        let reopened = save_and_reopen(&manual_time_config(
+            "[White \"Alice\"]\n1. e4".into(),
+            Some(budget),
+        ))
+        .await;
+        assert_eq!(
+            reopened.movetime_ms,
+            Some(budget),
+            "explicit budget {budget} must not be clamped to the default"
+        );
+    }
+}
+
+#[tokio::test]
+async fn legacy_manual_time_zero_budget_is_normalized_on_reopen() {
+    let pgn = "[White \"Alice\"]\n1. e4".to_string();
+    let game = core::extract(&pgn).unwrap();
+    let raw: Vec<_> = game
+        .fens
+        .iter()
+        .map(|fen| core::terminal_raw(fen, 0))
+        .collect();
+    let review = core::build(&game, &raw).unwrap();
+    let path = temp_path();
+    let conn = crate::db::open_file(&path).unwrap();
+    // Reproduce the legacy save that recorded 0 for an unspecified budget.
+    let id = Store::new(&conn)
+        .save(&NewGame {
+            pgn,
+            white: game.meta.white,
+            black: game.meta.black,
+            result: game.meta.result,
+            plies: game.moves.len() as u32,
+            engine_tier: "time".into(),
+            mode: Mode::Time,
+            analysis_kind: "manual".into(),
+            depth: 0,
+            multipv: 3,
+            accuracy_white: review.accuracy.white,
+            accuracy_black: review.accuracy.black,
+            review_json: serde_json::to_string(&review).unwrap(),
+        })
+        .unwrap();
+    drop(conn);
+    let reopened = SqliteRepository::new(path)
+        .review_config(id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(reopened.movetime_ms, None);
 }

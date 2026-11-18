@@ -221,7 +221,7 @@ impl Repository for SqliteRepository {
             let profile = crate::review::adaptive::profile(config.analysis_kind)?;
             let value = profile.map(|p| p.high_ms).unwrap_or_else(|| {
                 if config.mode == Mode::Time {
-                    config.movetime_ms.unwrap_or(0)
+                    config.movetime_ms.unwrap_or(DEFAULT_MOVETIME_MS)
                 } else {
                     config.engine.depth
                 }
@@ -312,7 +312,9 @@ fn review_config(stored: StoredGame) -> Result<ReviewConfig> {
         mode: stored.summary.mode,
         analysis_kind: kind,
         movetime_ms: if stored.summary.mode == Mode::Time && kind == AnalysisKind::Manual {
-            Some(stored.summary.depth)
+            // Legacy saves recorded 0 for an unspecified budget; map that
+            // sentinel back to None so session validation accepts the config.
+            (stored.summary.depth != 0).then_some(stored.summary.depth)
         } else {
             None
         },

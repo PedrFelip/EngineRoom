@@ -1,0 +1,15 @@
+scale=1
+uci: iters=1500 total_ms=119.059 ns_per_op=79372.6 allocs=1032001 bytes=28954564
+targets: iters=8000 total_ms=600.965 ns_per_op=75120.6 allocs=192000 bytes=85632000
+scale=1
+uci: iters=1500 total_ms=118.814 ns_per_op=79209.1 allocs=1032001 bytes=28954564
+targets: iters=8000 total_ms=588.214 ns_per_op=73526.7 allocs=192000 bytes=85632000
+scale=1
+uci: iters=1500 total_ms=118.017 ns_per_op=78678.2 allocs=1032001 bytes=28954564
+targets: iters=8000 total_ms=592.915 ns_per_op=74114.3 allocs=192000 bytes=85632000
+scale=1
+uci: iters=1500 total_ms=122.026 ns_per_op=81350.6 allocs=1032001 bytes=28954564
+targets: iters=8000 total_ms=597.344 ns_per_op=74668.1 allocs=192000 bytes=85632000
+scale=1
+uci: iters=1500 total_ms=118.070 ns_per_op=78713.1 allocs=1032001 bytes=28954564
+targets: iters=8000 total_ms=615.771 ns_per_op=76971.4 allocs=192000 bytes=85632000

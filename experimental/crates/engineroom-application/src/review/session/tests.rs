@@ -19,16 +19,40 @@ async fn receive(
     rx: &mut tokio::sync::mpsc::UnboundedReceiver<Envelope>,
     wanted: impl Fn(&Envelope) -> bool,
 ) -> Envelope {
+    let mut seen = Vec::new();
+    receive_recording(rx, wanted, &mut seen).await
+}
+
+// Keep every consumed event so callers can check for spurious errors without
+// assuming which legitimate events (progress, completion, warnings) came first.
+async fn receive_recording(
+    rx: &mut tokio::sync::mpsc::UnboundedReceiver<Envelope>,
+    wanted: impl Fn(&Envelope) -> bool,
+    seen: &mut Vec<Envelope>,
+) -> Envelope {
     tokio::time::timeout(Duration::from_secs(3), async {
         loop {
-            let e = rx.recv().await.unwrap();
-            if wanted(&e) {
-                return e;
+            let event = rx.recv().await.expect("session event channel closed");
+            let matched = wanted(&event);
+            seen.push(event);
+            if matched {
+                return seen.last().expect("event was just pushed").clone();
             }
         }
     })
     .await
     .expect("session event timeout")
+}
+
+fn assert_no_error_events(seen: &[Envelope], scenario: &str) {
+    let errors: Vec<_> = seen
+        .iter()
+        .filter(|e| matches!(&e.event, Event::Error { .. }))
+        .collect();
+    assert!(
+        errors.is_empty(),
+        "{scenario}: spurious Event::Error: {errors:?}"
+    );
 }
 #[tokio::test]
 async fn session_intents_wait_for_their_cleanup_acknowledgments() {
@@ -97,8 +121,15 @@ async fn only_latest_navigation_runs_and_close_finishes_all_resources() {
         )
         .await;
     });
-    let completed = receive(&mut rx, |e| matches!(e.event, Event::LiveCompleted { .. })).await;
+    let mut seen = Vec::new();
+    let completed = receive_recording(
+        &mut rx,
+        |e| matches!(e.event, Event::LiveCompleted { .. }),
+        &mut seen,
+    )
+    .await;
     assert_eq!(completed.request_id, Some(100));
+    assert_no_error_events(&seen, "superseded navigation intents");
     assert_eq!(f.state.lock().unwrap().searches, 1);
     s.close.send_replace(true);
     running.await.unwrap();
@@ -147,7 +178,13 @@ async fn replacing_live_search_waits_for_discard_and_does_not_emit_old_result() 
         )
         .await;
     });
-    receive(&mut rx, |e| matches!(e.event, Event::LiveStarted { .. })).await;
+    let mut seen = Vec::new();
+    receive_recording(
+        &mut rx,
+        |e| matches!(e.event, Event::LiveStarted { .. }),
+        &mut seen,
+    )
+    .await;
     while f.state.lock().unwrap().searches == 0 {
         tokio::task::yield_now().await;
     }
@@ -162,8 +199,14 @@ async fn replacing_live_search_waits_for_discard_and_does_not_emit_old_result() 
         }),
     )
     .unwrap();
-    let event = receive(&mut rx, |e| matches!(e.event, Event::LiveCompleted { .. })).await;
+    let event = receive_recording(
+        &mut rx,
+        |e| matches!(e.event, Event::LiveCompleted { .. }),
+        &mut seen,
+    )
+    .await;
     assert_eq!(event.request_id, Some(2));
+    assert_no_error_events(&seen, "live search replacement");
     assert_eq!(f.state.lock().unwrap().stopped, 1);
     assert_eq!(f.acquired.load(std::sync::atomic::Ordering::SeqCst), 2);
     s.close.send_replace(true);
@@ -244,11 +287,23 @@ async fn persistence_failure_does_not_invalidate_completed_review() {
         )
         .await;
     });
-    receive(&mut rx, |e| matches!(e.event, Event::Completed { .. })).await;
-    let warning = receive(&mut rx, |e| matches!(e.event, Event::Warning { .. })).await;
+    let mut seen = Vec::new();
+    receive_recording(
+        &mut rx,
+        |e| matches!(e.event, Event::Completed { .. }),
+        &mut seen,
+    )
+    .await;
+    let warning = receive_recording(
+        &mut rx,
+        |e| matches!(e.event, Event::Warning { .. }),
+        &mut seen,
+    )
+    .await;
     assert!(
         matches!(warning.event,Event::Warning {error:e} if e.code==ReviewErrorCode::Persistence)
     );
+    assert_no_error_events(&seen, "best-effort history save");
     s.close.send_replace(true);
     running.await.unwrap();
     assert!(*s.done.borrow());

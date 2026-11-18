@@ -83,11 +83,18 @@ fn legacy_review_normalization_and_current_data_preservation() {
         )
         .unwrap()
     );
+    let error = engineroom_application::review::repository::normalize(
+        serde_json::json!({"moves":[],"positions":[]}),
+    )
+    .unwrap_err();
+    assert_eq!(error.code, ReviewErrorCode::InvalidPayload);
+    assert_eq!(error.operation, "games.normalize");
+    assert_eq!(error.message, "Revisão salva inválida.");
     assert!(
-        engineroom_application::review::repository::normalize(
-            serde_json::json!({"moves":[],"positions":[]})
-        )
-        .is_err()
+        std::error::Error::source(&error)
+            .and_then(|source| source.downcast_ref::<serde_json::Error>())
+            .is_some(),
+        "normalization must retain the serde cause: {error:?}"
     );
 }
 #[test]

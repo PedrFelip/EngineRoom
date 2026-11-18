@@ -4,7 +4,7 @@ use super::{
     types::*,
 };
 use shakmaty::{Chess, Color, Position, Role};
-use std::{collections::BTreeMap, sync::LazyLock};
+use std::sync::LazyLock;
 #[derive(Debug, Clone, Copy, serde::Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Profile {
@@ -265,9 +265,13 @@ pub fn targets(critical: &[Critical], count: usize, profile: Profile) -> Vec<Tar
     let limit = profile
         .minimum
         .max((count as f64 * profile.fraction).ceil() as usize);
-    // Preserve insertion order, including stable sorting of ties.
+    // Position indexes are dense in `0..count`, so a flat slot vector replaces
+    // the map and gives O(1) lookup without per-position tree allocations.
+    // `order` keeps first-selection order so the stable final sort still breaks
+    // equal (hard, kind, score) ties the way the map-based version did.
     let mut order = Vec::new();
-    let mut selected: BTreeMap<usize, Target> = BTreeMap::new();
+    let mut selected: Vec<Option<Target>> = vec![None; count];
+    let mut chosen = 0usize;
     for m in ranked {
         let kind = refinement_kind(m);
         let pair = [m.ply - 1, m.ply];
@@ -276,7 +280,10 @@ pub fn targets(critical: &[Critical], count: usize, profile: Profile) -> Vec<Tar
         } else {
             &pair[..]
         };
-        if !m.hard && indexes.iter().any(|i| !selected.contains_key(i)) && selected.len() >= limit {
+        if !m.hard
+            && indexes.iter().any(|&i| i >= count || selected[i].is_none())
+            && chosen >= limit
+        {
             continue;
         }
         for &i in indexes {
@@ -284,8 +291,9 @@ pub fn targets(critical: &[Critical], count: usize, profile: Profile) -> Vec<Tar
                 continue;
             }
             let search = profile.budget(kind);
-            let target = selected.entry(i).or_insert_with(|| {
+            let target = selected[i].get_or_insert_with(|| {
                 order.push(i);
+                chosen += 1;
                 Target {
                     position_index: i,
                     score: m.score,
@@ -301,7 +309,7 @@ pub fn targets(critical: &[Critical], count: usize, profile: Profile) -> Vec<Tar
             target.search.multipv = target.search.multipv.max(search.multipv);
         }
     }
-    let mut result: Vec<_> = order.iter().filter_map(|i| selected.remove(i)).collect();
+    let mut result: Vec<_> = order.iter().filter_map(|&i| selected[i].take()).collect();
     result.sort_by(|a, b| {
         b.hard
             .cmp(&a.hard)
@@ -440,6 +448,131 @@ fn material(position: &Chess, color: Color) -> i32 {
             Role::King => 0,
         })
         .sum()
+}
+
+#[cfg(test)]
+mod flat_targets_tests {
+    use super::*;
+    use std::collections::BTreeMap;
+
+    // Reference copy of the previous map-based selection, kept only to prove the
+    // flat slot vector produces identical output and ordering.
+    fn reference(critical: &[Critical], count: usize, profile: Profile) -> Vec<Target> {
+        let mut ranked: Vec<_> = critical
+            .iter()
+            .filter(|m| m.score >= 32 || m.hard || m.reasons.contains(&Reason::UnstableSearch))
+            .collect();
+        ranked.sort_by(|a, b| {
+            b.hard
+                .cmp(&a.hard)
+                .then_with(|| refinement_kind(b).cmp(&refinement_kind(a)))
+                .then(b.score.cmp(&a.score))
+        });
+        let limit = profile
+            .minimum
+            .max((count as f64 * profile.fraction).ceil() as usize);
+        let mut order = Vec::new();
+        let mut selected: BTreeMap<usize, Target> = BTreeMap::new();
+        for m in ranked {
+            let kind = refinement_kind(m);
+            let pair = [m.ply - 1, m.ply];
+            let indexes = if kind == RefinementKind::Complex {
+                &pair[..1]
+            } else {
+                &pair[..]
+            };
+            if !m.hard
+                && indexes.iter().any(|i| !selected.contains_key(i))
+                && selected.len() >= limit
+            {
+                continue;
+            }
+            for &i in indexes {
+                if i >= count {
+                    continue;
+                }
+                let search = profile.budget(kind);
+                let target = selected.entry(i).or_insert_with(|| {
+                    order.push(i);
+                    Target {
+                        position_index: i,
+                        score: m.score,
+                        hard: m.hard,
+                        kind,
+                        search,
+                    }
+                });
+                target.score = target.score.max(m.score);
+                target.hard |= m.hard;
+                target.kind = target.kind.max(kind);
+                target.search.ms = target.search.ms.max(search.ms);
+                target.search.multipv = target.search.multipv.max(search.multipv);
+            }
+        }
+        let mut result: Vec<_> = order.iter().filter_map(|i| selected.remove(i)).collect();
+        result.sort_by(|a, b| {
+            b.hard
+                .cmp(&a.hard)
+                .then_with(|| b.kind.cmp(&a.kind))
+                .then(b.score.cmp(&a.score))
+        });
+        result
+    }
+    fn signature(targets: &[Target]) -> Vec<(usize, u32, bool, RefinementKind, SearchBudget)> {
+        targets
+            .iter()
+            .map(|t| (t.position_index, t.score, t.hard, t.kind, t.search))
+            .collect()
+    }
+
+    #[test]
+    fn flat_targets_match_the_map_reference() {
+        let reasons = [
+            Reason::Loss,
+            Reason::Swing,
+            Reason::Tactical,
+            Reason::Complex,
+            Reason::ClassificationBoundary,
+            Reason::UnstableSearch,
+            Reason::Mate,
+        ];
+        let profiles = [
+            profile(AnalysisKind::Fast).unwrap().unwrap(),
+            profile(AnalysisKind::Deep).unwrap().unwrap(),
+            Profile {
+                minimum: 2,
+                fraction: 0.0,
+                ..profile(AnalysisKind::Fast).unwrap().unwrap()
+            },
+        ];
+        let mut state = 0x1234_5678_u64;
+        for profile in profiles {
+            for count in [1, 2, 9, 40, 240] {
+                for _ in 0..24 {
+                    let mut next = || {
+                        state = state
+                            .wrapping_mul(6364136223846793005)
+                            .wrapping_add(1442695040888963407);
+                        state >> 33
+                    };
+                    let total = (next() % 60) as usize + 1;
+                    let critical: Vec<_> = (0..total)
+                        .map(|_| Critical {
+                            ply: (next() % (count as u64 + 3)).max(1) as usize,
+                            score: (next() % 120) as u32,
+                            hard: next() % 4 == 0,
+                            reasons: vec![reasons[(next() % reasons.len() as u64) as usize]],
+                        })
+                        .collect();
+                    assert_eq!(
+                        signature(&targets(&critical, count, profile)),
+                        signature(&reference(&critical, count, profile)),
+                        "count={count} profile={profile:?}"
+                    );
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
