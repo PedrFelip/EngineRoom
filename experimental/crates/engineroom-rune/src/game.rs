@@ -12,10 +12,10 @@ pub struct Game {
     pub event: String,
     pub avatar_key: Option<String>,
     pub ratings: [Option<String>; 2],
-    pub positions: Vec<Chess>,
+    positions: Vec<Chess>,
     /// FEN for each position, parallel to `positions`. Analysis lookups reuse
     /// these instead of re-serializing the same board several times per frame.
-    pub fens: Vec<String>,
+    fens: Vec<String>,
     pub moves: Vec<String>,
 }
 impl Game {
@@ -33,9 +33,19 @@ impl Game {
         }
     }
 
+    pub fn positions(&self) -> &[Chess] {
+        &self.positions
+    }
+
     /// Cached FEN for the position at `ply`.
     pub fn fen(&self, ply: usize) -> &str {
-        &self.fens[ply]
+        &self.fens[ply.min(self.fens.len() - 1)]
+    }
+
+    #[cfg(test)]
+    pub(crate) fn replace_position(&mut self, ply: usize, position: Chess) {
+        self.fens[ply] = core::fen(&position);
+        self.positions[ply] = position;
     }
 
     pub fn board(&self, ply: usize) -> [char; 64] {

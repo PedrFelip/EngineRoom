@@ -383,8 +383,8 @@ fn learning(s: &State, k: &Kit) -> El {
         let notation = &s.game.moves[ply - 1];
         let label = format!(
             "{}{} {}",
-            s.game.positions[ply - 1].fullmoves(),
-            if s.game.positions[ply - 1].turn().is_black() {
+            s.game.positions()[ply - 1].fullmoves(),
+            if s.game.positions()[ply - 1].turn().is_black() {
                 "…"
             } else {
                 "."
@@ -419,7 +419,7 @@ fn branches_at(s: &State, k: &Kit, root_ply: usize, indices: &[usize]) -> Option
         let mut moves = row().gap(8.0).flex_wrap();
         let branch_start = v.branch_from.map_or(0, |(_, cursor)| cursor);
         for (offset, san) in v.san.iter().enumerate().skip(branch_start) {
-            let position = &v.positions[offset];
+            let position = &v.positions()[offset];
             let caption = format!(
                 "{}{} {}",
                 position.fullmoves(),
@@ -470,7 +470,7 @@ fn branches_at(s: &State, k: &Kit, root_ply: usize, indices: &[usize]) -> Option
         }
         let origin = if let Some((parent, cursor)) = v.branch_from {
             if let Some(previous) = cursor.checked_sub(1) {
-                let position = &v.positions[previous];
+                let position = &v.positions()[previous];
                 format!(
                     "ramo de V{} após {}{} {}",
                     parent + 1,
@@ -488,7 +488,7 @@ fn branches_at(s: &State, k: &Kit, root_ply: usize, indices: &[usize]) -> Option
         } else if v.root_ply == 0 {
             "posição inicial".to_string()
         } else {
-            let before = &s.game.positions[v.root_ply - 1];
+            let before = &s.game.positions()[v.root_ply - 1];
             format!(
                 "após {}{} {}",
                 before.fullmoves(),
@@ -523,7 +523,7 @@ fn move_list(s: &State, k: &Kit) -> El {
     }
     let mut index = 0;
     while index < s.game.moves.len() {
-        let position = &s.game.positions[index];
+        let position = &s.game.positions()[index];
         let mut line = row().gap(6.0).center_y().child(
             ui::mono(
                 format!(
@@ -560,7 +560,7 @@ fn move_list(s: &State, k: &Kit) -> El {
                 .label(format!(
                     "{}{} {}{}",
                     position.fullmoves(),
-                    if s.game.positions[index].turn().is_black() {
+                    if s.game.positions()[index].turn().is_black() {
                         "…"
                     } else {
                         "."
@@ -600,7 +600,7 @@ fn move_list(s: &State, k: &Kit) -> El {
             line = line.child(cell);
             index += 1;
             if !branches[index].is_empty() {
-                if s.game.positions[index - 1].turn().is_white() {
+                if s.game.positions()[index - 1].turn().is_white() {
                     line = line.child(el().grow(1.0));
                 }
                 break;

@@ -8,7 +8,7 @@ const BENCH_GAME: &str = include_str!(concat!(
     "/../../perf/data/immortal.pgn"
 ));
 
-fn bench_time<F: FnMut()>(label: &str, n: usize, mut f: F) {
+fn bench_time<F: FnMut()>(label: &str, n: u32, mut f: F) {
     let start = Instant::now();
     for _ in 0..n {
         f();
@@ -16,7 +16,7 @@ fn bench_time<F: FnMut()>(label: &str, n: usize, mut f: F) {
     let elapsed = start.elapsed();
     println!(
         "{label}: {n} iters, {elapsed:?} total, {:?}/iter",
-        elapsed / n as u32
+        elapsed / n
     );
 }
 
@@ -27,7 +27,9 @@ fn analysis_lookup_bench() {
         core,
         types::{RawLine, RawPosition},
     };
-    use shakmaty::{CastlingMode, Position};
+    use shakmaty::{CastlingMode, Position, san::SanPlus};
+
+    const N: u32 = 20_000;
 
     let core_game = core::extract(BENCH_GAME).expect("legal bench PGN");
     let raw: Vec<RawPosition> = core_game
@@ -35,16 +37,17 @@ fn analysis_lookup_bench() {
         .iter()
         .enumerate()
         .map(|(ply, board)| {
+            let ply_cp = i32::try_from(ply).expect("bench ply fits in i32");
             let first = board
                 .legal_moves()
                 .into_iter()
                 .next()
                 .map(|m| m.to_uci(CastlingMode::Standard).to_string());
-            let lines = (0..3)
+            let lines = (0_u32..3)
                 .map(|i| RawLine {
                     unstable: false,
                     multipv: i + 1,
-                    cp: ply as i32 - i as i32 * 10,
+                    cp: ply_cp - i.cast_signed() * 10,
                     pv: first.clone().into_iter().collect(),
                     san: None,
                     depth: Some(18),
@@ -52,7 +55,7 @@ fn analysis_lookup_bench() {
                 .collect();
             RawPosition {
                 fen: core_game.fens[ply].clone(),
-                cp: ply as i32,
+                cp: ply_cp,
                 depth: 18,
                 pv: first.into_iter().collect(),
                 lines,
@@ -68,10 +71,16 @@ fn analysis_lookup_bench() {
 
     // A variation with cursor > 0 makes current_mainline_ply() return None so the
     // FEN lookup scans the whole positions vector, as it does for branch moves.
-    let mut variation = crate::variation::Variation::new(0, state.game.positions[0].clone());
-    variation.positions = state.game.positions.clone();
-    variation.fens = state.game.fens.clone();
-    variation.cursor = state.game.moves.len();
+    let mut variation = crate::variation::Variation::new(0, state.game.positions()[0].clone());
+    for san in &state.game.moves {
+        let mv = san
+            .parse::<SanPlus>()
+            .expect("legal SAN")
+            .san
+            .to_move(variation.position())
+            .expect("legal move");
+        variation.append(mv);
+    }
     state.variations.push(variation);
     state.active_variation = Some(0);
 
@@ -81,7 +90,6 @@ fn analysis_lookup_bench() {
         black_box(state.candidate_previews().len());
     }
 
-    const N: usize = 20_000;
     bench_time("bench:current_fen", N, || {
         black_box(state.current_fen());
     });
