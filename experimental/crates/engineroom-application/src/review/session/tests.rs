@@ -386,8 +386,7 @@ async fn native_navigation_detaches_from_an_active_review_without_releasing_its_
             memory_mb: 2048,
         }),
     );
-    assert_eq!(manager.scheduler(), SchedulerMode::Pipeline);
-    let manager = manager.with_scheduler(SchedulerMode::Native);
+    assert_eq!(manager.scheduler(), SchedulerMode::Native);
     let pgn = "1. f3 e5 2. g4 Qh4#";
     let game = super::super::core::extract(pgn).unwrap();
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();

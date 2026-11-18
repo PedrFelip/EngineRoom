@@ -27,6 +27,9 @@ impl EngineFactory for NoEngine {
 #[derive(Default)]
 pub(crate) struct MemoryRepo {
     drains: AtomicUsize,
+    cache_reads: AtomicUsize,
+    cache_writes: AtomicUsize,
+    saves: AtomicUsize,
 }
 impl Repository for MemoryRepo {
     fn lookup<'a>(
@@ -36,12 +39,15 @@ impl Repository for MemoryRepo {
         _: u32,
         _: u32,
     ) -> Task<'a, Result<Vec<Option<RawPosition>>>> {
+        self.cache_reads.fetch_add(1, Ordering::SeqCst);
         Box::pin(async move { Ok(vec![None; fens.len()]) })
     }
     fn put<'a>(&'a self, _: &'a [RawPosition], _: Mode, _: u32, _: u32) -> Task<'a, Result<()>> {
+        self.cache_writes.fetch_add(1, Ordering::SeqCst);
         Box::pin(async { Ok(()) })
     }
     fn save<'a>(&'a self, _: &'a ReviewConfig, _: &'a ReviewResult) -> Task<'a, Result<()>> {
+        self.saves.fetch_add(1, Ordering::SeqCst);
         Box::pin(async { Ok(()) })
     }
     fn drain(&self) -> Task<'_, ()> {
@@ -1230,10 +1236,10 @@ fn history_keyboard_retry_recovers_initial_and_paginated_failures() {
 }
 
 #[test]
-fn scheduler_selection_defaults_to_pipeline_and_honors_explicit_opt_in() {
+fn scheduler_selection_defaults_to_native_and_honors_pipeline_overrides() {
     assert_eq!(
         parse_scheduler_mode([], None).unwrap(),
-        SchedulerMode::Pipeline
+        SchedulerMode::Native
     );
     assert_eq!(
         parse_scheduler_mode(["--scheduler=native"], None).unwrap(),
@@ -1247,21 +1253,80 @@ fn scheduler_selection_defaults_to_pipeline_and_honors_explicit_opt_in() {
         parse_scheduler_mode(["--scheduler", "pipeline"], Some("native")).unwrap(),
         SchedulerMode::Pipeline
     );
+    assert_eq!(
+        parse_scheduler_mode(["--scheduler=pipeline"], None).unwrap(),
+        SchedulerMode::Pipeline
+    );
+    assert_eq!(
+        parse_scheduler_mode(["--pipeline-scheduler"], Some("native")).unwrap(),
+        SchedulerMode::Pipeline
+    );
+    assert_eq!(
+        parse_scheduler_mode([], Some("pipeline")).unwrap(),
+        SchedulerMode::Pipeline
+    );
     assert!(parse_scheduler_mode(["--scheduler"], None).is_err());
     assert!(parse_scheduler_mode(["--scheduler=invalid"], None).is_err());
+}
+
+#[test]
+fn cache_mode_defaults_to_enabled_and_cli_overrides_environment() {
+    assert_eq!(parse_cache_mode([], None).unwrap(), CacheMode::Enabled);
+    assert_eq!(
+        parse_cache_mode([], Some("off")).unwrap(),
+        CacheMode::Bypass
+    );
+    assert_eq!(
+        parse_cache_mode(["--scheduler=native", "--cache=off"], Some("on")).unwrap(),
+        CacheMode::Bypass
+    );
+    assert_eq!(
+        parse_cache_mode(["--cache", "on"], Some("off")).unwrap(),
+        CacheMode::Enabled
+    );
+    assert!(parse_cache_mode(["--cache"], None).is_err());
+    assert!(parse_cache_mode([], Some("invalid")).is_err());
+}
+
+#[tokio::test]
+async fn bypass_skips_cache_and_delegates_history_and_cleanup() {
+    let inner = Arc::new(MemoryRepo::default());
+    let repository = BypassCacheRepository::new(inner.clone());
+    let fens = core::extract("1. e4 e5 *").unwrap().fens;
+    let misses = repository.lookup(&fens, Mode::Time, 100, 2).await.unwrap();
+    assert_eq!(misses.len(), fens.len());
+    assert!(misses.iter().all(Option::is_none));
+    repository.put(&[], Mode::Time, 100, 2).await.unwrap();
+    let review = config(true);
+    repository
+        .save(&review, review.initial_result.as_ref().unwrap())
+        .await
+        .unwrap();
+    repository.drain().await;
+    assert_eq!(inner.cache_reads.load(Ordering::SeqCst), 0);
+    assert_eq!(inner.cache_writes.load(Ordering::SeqCst), 0);
+    assert_eq!(inner.saves.load(Ordering::SeqCst), 1);
+    assert_eq!(inner.drains.load(Ordering::SeqCst), 1);
 }
 
 #[test]
 fn cancelling_navigation_does_not_delay_closing_a_busy_pipeline_review() {
     let (started, received) = mpsc::channel();
     let stopped = Arc::new(AtomicUsize::new(0));
-    let (bridge, wake) = bridge(
+    let (wake_tx, wake) = mpsc::channel();
+    let bridge = Bridge::with_ports_and_scheduler(
         Arc::new(WaitingProbe {
             started,
             stopped: stopped.clone(),
         }),
         Arc::new(MemoryRepo::default()),
-    );
+        None,
+        SchedulerMode::Pipeline,
+        Arc::new(move || {
+            let _ = wake_tx.send(());
+        }),
+    )
+    .unwrap();
     bridge.open("busy", config(false)).unwrap();
     received
         .recv_timeout(Duration::from_secs(3))
@@ -1291,16 +1356,15 @@ fn real_stockfish_native_scheduler_serves_navigation_before_review_completion() 
         std::env::var_os("ENGINE_ROOM_STOCKFISH").expect("set ENGINE_ROOM_STOCKFISH"),
     );
     let (tx, wake) = mpsc::channel();
-    let bridge = Bridge::with_ports_and_scheduler(
+    let bridge = Bridge::with_ports(
         Arc::new(NativeEngineFactory::new(engine)),
         Arc::new(MemoryRepo::default()),
-        None,
-        SchedulerMode::Native,
         Arc::new(move || {
             let _ = tx.send(());
         }),
     )
     .unwrap();
+    assert_eq!(bridge.scheduler(), SchedulerMode::Native);
     let pgn = "1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6 5. O-O Be7 6. Re1 b5 7. Bb3 d6 *";
     let mut review = config(false);
     review.pgn = pgn.into();

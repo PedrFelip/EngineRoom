@@ -400,6 +400,18 @@ impl State {
             Err(error) => self.bridge_error = Some(error),
         }
     }
+    pub fn setup_bridge_with_cache_bypass(
+        &mut self,
+        wake: rune::Waker,
+        scheduler: engineroom_backend::review::session::SchedulerMode,
+    ) {
+        use engineroom_backend::review::repository::CacheMode;
+
+        match crate::bridge::Bridge::new_with_modes(wake, scheduler, CacheMode::Bypass) {
+            Ok(bridge) => self.bridge = Some(bridge),
+            Err(error) => self.bridge_error = Some(error),
+        }
+    }
     pub(crate) fn live_ready(&self) -> bool {
         self.real_result.is_some() || (self.real_progress.is_some() && self.live_during_review)
     }

@@ -4,6 +4,7 @@ use super::{
     types::{RawPosition, Result, ReviewConfig, ReviewResult},
 };
 use crate::db::mode::Mode;
+use std::sync::Arc;
 
 mod saved_review;
 
@@ -53,5 +54,53 @@ pub trait Repository: Send + Sync {
     /// Implementations without background work may use the immediate default.
     fn drain(&self) -> Task<'_, ()> {
         Box::pin(async {})
+    }
+}
+
+/// Selects whether analysis reads and writes the persistent position cache.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CacheMode {
+    #[default]
+    Enabled,
+    Bypass,
+}
+
+/// Skips position cache I/O while retaining history and persistence ownership.
+pub struct BypassCacheRepository {
+    inner: Arc<dyn Repository>,
+}
+
+impl BypassCacheRepository {
+    /// Wraps the repository used for history and persistence cleanup.
+    pub fn new(inner: Arc<dyn Repository>) -> Self {
+        Self { inner }
+    }
+}
+
+impl Repository for BypassCacheRepository {
+    fn lookup<'a>(
+        &'a self,
+        fens: &'a [String],
+        _: Mode,
+        _: u32,
+        _: u32,
+    ) -> Task<'a, Result<Vec<Option<RawPosition>>>> {
+        Box::pin(async move { Ok(vec![None; fens.len()]) })
+    }
+
+    fn put<'a>(&'a self, _: &'a [RawPosition], _: Mode, _: u32, _: u32) -> Task<'a, Result<()>> {
+        Box::pin(async { Ok(()) })
+    }
+
+    fn save<'a>(
+        &'a self,
+        config: &'a ReviewConfig,
+        review: &'a ReviewResult,
+    ) -> Task<'a, Result<()>> {
+        self.inner.save(config, review)
+    }
+
+    fn drain(&self) -> Task<'_, ()> {
+        self.inner.drain()
     }
 }

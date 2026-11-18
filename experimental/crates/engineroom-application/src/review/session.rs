@@ -54,9 +54,9 @@ impl Session {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum SchedulerMode {
     /// Runs the review pipeline to completion before serving live board requests.
-    #[default]
     Pipeline,
     /// Shares the native automatic worker pool and session coverage with live navigation.
+    #[default]
     Native,
 }
 
@@ -78,7 +78,7 @@ pub struct Resources {
     pub memory_mb: u32,
 }
 impl ReviewSessions {
-    /// Creates a registry with shared engine and persistence ports using the default pipeline.
+    /// Creates a registry with shared engine and persistence ports using the default native scheduler.
     pub fn new(
         factory: Arc<dyn EngineFactory>,
         repository: Arc<dyn Repository>,
@@ -89,7 +89,7 @@ impl ReviewSessions {
             factory,
             repository,
             resources,
-            scheduler: SchedulerMode::Pipeline,
+            scheduler: SchedulerMode::default(),
             exiting: AtomicBool::new(false),
         }
     }

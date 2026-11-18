@@ -2,7 +2,7 @@
 use engineroom_backend::review::{
     engine::EngineFactory,
     native_engine::NativeEngineFactory,
-    repository::{Repository, SqliteRepository},
+    repository::{BypassCacheRepository, CacheMode, Repository, SqliteRepository},
     session::{Resources, ReviewSessions, SchedulerMode},
     types::{Envelope, LiveRequest, LiveSettings, ReviewConfig, ReviewError},
 };
@@ -112,6 +112,14 @@ pub struct Bridge {
 }
 impl Bridge {
     pub fn new_with_scheduler(wake: rune::Waker, scheduler: SchedulerMode) -> Result<Self, String> {
+        Self::new_with_modes(wake, scheduler, CacheMode::Enabled)
+    }
+
+    pub fn new_with_modes(
+        wake: rune::Waker,
+        scheduler: SchedulerMode,
+        cache: CacheMode,
+    ) -> Result<Self, String> {
         // A missing engine must not disable storage, history, file and Chess.com
         // imports: the acquisition error is reported only when a review starts.
         let engine = engine_path();
@@ -125,7 +133,10 @@ impl Bridge {
             Arc::new(engineroom_backend::imports::ChessComHttp::new().map_err(|e| e.to_string())?);
         Self::with_data_ports(
             Arc::new(NativeEngineFactory::new(engine)),
-            repository.clone(),
+            match cache {
+                CacheMode::Enabled => repository.clone(),
+                CacheMode::Bypass => Arc::new(BypassCacheRepository::new(repository.clone())),
+            },
             Some(repository),
             Arc::new(move || (wake)()),
             http,
@@ -146,7 +157,7 @@ impl Bridge {
         repository: Arc<dyn Repository>,
         wake: Arc<dyn Fn() + Send + Sync>,
     ) -> Result<Self, String> {
-        Self::with_ports_and_scheduler(factory, repository, None, SchedulerMode::Pipeline, wake)
+        Self::with_ports_and_scheduler(factory, repository, None, SchedulerMode::default(), wake)
     }
 
     #[cfg(test)]
@@ -563,7 +574,7 @@ impl Bridge {
 }
 /// Resolves the review scheduler mode from CLI arguments or `ENGINE_ROOM_SCHEDULER`.
 ///
-/// Keeps [`SchedulerMode::Pipeline`] as the default unless explicitly opted in.
+/// Uses [`SchedulerMode::Native`] when no mode is selected.
 pub fn resolve_scheduler_mode() -> Result<SchedulerMode, String> {
     let env = match std::env::var_os("ENGINE_ROOM_SCHEDULER") {
         Some(value) => Some(
@@ -606,7 +617,7 @@ pub(crate) fn parse_scheduler_mode<'a>(
         return Ok(mode);
     }
     match env.map(str::trim).filter(|value| !value.is_empty()) {
-        None => Ok(SchedulerMode::Pipeline),
+        None => Ok(SchedulerMode::default()),
         Some(value) => parse_scheduler_label(value, "ENGINE_ROOM_SCHEDULER"),
     }
 }
@@ -619,6 +630,54 @@ fn parse_scheduler_label(value: &str, source: &str) -> Result<SchedulerMode, Str
     } else {
         Err(format!(
             "Modo de agendador inválido em {source}: '{value}' (use 'pipeline' ou 'native')."
+        ))
+    }
+}
+
+/// Resolves the position cache mode with CLI options taking precedence.
+pub fn resolve_cache_mode() -> Result<CacheMode, String> {
+    let env = std::env::var("ENGINE_ROOM_CACHE");
+    let env = match &env {
+        Ok(value) => Some(value.as_str()),
+        Err(std::env::VarError::NotPresent) => None,
+        Err(std::env::VarError::NotUnicode(_)) => {
+            return Err("ENGINE_ROOM_CACHE não é UTF-8 válido.".into());
+        }
+    };
+    parse_cache_mode(rune::extra_args().iter().map(String::as_str), env)
+}
+
+fn parse_cache_mode<'a>(
+    args: impl IntoIterator<Item = &'a str>,
+    env: Option<&str>,
+) -> Result<CacheMode, String> {
+    let mut cli = None;
+    let mut args = args.into_iter();
+    while let Some(arg) = args.next() {
+        if arg == "--cache" {
+            let value = args.next().ok_or("Valor ausente para --cache.")?;
+            cli = Some(parse_cache_label(value, "--cache")?);
+        } else if let Some(value) = arg.strip_prefix("--cache=") {
+            cli = Some(parse_cache_label(value, "--cache")?);
+        }
+    }
+    if let Some(mode) = cli {
+        return Ok(mode);
+    }
+    match env.map(str::trim).filter(|value| !value.is_empty()) {
+        None => Ok(CacheMode::default()),
+        Some(value) => parse_cache_label(value, "ENGINE_ROOM_CACHE"),
+    }
+}
+
+fn parse_cache_label(value: &str, source: &str) -> Result<CacheMode, String> {
+    if value.eq_ignore_ascii_case("on") {
+        Ok(CacheMode::Enabled)
+    } else if value.eq_ignore_ascii_case("off") {
+        Ok(CacheMode::Bypass)
+    } else {
+        Err(format!(
+            "Modo de cache inválido em {source}: '{value}' (use 'on' ou 'off')."
         ))
     }
 }
