@@ -31,3 +31,65 @@ for scene, selected in [('home-light', 'home-nav'), ('configure', 'home-nav'),
         if selected:
             assert 'selected' in nodes[selected].get('states', []), path.name
         print(f'{path.stem}: sidebar semantics OK')
+
+# Named folders and the move menu are presentation-only sidebar affordances.
+for scene in ('sessions-colors', 'sessions-grouped', 'sessions-grouped-light', 'sessions-menu'):
+    path = artifacts / f'{scene}.json'
+    tree = json.loads(path.read_text())
+    assert not tree['warnings'], (path.name, tree['warnings'])
+    all_nodes = list(walk(tree['accessibility']))
+    assert not any(node.get('name') == 'SEM PASTA' for node in all_nodes), path.name
+    nodes = {n.get('key'): n for n in all_nodes if n.get('key')}
+    if scene != 'sessions-menu':
+        assert 'session-1' in nodes and 'close-session-1' in nodes, path.name
+        assert 'context-menu' in nodes['session-1'].get('actions', []), path.name
+        assert 'Pasta: ' in nodes['session-1'].get('name', ''), path.name
+    if scene in ('sessions-grouped', 'sessions-grouped-light'):
+        groups = ('session-folder-fixture-blue', 'session-folder-fixture-amber', 'session-unfiled') if scene == 'sessions-grouped' else ('session-folder-fixture-green', 'session-folder-fixture-violet')
+        for key in groups:
+            assert key in nodes, (path.name, key)
+        names = ('Aberturas', 'Torneios') if scene == 'sessions-grouped' else ('Finais', 'Estudos')
+        for name in names:
+            assert any(n.get('name') == name for n in all_nodes), (path.name, name)
+    if scene == 'sessions-menu':
+        element_keys = {e.get('key') for e in tree['elements']}
+        assert 'session-1' in element_keys and 'close-session-1' in element_keys, path.name
+        assert 'session-menu-1-menu' in element_keys, path.name
+        menu_labels = ('Aberturas', 'Sem pasta', 'Nova pasta…', 'Fechar sessão')
+        for name in menu_labels:
+            assert any(n.get('name') == name for n in all_nodes), (path.name, name)
+        label_x = {
+            e['text']: e['rect'][0] for e in tree['elements']
+            if e.get('text') in menu_labels and e['path'].endswith('/content/label')
+        }
+        assert len(label_x) == len(menu_labels) and len(set(label_x.values())) == 1, label_x
+        checked = [n for n in all_nodes if 'checked' in n.get('states', [])]
+        assert any(n.get('name') == 'Aberturas' for n in checked), path.name
+    print(f'{scene}: presentation semantics OK')
+
+editor = json.loads((artifacts / 'folder-editor.json').read_text())
+assert not editor['warnings'], editor['warnings']
+keys = {node.get('key') for node in walk(editor['accessibility'])}
+assert 'folder-name' in keys and 'save-folder' in keys
+print('folder-editor: semantics OK')
+
+folder_menu = json.loads((artifacts / 'folder-menu.json').read_text())
+assert not folder_menu['warnings'], folder_menu['warnings']
+menu_nodes = list(walk(folder_menu['accessibility']))
+for name in ('Editar pasta…', 'Excluir pasta'):
+    assert any(node.get('name') == name for node in menu_nodes), name
+print('folder-menu: semantics OK')
+
+drag = json.loads((artifacts / 'sessions-drag.json').read_text())
+assert not drag['warnings'], drag['warnings']
+assert any(element.get('key') == 'session-drag-preview' for element in drag['elements'])
+assert any(node.get('name') == 'Solte aqui para deixar fora de pastas' for node in walk(drag['accessibility']))
+print('sessions-drag: destination and preview OK')
+
+# The committed sidebar reference screenshots must survive merges intact.
+screenshots = artifacts.parent / 'docs' / 'sidebar-screenshots'
+for name in ('folder-editor', 'folder-reorder', 'folders-dark', 'folders-light',
+             'session-menu', 'session-reorder'):
+    image = screenshots / f'{name}.png'
+    assert image.read_bytes().startswith(b'\x89PNG\r\n\x1a\n'), image.name
+print('sidebar-screenshots: committed PNG assets OK')

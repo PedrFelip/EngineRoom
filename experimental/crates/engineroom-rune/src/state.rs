@@ -2,11 +2,13 @@
 use crate::{
     game::{self, Game},
     review_data,
+    session_style::SessionPresentation,
     variation::Variation,
 };
-use rune::TextEdit;
+use rune::{PointerPress, TextEdit};
 use rune_kit::shell::PaneState;
 use shakmaty::{Chess, Position, Role, Square};
+use std::collections::BTreeMap;
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Page {
     #[default]
@@ -75,6 +77,8 @@ pub struct Preferences {
     pub search_seconds: usize,
     pub threads_auto: bool,
     pub chess_username: String,
+    #[serde(default)]
+    pub sessions: SessionPresentation,
 }
 impl Default for Preferences {
     fn default() -> Self {
@@ -91,12 +95,13 @@ impl Default for Preferences {
             search_seconds: 3,
             threads_auto: true,
             chess_username: String::new(),
+            sessions: SessionPresentation::default(),
         }
     }
 }
 #[path = "workspace.rs"]
 mod workspace;
-pub(crate) use workspace::WorkspaceReview;
+pub(crate) use workspace::{RenderStatus, WorkspaceReview};
 
 #[derive(Clone, Debug, PartialEq)]
 enum HistoryOperation {
@@ -109,6 +114,15 @@ pub struct State {
     avatars: Option<crate::avatar::Avatars>,
     pub workspace: Vec<WorkspaceReview>,
     pub active_workspace: Option<u64>,
+    /// Complete visual order for each folder whose sessions have been reordered.
+    /// Moves and closes update these lists alongside workspace membership.
+    pub session_order: BTreeMap<String, Vec<u64>>,
+    pub session_drag: Option<crate::session_style::SessionDrag>,
+    pub folder_menu: Option<(String, PointerPress)>,
+    pub folder_editor: Option<crate::session_style::FolderEditor>,
+    pub folder_name: TextEdit,
+    /// Secondary-press target for the sidebar's context menu: session key and anchor point.
+    pub session_menu: Option<(u64, PointerPress)>,
     next_workspace_key: u64,
     preference_store: Option<crate::preferences::Store>,
     preference_saved: Option<Preferences>,
@@ -192,6 +206,12 @@ impl Default for State {
             avatars: None,
             workspace: Vec::new(),
             active_workspace: None,
+            session_order: BTreeMap::new(),
+            session_drag: None,
+            folder_menu: None,
+            folder_editor: None,
+            folder_name: TextEdit::new(""),
+            session_menu: None,
             next_workspace_key: 0,
             preference_store: None,
             preference_saved: None,
@@ -647,28 +667,7 @@ impl State {
                 BridgeLifecycle::Error { id, error, origin }
                     if self.session.id() == Some(id.as_str()) =>
                 {
-                    use crate::bridge::LifecycleOrigin;
-                    use engineroom_backend::review::types::ReviewErrorCode;
-                    // A live request (settings validation, a stale cancel, ...) can
-                    // fail while the session itself is still running. Closing the
-                    // phase here would make every later valid request fail
-                    // sync_live's phase guard. Only a genuine SessionClosed or a
-                    // failed Open means the session is actually gone; keeping that
-                    // check by error code avoids hiding a real closure behind the
-                    // origin heuristic, and no retry is enqueued here.
-                    let recoverable_live =
-                        matches!(origin, LifecycleOrigin::Analyze | LifecycleOrigin::Cancel)
-                            && error.code != ReviewErrorCode::SessionClosed;
-                    if !recoverable_live {
-                        self.session.closed(&id);
-                    }
-                    self.bridge_error = Some(error.to_string());
-                    self.real_progress = None;
-                    self.live_running = false;
-                    self.playing = false;
-                    if recoverable_live {
-                        self.live_error = Some(error.to_string());
-                    }
+                    self.handle_lifecycle_error(&id, &error, origin);
                 }
                 BridgeLifecycle::Error { .. } => continue,
             }
@@ -731,7 +730,6 @@ impl State {
     }
     fn sync_live(&mut self) {
         use engineroom_backend::review::types::{LiveRequest, LiveSettings};
-        use shakmaty::{EnPassantMode, fen::Fen};
         let Some(id) = self.session.id().map(str::to_owned) else {
             return;
         };
@@ -741,13 +739,11 @@ impl State {
         ) {
             return;
         }
-        let fen = Fen::from_position(self.position(), EnPassantMode::Legal).to_string();
+        let fen = self.current_fen().to_owned();
         let node_id = self.variation_node_id();
         let source_fen = self.active_variation.and_then(|i| {
             let v = &self.variations[i];
-            v.cursor
-                .checked_sub(1)
-                .map(|j| engineroom_backend::review::core::fen(&v.positions[j]))
+            v.cursor.checked_sub(1).map(|j| v.fen_at(j).to_owned())
         });
         let source_analysis = source_fen
             .as_deref()
@@ -812,6 +808,34 @@ impl State {
             *key = format!("{prefix}:false");
         }
         self.live_error = Some(error);
+    }
+    /// Applies a bridge lifecycle failure to the typed UI state.
+    ///
+    /// Analyze/Cancel failures are recoverable live requests: the review session
+    /// and its completed result stay intact, and the error goes to the live-error
+    /// state instead of `bridge_error` (which drives the fatal banner and the
+    /// sidebar "Erro" badge). A genuine `SessionClosed` or any other origin still
+    /// ends the session and surfaces the fatal error.
+    fn handle_lifecycle_error(
+        &mut self,
+        id: &str,
+        error: &engineroom_backend::review::types::ReviewError,
+        origin: crate::bridge::LifecycleOrigin,
+    ) {
+        use engineroom_backend::review::types::ReviewErrorCode;
+        let recoverable_live = matches!(
+            origin,
+            crate::bridge::LifecycleOrigin::Analyze | crate::bridge::LifecycleOrigin::Cancel
+        ) && error.code != ReviewErrorCode::SessionClosed;
+        if recoverable_live {
+            self.stop_live_with_error(error.to_string());
+            return;
+        }
+        self.session.closed(id);
+        self.bridge_error = Some(error.to_string());
+        self.real_progress = None;
+        self.live_running = false;
+        self.playing = false;
     }
     pub fn classification(&self, ply: usize) -> Option<review_data::Classification> {
         if ply == 0 {
@@ -899,6 +923,10 @@ impl State {
         }
     }
     pub fn navigate(&mut self, page: Page) {
+        self.session_drag = None;
+        self.session_menu = None;
+        self.folder_editor = None;
+        self.folder_menu = None;
         self.invalidate_history_load();
         if page == Page::Home && self.page != Page::Home {
             self.park_review();
@@ -1353,7 +1381,14 @@ impl State {
     pub fn position(&self) -> &Chess {
         match self.active_variation {
             Some(i) => self.variations[i].position(),
-            None => &self.game.positions[self.ply],
+            None => &self.game.positions()[self.ply],
+        }
+    }
+    /// FEN of the current position from the flat mainline/variation arrays.
+    pub(crate) fn current_fen(&self) -> &str {
+        match self.active_variation {
+            Some(i) => self.variations[i].fen(),
+            None => self.game.fen(self.ply),
         }
     }
     pub fn visible_variation_cursor(&self) -> Option<(usize, usize)> {
@@ -1386,7 +1421,7 @@ impl State {
                     .parse::<shakmaty::san::SanPlus>()
                     .ok()?
                     .san
-                    .to_move(&self.game.positions[i])
+                    .to_move(&self.game.positions()[i])
                     .ok()
             })
             .map(review_data::squares)
@@ -1401,8 +1436,8 @@ impl State {
             "{}:{}:{}:{}",
             i,
             variation.cursor,
-            engineroom_backend::review::core::fen(&variation.positions[variation.cursor - 1]),
-            engineroom_backend::review::core::fen(variation.position())
+            variation.fen_at(variation.cursor - 1),
+            variation.fen()
         ))
     }
     fn apply_variation_classification(
@@ -1455,9 +1490,9 @@ impl State {
     pub fn position_analysis(
         &self,
     ) -> Option<&engineroom_backend::review::types::PositionAnalysis> {
-        let fen = engineroom_backend::review::core::fen(self.position());
-        let original = self.original_analysis(&fen, self.current_mainline_ply());
-        match (original, self.live_positions.get(&fen)) {
+        let fen = self.current_fen();
+        let original = self.original_analysis(fen, self.current_mainline_ply());
+        match (original, self.live_positions.get(fen)) {
             (Some(a), Some(b)) => Some(if prefer_incoming(a, b) { b } else { a }),
             (Some(a), None) => Some(a),
             (None, live) => live,
@@ -1479,9 +1514,9 @@ impl State {
         }
     }
     fn candidate_analysis(&self) -> Option<&engineroom_backend::review::types::PositionAnalysis> {
-        let fen = engineroom_backend::review::core::fen(self.position());
-        let original = self.original_analysis(&fen, self.current_mainline_ply());
-        let live = self.live_positions.get(&fen);
+        let fen = self.current_fen();
+        let original = self.original_analysis(fen, self.current_mainline_ply());
+        let live = self.live_positions.get(fen);
         match (original, live) {
             (Some(a), Some(b)) if (b.lines.len(), b.depth) > (a.lines.len(), a.depth) => Some(b),
             (Some(a), _) => Some(a),
@@ -1692,8 +1727,8 @@ impl State {
             .is_some_and(|class| class.critical())
             && match self.learning_side {
                 LearningSide::All => true,
-                LearningSide::White => self.game.positions[ply - 1].turn().is_white(),
-                LearningSide::Black => self.game.positions[ply - 1].turn().is_black(),
+                LearningSide::White => self.game.positions()[ply - 1].turn().is_white(),
+                LearningSide::Black => self.game.positions()[ply - 1].turn().is_black(),
             }
     }
     pub fn next_critical(&mut self) {
@@ -1802,7 +1837,8 @@ mod council_regressions {
     #[test]
     fn mainline_repeated_fen_uses_its_ply_and_live_candidate_policy() {
         let mut state = State::fixture();
-        state.game.positions[1] = state.game.positions[0].clone();
+        let initial = state.game.positions()[0].clone();
+        state.game.replace_position(1, initial);
         let positions = &mut state.real_result.as_mut().unwrap().positions;
         positions[1].fen = positions[0].fen.clone();
         positions[0].cp = 10;
@@ -1973,6 +2009,42 @@ mod council_regressions {
         state.apply_history_load(latest, Ok(Some(Box::new(config))), false);
         assert_eq!(state.page, Page::Settings);
         assert_eq!(state.workspace.len(), 2);
+    }
+    #[test]
+    fn cached_fen_matches_serialized_position_across_mainline_and_variations() {
+        let mut state = State::fixture();
+        for ply in 0..=state.game.moves.len() {
+            state.go_to(ply);
+            assert_eq!(
+                state.current_fen(),
+                engineroom_backend::review::core::fen(state.position()),
+                "mainline ply {ply}"
+            );
+        }
+        state.go_to(1);
+        state.explore_candidate();
+        let index = state.active_variation.expect("fixture has a candidate");
+        for cursor in 0..state.variations[index].moves.len() {
+            state.variations[index].cursor = cursor;
+            assert_eq!(
+                state.current_fen(),
+                engineroom_backend::review::core::fen(state.position()),
+                "variation cursor {cursor}"
+            );
+        }
+        let mut setup = State::fixture();
+        setup.game = crate::game::parse(
+            "[SetUp \"1\"]\n[FEN \"7k/P7/8/8/8/8/4K3/8 w - - 0 1\"]\n\n1. a8=Q+ *",
+        )
+        .expect("FEN setup PGN");
+        for ply in 0..=setup.game.moves.len() {
+            setup.go_to(ply);
+            assert_eq!(
+                setup.current_fen(),
+                engineroom_backend::review::core::fen(setup.position()),
+                "FEN setup ply {ply}"
+            );
+        }
     }
 }
 

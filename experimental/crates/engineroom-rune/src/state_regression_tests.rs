@@ -1,6 +1,6 @@
 use super::{Appearance, HistoryOperation, ImportSource, State};
 use std::{
-    sync::Arc,
+    sync::{Arc, mpsc},
     time::{Duration, Instant},
 };
 
@@ -100,11 +100,11 @@ fn history_retry_keeps_the_failed_operation_and_cursor() {
     assert_eq!(state.history_operation, Some(HistoryOperation::List));
 }
 
-/// A live request whose settings fail validation is recoverable: the session is
-/// still running and a later, valid request must be accepted. The lifecycle error
-/// must not tear the session down.
+/// A live Analyze/Cancel failure is recoverable: it must surface through the
+/// live-error state without showing the fatal banner (or the sidebar "Erro"
+/// badge) or closing a healthy session, and the completed result stays usable.
 #[test]
-fn recoverable_live_settings_error_keeps_session_for_next_request() {
+fn recoverable_live_error_keeps_session_banner_and_results() {
     let (bridge, wake) = crate::bridge::tests::bridge(
         Arc::new(crate::bridge::tests::NoEngine),
         Arc::new(crate::bridge::tests::MemoryRepo::default()),
@@ -134,24 +134,34 @@ fn recoverable_live_settings_error_keeps_session_for_next_request() {
         crate::review_session::Phase::Running,
         "fixture session should be running"
     );
+    let progress = state.real_progress;
 
     // Invalid live settings make analyze_position reject the request. The bridge
     // reports that failure as a lifecycle Error while the session is still alive.
     state.preferences.lines = 0;
     let deadline = Instant::now() + Duration::from_secs(5);
-    while Instant::now() < deadline && state.bridge_error.is_none() {
+    while Instant::now() < deadline && state.live_error.is_none() {
         state.poll_bridge();
         let _ = wake.recv_timeout(Duration::from_millis(20));
     }
     assert!(
-        state.bridge_error.is_some(),
-        "invalid live settings should surface a recoverable error"
+        state.live_error.is_some(),
+        "invalid live settings should surface as a live error"
+    );
+    assert!(
+        state.bridge_error.is_none(),
+        "a recoverable live error must not show the fatal banner"
     );
     assert_eq!(
         state.session.phase,
         crate::review_session::Phase::Running,
-        "a recoverable live settings error must not close the session"
+        "a recoverable live error must not close the session"
     );
+    assert_eq!(
+        state.real_progress, progress,
+        "a recoverable live error must keep the review result"
+    );
+    assert!(state.real_result.is_some());
 
     // Correcting the settings changes the live key, so the next poll submits a
     // fresh request. With the failing engine it produces a live error; the point
@@ -167,6 +177,37 @@ fn recoverable_live_settings_error_keeps_session_for_next_request() {
         state.live_error.is_some(),
         "a valid live request after the recoverable error must be submitted"
     );
+    assert!(state.bridge_error.is_none());
+}
+
+/// SessionClosed (even with a live origin) and fatal origins still end the
+/// session and surface the fatal error instead of the live-error state.
+#[test]
+fn fatal_and_session_closed_lifecycle_errors_still_close_the_session() {
+    use crate::bridge::LifecycleOrigin;
+    use engineroom_backend::review::types::{ReviewError, ReviewErrorCode};
+
+    for (origin, code) in [
+        (LifecycleOrigin::Analyze, ReviewErrorCode::SessionClosed),
+        (LifecycleOrigin::Cancel, ReviewErrorCode::SessionClosed),
+        (LifecycleOrigin::Open, ReviewErrorCode::EngineSpawn),
+    ] {
+        let mut state = State::default();
+        state.session.open("live".into());
+        state.session.acquired("live");
+        state.real_progress = Some((1, 9));
+        state.live_key = Some("fen:None:1:true".into());
+        let error = ReviewError::new(code, "analyze", "fatal");
+        state.handle_lifecycle_error("live", &error, origin);
+        assert_eq!(
+            state.session.phase,
+            crate::review_session::Phase::Closed,
+            "{origin:?}/{code:?} must close the session"
+        );
+        assert!(state.bridge_error.is_some());
+        assert_eq!(state.real_progress, None);
+        assert!(state.live_error.is_none());
+    }
 }
 
 /// The preference checkpoint advances on the worker's saved-snapshot ACK, not at
@@ -174,10 +215,7 @@ fn recoverable_live_settings_error_keeps_session_for_next_request() {
 /// re-enqueueing (which would spin).
 #[test]
 fn preference_checkpoint_advances_only_on_ack_without_ui_retry_loop() {
-    use std::sync::{
-        Arc,
-        atomic::{AtomicUsize, Ordering},
-    };
+    use std::sync::atomic::{AtomicUsize, Ordering};
     let path = std::env::temp_dir().join(format!(
         "engineroom-pref-state-{}-{}.json",
         std::process::id(),
@@ -188,12 +226,17 @@ fn preference_checkpoint_advances_only_on_ack_without_ui_retry_loop() {
     ));
     let attempts = Arc::new(AtomicUsize::new(0));
     let seen = attempts.clone();
+    let (wake_tx, wake_rx) = mpsc::channel();
     let (store, initial) = crate::preferences::Store::open_with(
         path.clone(),
-        || {},
+        move || {
+            let _ = wake_tx.send(());
+        },
         move |p, preferences| {
             if seen.fetch_add(1, Ordering::SeqCst) == 0 {
-                Err("falha transitória".into())
+                Err(crate::preferences::WriteError::transient(
+                    "falha transitória",
+                ))
             } else {
                 crate::preferences::write(p, preferences)
             }
@@ -221,14 +264,10 @@ fn preference_checkpoint_advances_only_on_ack_without_ui_retry_loop() {
     assert_eq!(state.preference_queued.as_ref(), Some(&desired));
 
     // The worker fails once, then retries the same snapshot and acknowledges it.
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while Instant::now() < deadline && state.preference_saved.as_ref() != Some(&desired) {
-        let before = state.preference_saved.clone();
-        state.poll_preferences();
-        if state.preference_saved == before {
-            std::thread::sleep(Duration::from_millis(5));
-        }
-    }
+    wake_rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("worker wake");
+    state.poll_preferences();
     assert_eq!(state.preference_saved.as_ref(), Some(&desired));
     assert_eq!(state.preference_error, None);
     assert_eq!(state.preference_queued, None);
@@ -285,4 +324,38 @@ fn reverting_preferences_while_a_save_is_pending_persists_the_latest_value() {
         Some(&original),
         "last snapshot on disk must match the UI"
     );
+}
+
+#[test]
+fn new_and_history_reviews_start_unfiled_without_changing_existing_sessions() {
+    use crate::{session_style::SessionColor, state::Page};
+    let mut state = State::fixture();
+    let first = state.workspace[0].key;
+    let config = state.workspace[0].config.clone();
+    crate::fixtures::file_session(&mut state, first, SessionColor::Blue);
+    state.navigate(Page::Home);
+    state.pgn.replace_text(&config.pgn);
+    state.prepare();
+    state.start_review();
+    assert!(
+        state
+            .session_folder(state.active_workspace.unwrap())
+            .is_none()
+    );
+    assert_eq!(state.session_folder(first).unwrap().id, "fixture-blue");
+    for reanalyze in [false, true] {
+        state.navigate(Page::History);
+        state.history_open(7, reanalyze);
+        state.apply_history_load(
+            state.history_load_id,
+            Ok(Some(Box::new(config.clone()))),
+            reanalyze,
+        );
+        assert!(
+            state
+                .session_folder(state.active_workspace.unwrap())
+                .is_none()
+        );
+        assert_eq!(state.session_folder(first).unwrap().id, "fixture-blue");
+    }
 }

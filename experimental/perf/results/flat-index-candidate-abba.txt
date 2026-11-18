@@ -1,0 +1,40 @@
+--- candidate run 1 ---
+scale=1
+uci: iters=1500 total_ms=114.144 ns_per_op=76095.9 allocs=1032001 bytes=28114564
+targets: iters=8000 total_ms=504.816 ns_per_op=63102.0 allocs=144000 bytes=110336000
+--- baseline interleave 1 ---
+scale=1
+uci: iters=1500 total_ms=119.490 ns_per_op=79659.7 allocs=1032001 bytes=28954564
+targets: iters=8000 total_ms=601.546 ns_per_op=75193.3 allocs=192000 bytes=85632000
+--- candidate run 2 ---
+scale=1
+uci: iters=1500 total_ms=113.416 ns_per_op=75610.4 allocs=1032001 bytes=28114564
+targets: iters=8000 total_ms=487.770 ns_per_op=60971.3 allocs=144000 bytes=110336000
+--- baseline interleave 2 ---
+scale=1
+uci: iters=1500 total_ms=119.454 ns_per_op=79635.7 allocs=1032001 bytes=28954564
+targets: iters=8000 total_ms=604.346 ns_per_op=75543.2 allocs=192000 bytes=85632000
+--- candidate run 3 ---
+scale=1
+uci: iters=1500 total_ms=116.459 ns_per_op=77639.4 allocs=1032001 bytes=28114564
+targets: iters=8000 total_ms=486.584 ns_per_op=60822.9 allocs=144000 bytes=110336000
+--- baseline interleave 3 ---
+scale=1
+uci: iters=1500 total_ms=118.887 ns_per_op=79257.8 allocs=1032001 bytes=28954564
+targets: iters=8000 total_ms=598.228 ns_per_op=74778.5 allocs=192000 bytes=85632000
+--- candidate run 4 ---
+scale=1
+uci: iters=1500 total_ms=114.769 ns_per_op=76512.6 allocs=1032001 bytes=28114564
+targets: iters=8000 total_ms=486.139 ns_per_op=60767.4 allocs=144000 bytes=110336000
+--- baseline interleave 4 ---
+scale=1
+uci: iters=1500 total_ms=119.359 ns_per_op=79572.5 allocs=1032001 bytes=28954564
+targets: iters=8000 total_ms=606.120 ns_per_op=75765.0 allocs=192000 bytes=85632000
+--- candidate run 5 ---
+scale=1
+uci: iters=1500 total_ms=113.138 ns_per_op=75425.2 allocs=1032001 bytes=28114564
+targets: iters=8000 total_ms=489.023 ns_per_op=61127.8 allocs=144000 bytes=110336000
+--- baseline interleave 5 ---
+scale=1
+uci: iters=1500 total_ms=118.795 ns_per_op=79196.5 allocs=1032001 bytes=28954564
+targets: iters=8000 total_ms=612.973 ns_per_op=76621.6 allocs=192000 bytes=85632000
