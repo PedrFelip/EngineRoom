@@ -12,8 +12,33 @@ use rune_kit::{
     TextInput, context_menu,
     shell::{Sidebar, SidebarRow, SidebarSection},
 };
+use std::sync::{Arc, LazyLock, mpsc};
 
 const SESSIONS_TITLE: &str = "SESSÕES ABERTAS";
+const LOGO_WIDTH: f32 = 116.0;
+const LOGO_HEIGHT: f32 = LOGO_WIDTH * 601.0 / 854.0;
+static DARK_LOGO: LazyLock<rune::Image> = LazyLock::new(|| {
+    decode_logo(include_bytes!(
+        "../../../../../docs/brand/engineroom-logo.svg"
+    ))
+});
+static LIGHT_LOGO: LazyLock<rune::Image> = LazyLock::new(|| {
+    decode_logo(include_bytes!(
+        "../../../../../docs/brand/engineroom-logo-light.svg"
+    ))
+});
+
+fn decode_logo(bytes: &'static [u8]) -> rune::Image {
+    let (ready, decoded) = mpsc::channel();
+    let cache = rune::ImageCache::new(Arc::new(move || {
+        let _ = ready.send(());
+    }));
+    let image = cache.svg(bytes, LOGO_WIDTH, 3.0);
+    // Rune wakes after publishing the pixels, so even the first headless frame has the logo.
+    decoded.recv().expect("EngineRoom logo decoder must finish");
+    image.wait().expect("embedded EngineRoom logo must decode");
+    image
+}
 
 /// The sidebar's context menu, mounted into the root layer stack by the caller. Every action
 /// clears the transient menu state; the kit restores focus to the trigger on close.
@@ -223,6 +248,7 @@ fn session_row(
 }
 
 fn sidebar(s: &State, k: &Kit, layers: &mut Vec<El>) -> El {
+    let logo = if k.dark { &DARK_LOGO } else { &LIGHT_LOGO };
     let nav = |page: Page, key: &str, title: &str, icon: &'static rune::Icon| {
         SidebarRow::new(title)
             .icon(icon)
@@ -241,27 +267,24 @@ fn sidebar(s: &State, k: &Kit, layers: &mut Vec<El>) -> El {
                 .window_drag()
                 .center_y()
                 .child(
-                    col()
-                        .grow(1.0)
-                        .min_w(0.0)
-                        .px(12.0)
-                        .py(12.0)
-                        .gap(4.0)
-                        .child(ui::label("EngineRoom", 19.0, k.c.text_base))
-                        .child(ui::label("REVISÃO DE XADREZ", 12.0, k.c.text_muted)),
+                    col().grow(1.0).min_w(0.0).px(12.0).py(12.0).child(
+                        el().key("sidebar-logo")
+                            .role("img")
+                            .label("EngineRoom")
+                            .w(LOGO_WIDTH)
+                            .h(LOGO_HEIGHT)
+                            .pixels_fit(logo.pixels(), rune::SurfaceFit::Fit),
+                    ),
                 )
                 .child(toggle(true, k)),
         )
-        .section(
-            SidebarSection::new("ESPAÇO DE TRABALHO")
-                .row(nav(Page::Home, "home-nav", "Nova revisão", &icons::PLUS))
-                .row(nav(
-                    Page::History,
-                    "history-nav",
-                    "Histórico",
-                    &icons::HISTORY,
-                )),
-        );
+        .child(nav(Page::Home, "home-nav", "Nova revisão", &icons::PLUS))
+        .child(nav(
+            Page::History,
+            "history-nav",
+            "Histórico",
+            &icons::HISTORY,
+        ));
     let empty_hint = || {
         ui::label("Importe uma partida para começar", 12.0, k.c.text_muted)
             .wrap()

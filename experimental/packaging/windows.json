@@ -26,11 +26,11 @@
     "nsis"
   ],
   "icons": [
-    "../app/src-tauri/icons/icon.ico"
+    "assets/icons/engineroom-rune.ico"
   ],
   "nsis": {
     "installMode": "currentUser",
-    "installerIcon": "../app/src-tauri/icons/icon.ico"
+    "installerIcon": "assets/icons/engineroom-rune.ico"
   },
   "name": "engineroom-rune"
 }

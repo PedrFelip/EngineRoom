@@ -1,3 +1,5 @@
+<div style="text-align: center;"><img src="docs/brand/engineroom-icon.svg" alt="Ícone do EngineRoom" width="80" height="80"></div>
+
 # EngineRoom
 
 Revise suas partidas de xadrez com **Stockfish 19**, direto no computador.
@@ -90,14 +92,14 @@ bun run tauri build
 **Rust cuida da revisão; React cuida da interface.** O aplicativo usa Tauri 2
 para conectar as duas partes.
 
-| Parte | Responsabilidade | Código |
-| --- | --- | --- |
-| Análise | PGN, regras de xadrez, classificação, acurácia, aberturas e seleção adaptativa | [`review/`](app/src-tauri/src/review/) |
-| Motor e sessões | Comunicação UCI com o Stockfish, fila de trabalho, análise ao vivo e encerramento dos processos | [`review/session/`](app/src-tauri/src/review/session/) |
-| Persistência | Cache de posições, histórico e migrações SQLite | [`db/`](app/src-tauri/src/db/) |
-| Importação online | API Chess.com, validação e buscas limitadas por janela | [`imports/`](app/src-tauri/src/imports/) e [`chess-com-import.ts`](app/src/lib/chess-com-import.ts) |
-| Integração frontend | IPC com Effect, validação de eventos e ciclo de vida da sessão | [`review-session.ts`](app/src/lib/review-session.ts) e [`review-protocol.ts`](app/src/lib/review-protocol.ts) |
-| Estado da revisão | Navegação e variações no tabuleiro | [`review-store.ts`](app/src/lib/review-store.ts) |
+| Parte               | Responsabilidade                                                                                | Código                                                                                                        |
+| ------------------- | ----------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| Análise             | PGN, regras de xadrez, classificação, acurácia, aberturas e seleção adaptativa                  | [`review/`](app/src-tauri/src/review/)                                                                        |
+| Motor e sessões     | Comunicação UCI com o Stockfish, fila de trabalho, análise ao vivo e encerramento dos processos | [`review/session/`](app/src-tauri/src/review/session/)                                                        |
+| Persistência        | Cache de posições, histórico e migrações SQLite                                                 | [`db/`](app/src-tauri/src/db/)                                                                                |
+| Importação online   | API Chess.com, validação e buscas limitadas por janela                                          | [`imports/`](app/src-tauri/src/imports/) e [`chess-com-import.ts`](app/src/lib/chess-com-import.ts)           |
+| Integração frontend | IPC com Effect, validação de eventos e ciclo de vida da sessão                                  | [`review-session.ts`](app/src/lib/review-session.ts) e [`review-protocol.ts`](app/src/lib/review-protocol.ts) |
+| Estado da revisão   | Navegação e variações no tabuleiro                                                              | [`review-store.ts`](app/src/lib/review-store.ts)                                                              |
 
 O backend revalida o PGN e respeita posições iniciais definidas por FEN.
 A interface usa `chess.js` na prévia de importação e nas interações do
