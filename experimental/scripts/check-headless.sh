@@ -6,7 +6,7 @@ python3 scripts/test-headless-report.py
 cargo build --locked
 binary="target/debug/engineroom-rune"
 "$binary" --snap artifacts/home.png --tree artifacts/home.json --scale 1
-for scene in sessions home-file home-chesscom home-valid home-invalid home-light configure configure-deep manual review opening summary history settings settings-light settings-analysis settings-storage; do
+for scene in sessions sessions-colors sessions-grouped sessions-menu sessions-grouped-light sessions-drag folder-menu folder-editor home-file home-chesscom home-valid home-invalid home-light configure configure-deep manual review opening summary history settings settings-light settings-analysis settings-storage; do
   "$binary" --scene "$scene" --snap "artifacts/$scene.png" --tree "artifacts/$scene.json" --scale 1
 done
 "$binary" --scene review --script scripts/review.json --at 3.8 --snap artifacts/interaction.png --tree artifacts/interaction.json --scale 1

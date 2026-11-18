@@ -93,7 +93,7 @@ fn spawn(path: &PathBuf, permit: Arc<OwnedSemaphorePermit>) -> Result<NativeEngi
                     ),
                 )
             } else {
-                ReviewError::new(ReviewErrorCode::EngineSpawn, "engine.spawn", e)
+                ReviewError::with_source(ReviewErrorCode::EngineSpawn, "engine.spawn", e)
             }
         })?;
     let stdin = child.stdin.take().ok_or_else(|| {
@@ -136,11 +136,12 @@ impl EnginePort for NativeEngine {
             self.stdin
                 .write_all(command.as_bytes())
                 .await
-                .map_err(|e| ReviewError::new(ReviewErrorCode::EngineCommand, "engine.send", e))?;
-            self.stdin
-                .write_all(b"\n")
-                .await
-                .map_err(|e| ReviewError::new(ReviewErrorCode::EngineCommand, "engine.send", e))
+                .map_err(|e| {
+                    ReviewError::with_source(ReviewErrorCode::EngineCommand, "engine.send", e)
+                })?;
+            self.stdin.write_all(b"\n").await.map_err(|e| {
+                ReviewError::with_source(ReviewErrorCode::EngineCommand, "engine.send", e)
+            })
         })
     }
     fn next(&mut self) -> Task<'_, Result<String>> {
@@ -148,7 +149,9 @@ impl EnginePort for NativeEngine {
             self.lines
                 .next_line()
                 .await
-                .map_err(|e| ReviewError::new(ReviewErrorCode::EngineExited, "engine.read", e))?
+                .map_err(|e| {
+                    ReviewError::with_source(ReviewErrorCode::EngineExited, "engine.read", e)
+                })?
                 .ok_or_else(|| {
                     ReviewError::new(
                         ReviewErrorCode::EngineExited,
