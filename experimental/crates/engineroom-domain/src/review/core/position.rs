@@ -1,7 +1,9 @@
 //! FEN, terminal positions and SAN conversion.
 use super::invalid;
 use crate::review::types::*;
-use shakmaty::{CastlingMode, Chess, EnPassantMode, Position, fen::Fen, san, uci::UciMove};
+use shakmaty::{
+    Bitboard, CastlingMode, Chess, EnPassantMode, Position, fen::Fen, san, uci::UciMove,
+};
 
 pub fn position(fen: &str) -> Result<Chess> {
     let fen: Fen = fen
@@ -27,26 +29,17 @@ pub fn terminal_position(p: &Chess) -> Option<i32> {
 }
 // Match chess.js (same-color bishops only; K+NN is not automatically a draw).
 fn insufficient(p: &Chess) -> bool {
-    let pieces: Vec<_> = p
-        .board()
-        .iter()
-        .filter(|(_, piece)| piece.role != shakmaty::Role::King)
-        .collect();
-    if pieces.is_empty() {
-        return true;
+    let board = p.board();
+    let pieces = board.occupied() & !board.kings();
+    match pieces.count() {
+        0 => true,
+        1 => pieces.intersects(board.bishops() | board.knights()),
+        _ => {
+            pieces == board.bishops()
+                && (pieces.is_subset(Bitboard::LIGHT_SQUARES)
+                    || pieces.is_subset(Bitboard::DARK_SQUARES))
+        }
     }
-    if pieces.len() == 1 {
-        return matches!(
-            pieces[0].1.role,
-            shakmaty::Role::Bishop | shakmaty::Role::Knight
-        );
-    }
-    pieces
-        .iter()
-        .all(|(_, piece)| piece.role == shakmaty::Role::Bishop)
-        && pieces
-            .iter()
-            .all(|(s, _)| s.is_light() == pieces[0].0.is_light())
 }
 pub fn add_san(raw: &mut RawPosition) {
     let Ok(position) = position(&raw.fen) else {

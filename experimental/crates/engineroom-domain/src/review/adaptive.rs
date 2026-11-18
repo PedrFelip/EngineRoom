@@ -3,6 +3,7 @@ use super::{
     scoring::win_pct,
     types::*,
 };
+use fixedbitset::FixedBitSet;
 use shakmaty::{Chess, Color, Position, Role};
 use std::sync::LazyLock;
 #[derive(Debug, Clone, Copy, serde::Deserialize)]
@@ -323,46 +324,42 @@ pub fn targets(critical: &[Critical], count: usize, profile: Profile) -> Vec<Tar
 /// inside each position. Only selected decisions may open an optional sequence.
 pub fn review_targets(game: &Game, raw: &[RawPosition], profile: Profile) -> Vec<Target> {
     let positions = &game.positions;
-    let forcing: Vec<_> = game
-        .moves
-        .iter()
-        .enumerate()
-        .map(|(i, m)| {
+    let mut forcing = FixedBitSet::with_capacity(game.moves.len());
+    for (i, m) in game.moves.iter().enumerate() {
+        forcing.set(
+            i,
             m.san.contains('x')
                 || m.san.contains('+')
                 || m.san.contains('#')
                 || m.san.contains('=')
-                || (positions[i].is_check() || positions[i].legal_moves().len() == 1)
-        })
-        .collect();
+                || (positions[i].is_check() || positions[i].legal_moves().len() == 1),
+        );
+    }
     let unstable = |i: usize| (win_pct(raw[i].cp) - (100.0 - win_pct(raw[i + 1].cp))).abs() >= 2.0;
     let mut critical = rank(game, raw);
     let book = opening(&game.moves).map_or(0, |(n, _)| n);
-    let sacrifices: Vec<_> = game
-        .moves
-        .iter()
-        .enumerate()
-        .map(|(i, _)| {
-            if i + 2 >= positions.len() || i < book {
-                return false;
+    let mut sacrifices = FixedBitSet::with_capacity(game.moves.len());
+    for (i, candidate) in critical.iter_mut().enumerate().skip(book) {
+        if i + 2 >= positions.len() {
+            break;
+        }
+        let before = &positions[i];
+        let after = &positions[i + 2];
+        let color = before.turn();
+        // Material surrendered over the reply with evaluation compensation
+        // identifies a candidate sacrifice.
+        let is_sacrifice = material(before, color) - material(after, color) >= 300
+            && (material(before, color) - material(before, !color))
+                - (material(after, color) - material(after, !color))
+                >= 200
+            && win_pct(raw[i].cp) - win_pct(raw[i + 2].cp) <= 5.0
+            && game.moves[i + 1].san.contains('x');
+        if is_sacrifice {
+            sacrifices.insert(i);
+            if candidate.ply > book {
+                candidate.score = candidate.score.max(32);
+                candidate.reasons.push(Reason::Tactical);
             }
-            let before = &positions[i];
-            let after = &positions[i + 2];
-            let color = before.turn();
-            // Material surrendered over the reply with evaluation compensation is
-            // a candidate sacrifice, not a claim that the sacrifice is sound.
-            material(before, color) - material(after, color) >= 300
-                && (material(before, color) - material(before, !color))
-                    - (material(after, color) - material(after, !color))
-                    >= 200
-                && win_pct(raw[i].cp) - win_pct(raw[i + 2].cp) <= 5.0
-                && game.moves[i + 1].san.contains('x')
-        })
-        .collect();
-    for (i, candidate) in critical.iter_mut().enumerate() {
-        if sacrifices[i] && candidate.ply > book {
-            candidate.score = candidate.score.max(32);
-            candidate.reasons.push(Reason::Tactical);
         }
     }
     let mut selected = targets(&critical, raw.len(), profile);
@@ -375,7 +372,9 @@ pub fn review_targets(game: &Game, raw: &[RawPosition], profile: Profile) -> Vec
             let i = m.ply - 1;
             m.ply > book
                 && (m.hard || m.score >= 32)
-                && (forcing[i] || sacrifices[i] || m.reasons.contains(&Reason::Mate))
+                && (forcing.contains(i)
+                    || sacrifices.contains(i)
+                    || m.reasons.contains(&Reason::Mate))
                 && selected
                     .iter()
                     .any(|t| t.position_index == i && t.kind != RefinementKind::Context)
@@ -400,7 +399,7 @@ pub fn review_targets(game: &Game, raw: &[RawPosition], profile: Profile) -> Vec
                 break;
             }
             let next = if step % 2 == 0 && right_open || !left_open {
-                if right < game.moves.len() && (forcing[right] || unstable(right)) {
+                if right < game.moves.len() && (forcing.contains(right) || unstable(right)) {
                     right += 1;
                     Some(right)
                 } else {
@@ -408,7 +407,7 @@ pub fn review_targets(game: &Game, raw: &[RawPosition], profile: Profile) -> Vec
                     None
                 }
             } else {
-                if left > book && forcing[left - 1] {
+                if left > book && forcing.contains(left - 1) {
                     left -= 1;
                     Some(left)
                 } else {
