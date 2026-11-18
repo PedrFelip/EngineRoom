@@ -1,0 +1,82 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 376 376" role="img" aria-labelledby="title">
+  <title id="title">Ícone do EngineRoom</title>
+  <defs>
+    <linearGradient id="ivory" x2="0" y2="1">
+      <stop stop-color="#fff2db"/>
+      <stop offset="1" stop-color="#f5e6cb"/>
+    </linearGradient>
+    <linearGradient id="lens" x2=".25" y2="1">
+      <stop stop-color="#191613"/>
+      <stop offset="1" stop-color="#27221c"/>
+    </linearGradient>
+    <linearGradient id="board" x2="0" y2="1">
+      <stop stop-color="#34391d"/>
+      <stop offset="1" stop-color="#4b5429"/>
+    </linearGradient>
+    <linearGradient id="board-depth" x2="0" y2="1">
+      <stop stop-color="#2b2812" stop-opacity=".28"/>
+      <stop offset="1" stop-color="#2b2812" stop-opacity="0"/>
+    </linearGradient>
+    <clipPath id="lens-clip">
+      <ellipse cx="520" cy="402" rx="160" ry="157"/>
+    </clipPath>
+    <g id="emblem">
+      <rect id="handle" x="682" y="492" width="122" height="47" rx="19"
+            transform="rotate(42 682 492)" fill="url(#ivory)"/>
+      <ellipse id="lens-glass" cx="520" cy="402" rx="162" ry="159" fill="url(#lens)"/>
+      <g id="chessboard" clip-path="url(#lens-clip)">
+        <path id="board-ground" fill="url(#board)" d="M330 435h380v130H330z"/>
+        <g id="back-rank" fill="#cdb38a">
+          <path id="back-square-1" d="M333 435H380L329 468H265Z"/>
+          <path id="back-square-3" d="M427 435H474L457 468H393Z"/>
+          <path id="back-square-5" d="M521 435H568L585 468H521Z"/>
+          <path id="back-square-7" d="M615 435H662L713 468H649Z"/>
+        </g>
+        <g id="middle-rank" fill="#cdb38a">
+          <path id="middle-square-2" d="M329 468H393L349 510H263Z"/>
+          <path id="middle-square-4" d="M457 468H521L521 510H435Z"/>
+          <path id="middle-square-6" d="M585 468H649L693 510H607Z"/>
+          <path id="middle-square-8" d="M713 468H777L865 510H779Z"/>
+        </g>
+        <g id="front-rank" fill="#cdb38a">
+          <path id="front-square-1" d="M177 510H263L176 565H61Z"/>
+          <path id="front-square-3" d="M349 510H435L406 565H291Z"/>
+          <path id="front-square-5" d="M521 510H607L636 565H521Z"/>
+          <path id="front-square-7" d="M693 510H779L866 565H751Z"/>
+        </g>
+        <path id="board-shadow" d="M330 435h380v130H330z" fill="url(#board-depth)"/>
+      </g>
+      <g id="rook">
+        <path id="rook-shadow" fill="#171510"
+              d="M459 307h132l-1 35q-1 17-16 17h-9v18q0 31 13 59 8 5 8 17v6q11 5 11 17v23H443v-25q0-11 11-16v-7q0-13 15-15 13-28 13-64v-14h-11q-14 0-14-17z"/>
+        <g id="rook-ivory" fill="url(#ivory)">
+          <path id="crown" d="M457 301h28l.5 20H504v-20h36v20h18l1-20h27l-1 39q-1 12-13 12H470q-12 0-12-13z"/>
+          <path id="shaft" d="M482 360h78v15q0 35 12 63 8 4 8 15H457q-1-13 12-15 13-28 13-63z"/>
+          <path id="plinth" d="M455 462h123q12 0 12 13v16H443v-16q0-13 12-13z"/>
+        </g>
+        <g id="rook-shading" fill="#847453" opacity=".32">
+          <path id="crown-shade" d="M551 321h7l1-20h27l-1 39q-1 12-13 12h-26q4-10 5-31z"/>
+          <path id="shaft-shade" d="M523 360h37v15q0 35 12 63 8 4 8 15h-58v-13l14-3q-12-29-13-77z"/>
+          <path id="plinth-shade" d="M522 462h56q12 0 12 13v16h-68z"/>
+        </g>
+      </g>
+      <ellipse id="lens-rim" cx="520" cy="402" rx="171" ry="168" fill="none"
+               stroke="url(#ivory)" stroke-width="23"/>
+    </g>
+    <linearGradient id="tile" x2=".28" y2="1">
+      <stop stop-color="#373129"/>
+      <stop offset="1" stop-color="#26211c"/>
+    </linearGradient>
+    <linearGradient id="tile-rim" x2="0" y2="1">
+      <stop stop-color="#5c554c"/>
+      <stop offset="1" stop-color="#211c18"/>
+    </linearGradient>
+    <g id="app-icon">
+      <rect id="tile-shadow" x="11" y="16" width="354" height="351" rx="82" fill="#100e0c" opacity=".48"/>
+      <rect id="tile-face" x="11" y="9" width="354" height="348" rx="81" fill="url(#tile)"
+            stroke="url(#tile-rim)" stroke-width="2"/>
+      <use href="#emblem" transform="translate(-144 -67) scale(.616)"/>
+    </g>
+  </defs>
+  <use href="#app-icon"/>
+</svg>

@@ -20,3 +20,16 @@ Board navigation uses Primer Octicons `move-to-start`, `chevron-left`,
 https://github.com/primer/octicons/tree/main/icons. MIT license in OCTICONS-LICENSE.txt.
 
 Additional interface icons are Primer Octicons, sourced from https://github.com/primer/octicons/tree/main/icons and distributed under the included MIT license.
+
+# Marca EngineRoom
+
+Os SVGs editáveis ficam em [`docs/brand`](../../docs/brand). A barra lateral
+usa `engineroom-logo.svg` no tema escuro e `engineroom-logo-light.svg` no
+tema claro. O AppImage usa o PNG. O instalador NSIS e
+o executável Windows usam o ICO com múltiplos tamanhos. Para regenerar os
+ícones a partir da raiz do projeto:
+
+```sh
+rsvg-convert -w 256 -h 256 docs/brand/engineroom-icon.svg -o experimental/assets/icons/engineroom-rune.png
+magick experimental/assets/icons/engineroom-rune.png -define icon:auto-resize=256,128,64,48,32,24,16 experimental/assets/icons/engineroom-rune.ico
+```

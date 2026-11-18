@@ -16,11 +16,18 @@ for scene, selected in [('home-light', 'home-nav'), ('configure', 'home-nav'),
         path = artifacts / f'sidebar-{scene}-{size}.json'
         tree = json.loads(path.read_text())
         assert not tree['warnings'], (path.name, tree['warnings'])
+        assert not any(e.get('text') == 'ESPAÇO DE TRABALHO' for e in tree['elements']), path.name
         nodes = {n.get('key'): n for n in walk(tree['accessibility']) if n.get('key')}
         if scene == 'demo-collapsed':
             assert 'sidebar-list' not in nodes or nodes['sidebar-list']['bounds'][2] == 0, path.name
+            assert 'sidebar-logo' not in nodes, path.name
+            assert 'click' in nodes['sidebar-toggle']['actions'], path.name
             continue
         assert nodes['sidebar-list']['name'] == 'Navegação principal'
+        logo = nodes['sidebar-logo']
+        assert (logo['role'], logo['name']) == ('image', 'EngineRoom'), path.name
+        x, _, width, height = logo['bounds']
+        assert width > 0 and height > 0 and x + width <= nodes['sidebar-toggle']['bounds'][0], path.name
         for key in ('home-nav', 'history-nav', 'session-1', 'settings-nav'):
             node = nodes[key]
             assert 'click' in node.get('actions', []) and 'focus' in node.get('actions', [])

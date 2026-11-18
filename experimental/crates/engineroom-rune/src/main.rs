@@ -577,6 +577,13 @@ fn spec() -> AppSpec<State> {
     }
 }
 fn main() {
+    rune::set_app_id("engineroom-rune");
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    if let Err(error) =
+        rune::set_app_icon(&include_bytes!("../../../assets/icons/engineroom-rune.png")[..])
+    {
+        eprintln!("EngineRoom icon: {error}");
+    }
     rune::run(spec());
 }
 #[cfg(test)]

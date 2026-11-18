@@ -1,0 +1,84 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="127 202 854 601" role="img" aria-labelledby="title">
+  <title id="title">EngineRoom</title>
+  <defs>
+    <linearGradient id="ivory" x2="0" y2="1">
+      <stop stop-color="#fff8ea"/>
+      <stop offset="1" stop-color="#efe1c9"/>
+    </linearGradient>
+    <linearGradient id="magnifier" x2="0" y2="1">
+      <stop stop-color="#302a20"/>
+      <stop offset="1" stop-color="#453a2c"/>
+    </linearGradient>
+    <linearGradient id="board" x2="0" y2="1">
+      <stop stop-color="#4a562d"/>
+      <stop offset="1" stop-color="#69773c"/>
+    </linearGradient>
+    <linearGradient id="board-depth" x2="0" y2="1">
+      <stop stop-color="#30351b" stop-opacity=".28"/>
+      <stop offset="1" stop-color="#30351b" stop-opacity="0"/>
+    </linearGradient>
+    <clipPath id="lens-clip">
+      <ellipse cx="520" cy="402" rx="160" ry="157"/>
+    </clipPath>
+    <g id="emblem">
+      <rect id="handle" x="682" y="492" width="122" height="47" rx="19"
+            transform="rotate(42 682 492)" fill="url(#magnifier)"/>
+      <g id="chessboard" clip-path="url(#lens-clip)">
+        <path id="board-ground" fill="url(#board)" d="M330 435h380v130H330z"/>
+        <g id="back-rank" fill="#e4cfa9">
+          <path id="back-square-1" d="M333 435H380L329 468H265Z"/>
+          <path id="back-square-3" d="M427 435H474L457 468H393Z"/>
+          <path id="back-square-5" d="M521 435H568L585 468H521Z"/>
+          <path id="back-square-7" d="M615 435H662L713 468H649Z"/>
+        </g>
+        <g id="middle-rank" fill="#e4cfa9">
+          <path id="middle-square-2" d="M329 468H393L349 510H263Z"/>
+          <path id="middle-square-4" d="M457 468H521L521 510H435Z"/>
+          <path id="middle-square-6" d="M585 468H649L693 510H607Z"/>
+          <path id="middle-square-8" d="M713 468H777L865 510H779Z"/>
+        </g>
+        <g id="front-rank" fill="#e4cfa9">
+          <path id="front-square-1" d="M177 510H263L176 565H61Z"/>
+          <path id="front-square-3" d="M349 510H435L406 565H291Z"/>
+          <path id="front-square-5" d="M521 510H607L636 565H521Z"/>
+          <path id="front-square-7" d="M693 510H779L866 565H751Z"/>
+        </g>
+        <path id="board-shadow" d="M330 435h380v130H330z" fill="url(#board-depth)"/>
+      </g>
+      <g id="rook">
+        <path id="rook-shadow" fill="#2c261d"
+              d="M459 307h132l-1 35q-1 17-16 17h-9v18q0 31 13 59 8 5 8 17v6q11 5 11 17v23H443v-25q0-11 11-16v-7q0-13 15-15 13-28 13-64v-14h-11q-14 0-14-17z"/>
+        <g id="rook-ivory" fill="url(#ivory)" stroke="#2c261d" stroke-width="8" stroke-linejoin="round">
+          <path id="crown" d="M457 301h28l.5 20H504v-20h36v20h18l1-20h27l-1 39q-1 12-13 12H470q-12 0-12-13z"/>
+          <path id="shaft" d="M482 360h78v15q0 35 12 63 8 4 8 15H457q-1-13 12-15 13-28 13-63z"/>
+          <path id="plinth" d="M455 462h123q12 0 12 13v16H443v-16q0-13 12-13z"/>
+        </g>
+        <g id="rook-shading" fill="#ac8f64" opacity=".32">
+          <path id="crown-shade" d="M551 321h7l1-20h27l-1 39q-1 12-13 12h-26q4-10 5-31z"/>
+          <path id="shaft-shade" d="M523 360h37v15q0 35 12 63 8 4 8 15h-58v-13l14-3q-12-29-13-77z"/>
+          <path id="plinth-shade" d="M522 462h56q12 0 12 13v16h-68z"/>
+        </g>
+      </g>
+      <ellipse id="lens-rim" cx="520" cy="402" rx="171" ry="168" fill="none"
+               stroke="url(#magnifier)" stroke-width="23"/>
+    </g>
+    <g id="wordmark" fill-rule="evenodd">
+      <g id="engine" fill="#35271f">
+        <path id="letter-e-capital" d="M147 637h79v21h-55v23h45v21h-45v25h55v21h-79z"/>
+        <path id="letter-n" d="M234 671h21v10q8-12 24-12c18 0 30 13 30 33v46h-22v-42q0-17-15-17t-16 19v40h-22z"/>
+        <path id="letter-g" d="M377 671h21v72c0 26-16 40-43 40q-24 0-38-16l15-14q9 11 23 11 22 0 22-24v-3q-10 12-26 12c-21 0-37-17-37-40s16-40 37-40q16 0 26 12zM376 709a20 20 0 1 0-40 0 20 20 0 0 0 40 0z"/>
+        <g id="letter-i"><circle cx="417.5" cy="647.5" r="12.5"/><path d="M407 671h21v77h-21z"/></g>
+        <use href="#letter-n" x="204"/>
+        <path id="letter-e" d="M597 717h-56q4 15 20 15 10 0 18-9l15 12q-13 16-34 16c-24 0-41-17-41-41 0-23 17-41 39-41 25 0 42 20 39 48zM541 702h36q-3-14-18-14-13 0-18 14z"/>
+      </g>
+      <g id="room" fill="#707c3d">
+        <path id="letter-r" d="M606 637h39c24 0 41 14 41 36q0 22-22 32l26 43h-26l-23-39h-13v39h-22zM628 658v31h16q19 0 19-16 0-15-19-15z"/>
+        <path id="letter-o" d="M766 710a40.5 40.5 0 1 1-81 0 40.5 40.5 0 1 1 81 0zM745 710a19.5 20.5 0 1 0-39 0 19.5 20.5 0 0 0 39 0z"/>
+        <use href="#letter-o" x="79"/>
+        <path id="letter-m" d="M848 671h20v10q8-12 22-12t21 13q9-13 24-13c16 0 26 12 26 31v48h-21v-44q0-15-12-15-13 0-13 17v42h-21v-44q0-15-12-15-13 0-13 17v42h-21z"/>
+      </g>
+    </g>
+  </defs>
+  <use href="#emblem"/>
+  <use href="#wordmark"/>
+</svg>
