@@ -18,11 +18,32 @@ use std::{
 // Integration contract: drain() retains the existing analysis stream; drain_lifecycle()
 // reports asynchronous open/close acknowledgements and typed failures. Consumers should
 // associate these with session IDs and ignore superseded opens.
+/// The operation that produced a [`BridgeLifecycle::Error`].
+///
+/// Failures of live requests are recoverable: the session itself may still be
+/// running. Keeping the origin explicit lets the UI avoid closing a healthy
+/// session while still honoring a genuine `SessionClosed` failure.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LifecycleOrigin {
+    Open,
+    Analyze,
+    Cancel,
+    Close,
+}
+
 #[derive(Debug, Clone)]
 pub enum BridgeLifecycle {
-    Opened { id: String },
-    Closed { id: String },
-    Error { id: String, error: ReviewError },
+    Opened {
+        id: String,
+    },
+    Closed {
+        id: String,
+    },
+    Error {
+        id: String,
+        error: ReviewError,
+        origin: LifecycleOrigin,
+    },
 }
 
 enum ImportIntent {
@@ -200,6 +221,7 @@ impl Bridge {
                                     Err(error) => BridgeLifecycle::Error {
                                         id: previous,
                                         error,
+                                        origin: LifecycleOrigin::Close,
                                     },
                                 },
                             );
@@ -229,7 +251,11 @@ impl Bridge {
                             Err(error) => publish_lifecycle(
                                 &lifecycle_tx,
                                 &wake,
-                                BridgeLifecycle::Error { id, error },
+                                BridgeLifecycle::Error {
+                                    id,
+                                    error,
+                                    origin: LifecycleOrigin::Open,
+                                },
                             ),
                         }
                     }
@@ -245,7 +271,11 @@ impl Bridge {
                             publish_lifecycle(
                                 &lifecycle_tx,
                                 &wake,
-                                BridgeLifecycle::Error { id, error },
+                                BridgeLifecycle::Error {
+                                    id,
+                                    error,
+                                    origin: LifecycleOrigin::Analyze,
+                                },
                             );
                         }
                     }
@@ -254,7 +284,11 @@ impl Bridge {
                             publish_lifecycle(
                                 &lifecycle_tx,
                                 &wake,
-                                BridgeLifecycle::Error { id, error },
+                                BridgeLifecycle::Error {
+                                    id,
+                                    error,
+                                    origin: LifecycleOrigin::Cancel,
+                                },
                             );
                         }
                     }
@@ -346,7 +380,11 @@ impl Bridge {
                             &wake,
                             match result {
                                 Ok(()) => BridgeLifecycle::Closed { id },
-                                Err(error) => BridgeLifecycle::Error { id, error },
+                                Err(error) => BridgeLifecycle::Error {
+                                    id,
+                                    error,
+                                    origin: LifecycleOrigin::Close,
+                                },
                             },
                         );
                     }
@@ -450,6 +488,13 @@ impl Bridge {
         self.send(Intent::DeleteGame(id))
     }
     pub fn start_probe(&self) {
+        // Lock the slot before spawning: a second start while one is in flight
+        // must be rejected, otherwise its JoinHandle would replace (detach) the
+        // first one and Drop could no longer await that probe's teardown.
+        let mut slot = self.probe_task.lock().expect("probe task lock");
+        if slot.as_ref().is_some_and(|task| !task.is_finished()) {
+            return;
+        }
         let factory = self.probe_factory.clone();
         let cancel = engineroom_backend::review::engine::Cancellation {
             closed: self.probe_cancel.subscribe(),
@@ -462,7 +507,7 @@ impl Bridge {
             let _ = events.send(DataEvent::Probe(result));
             wake();
         });
-        *self.probe_task.lock().expect("probe task lock") = Some(task);
+        *slot = Some(task);
     }
     pub fn drain_data(&self) -> Vec<DataEvent> {
         self.data.try_iter().collect()
@@ -524,4 +569,4 @@ impl Drop for Bridge {
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
