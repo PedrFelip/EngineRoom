@@ -42,6 +42,7 @@ como referência versionada neste documento, conforme a versão fixada no lockfi
 | [`real-game.bench.ts`](real-game.bench.ts) | Casos com Stockfish real, reaproveitando `crates/engineroom-backend/examples/strobe_review.rs`. |
 | [`../crates/engineroom-backend/examples/pipeline_strobe.rs`](../crates/engineroom-backend/examples/pipeline_strobe.rs) | Harness: dirige o `Pipeline` de produção pelas portas públicas `EnginePort`/`EngineFactory`/`Repository` e imprime contadores `strobe:metric`. |
 | [`../crates/engineroom-backend/examples/pipeline_strobe_cache.rs`](../crates/engineroom-backend/examples/pipeline_strobe_cache.rs) | Harness de cache parcial e retomada: interrompe uma revisão no barreira, confirma o flush parcial e relê o resultado com um segundo `Pipeline`. |
+| [`../crates/engineroom-backend/examples/pipeline_strobe_sessions.rs`](../crates/engineroom-backend/examples/pipeline_strobe_sessions.rs) | Harness de `ReviewSessions`: cancelamento, navegação latest-wins e ciclo de vida com portas e lease falsos. |
 | [`fixtures/`](fixtures/) | Fixtures `short.pgn` (8 posições), `long.pgn` (45) e `fen.pgn` (6, com FEN inicial). |
 | [`../scripts/test-strobe-harness.py`](../scripts/test-strobe-harness.py) | Testes que validam os contadores de cada estágio, incluindo os três fixtures de cache. |
 | [`../scripts/check-strobe.sh`](../scripts/check-strobe.sh) | Comando único: build, testes, `--check` dos benches determinístico e real. |
@@ -61,7 +62,7 @@ A partir de `experimental/`:
 
 ```sh
 bun install --frozen-lockfile          # instala @hona/strobe 0.32.0 do lockfile
-./scripts/check-strobe.sh              # build release + testes + 8 casos --check
+./scripts/check-strobe.sh              # build release + testes + 11 casos --check
 ```
 
 Para incluir o Stockfish real (o sidecar pode vir do downloader do app principal):
@@ -99,6 +100,14 @@ ENGINE_ROOM_STOCKFISH=/caminho/stockfish \
 | `cache-partial-short` | interrompe após 2 buscas, retoma 5 | `fixture_positions=8`, `interrupt_completed=2`, `partial_cache_entries=2`, `resume_searched=5`, `ports=2/2 active=0` |
 | `cache-partial-long` | interrompe após 15 buscas (cruza o flush de 8), retoma 30 | `fixture_positions=45`, `interrupt_completed=15`, `partial_cache_entries=15`, `resume_searched=30` |
 | `cache-partial-fen` | fixture com FEN inicial; interrompe após 2, retoma 4 | `fixture_positions=6`, `resume_searched=4` |
+| `sessions-cancel-analysis` | cancela uma busca em voo e fecha a sessão | `searches=1`, `cancels_acked=1`, `live_completed=0` |
+| `sessions-navigation-latest-wins` | 4 intenções, só a última publica resultado | `jobs_enqueued=4`, `searches=2`, `latest_completed=1`, `stale_completed=0` |
+| `sessions-lifecycle` | owner isolation, substituição e shutdown idempotente | `sessions_opened=2`, `auth_rejected=2`, `shutdown_rejects=1` |
+
+Todos os cenários de sessões aceitam um PGN opcional como último argumento;
+`navigation-latest-wins` exige pelo menos 5 FENs (o PGN inline e o fixture
+`short.pgn` satisfazem isso). `acquires=shutdowns`, `active=0`, `permits=1` e
+`peak_active=1` valem para os três cenários.
 
 `ports_*` conta **portas da trait** (`EnginePort`/`EngineFactory`), não processos
 do sistema: a engine é falsa e `shutdown()` não encerra nenhum PID. O contador

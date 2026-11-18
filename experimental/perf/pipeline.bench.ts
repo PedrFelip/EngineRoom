@@ -15,6 +15,10 @@ const cacheExe =
   process.platform === "win32"
     ? "experimental\\target\\release\\examples\\pipeline_strobe_cache.exe"
     : "./experimental/target/release/examples/pipeline_strobe_cache"
+const sessionsExe =
+  process.platform === "win32"
+    ? "experimental\\target\\release\\examples\\pipeline_strobe_sessions.exe"
+    : "./experimental/target/release/examples/pipeline_strobe_sessions"
 const pgn = "experimental/perf/data/immortal.pgn"
 const command = (scenario: string) => `${exe} ${scenario} ${pgn}`
 
@@ -22,6 +26,36 @@ const command = (scenario: string) => `${exe} ${scenario} ${pgn}`
 // `short` interrupts after 2 searches, `long` after 15 and `fen` after 2.
 const cacheCmd = (scenario: string) =>
   `${cacheExe} ${scenario} experimental/perf/fixtures/${scenario}.pgn`
+const sessionsCmd = (scenario: string) =>
+  `${sessionsExe} ${scenario} experimental/perf/fixtures/short.pgn`
+// Every counter printed by pipeline_strobe_sessions is declared so --check
+// reads it. Ports and permits are Rust values, never OS processes.
+const sessionsMetrics = [
+  "run.duration",
+  "metric.fake_engine",
+  "metric.sessions_opened",
+  "metric.jobs_enqueued",
+  "metric.searches",
+  "metric.acquires",
+  "metric.shutdowns",
+  "metric.peak_active",
+  "metric.active",
+  "metric.permits",
+  "metric.live_started",
+  "metric.live_completed",
+  "metric.latest_completed",
+  "metric.stale_completed",
+  "metric.stale_events",
+  "metric.accepted_events",
+  "metric.max_sequence",
+  "metric.cancels_acked",
+  "metric.closes_acked",
+  "metric.auth_rejected",
+  "metric.shutdown_rejects",
+  "metric.repo_drained",
+  "metric.wrong_session",
+  "metric.sequence_violations",
+]
 // Every counter printed by pipeline_strobe_cache is declared so --check reads
 // it. All cases use the fake engine: cpu.work excludes any Stockfish child.
 const cacheMetrics = [
@@ -59,6 +93,10 @@ export default bench({
     cache: cli(cacheCmd("short"), {
       build:
         "cargo build --release --locked --manifest-path experimental/Cargo.toml -p engineroom-backend --example pipeline_strobe_cache",
+    }),
+    sessions: cli(sessionsCmd("cancel-analysis"), {
+      build:
+        "cargo build --release --locked --manifest-path experimental/Cargo.toml -p engineroom-backend --example pipeline_strobe_sessions",
     }),
   },
   cases: {
@@ -109,6 +147,24 @@ export default bench({
       primary: "cpu.work",
       metrics: cacheMetrics,
       run: (ctx) => ctx.exec(cacheCmd("fen")),
+    },
+    "sessions-cancel-analysis": {
+      targets: ["sessions"],
+      primary: "cpu.work",
+      metrics: sessionsMetrics,
+      run: (ctx) => ctx.exec(sessionsCmd("cancel-analysis")),
+    },
+    "sessions-navigation-latest-wins": {
+      targets: ["sessions"],
+      primary: "cpu.work",
+      metrics: sessionsMetrics,
+      run: (ctx) => ctx.exec(sessionsCmd("navigation-latest-wins")),
+    },
+    "sessions-lifecycle": {
+      targets: ["sessions"],
+      primary: "cpu.work",
+      metrics: sessionsMetrics,
+      run: (ctx) => ctx.exec(sessionsCmd("session-lifecycle")),
     },
   },
 })
