@@ -12,6 +12,7 @@ mod layout;
 mod preferences;
 mod review_data;
 mod review_session;
+mod session_style;
 mod state;
 mod theme;
 mod variation;
@@ -61,8 +62,15 @@ fn view(s: &State, cx: &mut Cx<State>) -> El {
         )
     });
     rune_kit::root(
-        components::shell::view(s, cx, content.key("page-body").fill(k.c.page), trailing, k)
-            .on_key(review_shortcut),
+        components::shell::view(
+            s,
+            cx,
+            content.key("page-body").fill(k.c.page),
+            trailing,
+            k,
+            &mut layers,
+        )
+        .on_key(review_shortcut),
         layers,
     )
     .on_drop_files(|s: &mut State, files, _| {
@@ -75,6 +83,8 @@ fn view(s: &State, cx: &mut Cx<State>) -> El {
 fn review_shortcut(s: &mut State, key: &rune::KeyEvent, tx: &mut rune::Tx) -> bool {
     if s.page != Page::Review
         || s.analysis_settings_open
+        || s.folder_editor.is_some()
+        || s.session_drag.is_some()
         || s.promotion_pending.is_some()
         || key.mods.ctrl
         || key.mods.alt
@@ -132,6 +142,80 @@ fn spec() -> AppSpec<State> {
         families: theme::FAMILIES,
         scenes: &[
             ("sessions", |s| *s = fixtures::workspace_scene()),
+            ("sessions-colors", |s| {
+                *s = fixtures::workspace_scene();
+                let keys: Vec<u64> = s.workspace.iter().map(|e| e.key).collect();
+                for (index, key) in keys.into_iter().enumerate() {
+                    let color = match index % 3 {
+                        0 => session_style::SessionColor::Blue,
+                        1 => session_style::SessionColor::Amber,
+                        _ => session_style::SessionColor::Violet,
+                    };
+                    fixtures::file_session(s, key, color);
+                }
+            }),
+            ("sessions-grouped", |s| {
+                *s = fixtures::workspace_scene();
+                s.pgn.replace_text("1. d4 d5 2. c4 e6 *");
+                s.prepare();
+                s.start_review();
+                s.bridge_error = None;
+                let keys: Vec<u64> = s.workspace.iter().map(|e| e.key).collect();
+                for (index, key) in keys.into_iter().enumerate() {
+                    let color = match index % 3 {
+                        0 => session_style::SessionColor::Blue,
+                        1 => session_style::SessionColor::Amber,
+                        _ => session_style::SessionColor::None,
+                    };
+                    fixtures::file_session(s, key, color);
+                }
+            }),
+            ("sessions-drag", |s| {
+                *s = fixtures::workspace_scene();
+                let first = s.workspace[0].key;
+                let second = s.workspace[1].key;
+                fixtures::file_session(s, first, session_style::SessionColor::Blue);
+                fixtures::file_session(s, second, session_style::SessionColor::Amber);
+                s.session_drag = Some(session_style::SessionDrag {
+                    item: session_style::DragItem::Session(second),
+                    point: [100.0, 238.0],
+                    target: Some(session_style::SessionDropTarget::Folder(
+                        "fixture-blue".into(),
+                    )),
+                });
+            }),
+            ("folder-editor", |s| {
+                *s = fixtures::workspace_scene();
+                s.edit_folder(None, None);
+            }),
+            ("folder-menu", |s| {
+                *s = fixtures::workspace_scene();
+                let key = s.workspace[0].key;
+                fixtures::file_session(s, key, session_style::SessionColor::Blue);
+                s.open_folder_menu(
+                    "fixture-blue".into(),
+                    rune::PointerPress { x: 100.0, y: 235.0 },
+                );
+            }),
+            ("sessions-menu", |s| {
+                *s = fixtures::workspace_scene();
+                let key = s.workspace[0].key;
+                fixtures::file_session(s, key, session_style::SessionColor::Blue);
+                s.open_session_menu(key, rune::PointerPress { x: 40.0, y: 300.0 });
+            }),
+            ("sessions-grouped-light", |s| {
+                *s = fixtures::workspace_scene();
+                s.preferences.appearance = Appearance::Light;
+                let keys: Vec<u64> = s.workspace.iter().map(|e| e.key).collect();
+                for (index, key) in keys.into_iter().enumerate() {
+                    let color = if index == 0 {
+                        session_style::SessionColor::Violet
+                    } else {
+                        session_style::SessionColor::Green
+                    };
+                    fixtures::file_session(s, key, color);
+                }
+            }),
             ("home-file", |s| s.import_source = ImportSource::File),
             ("home-chesscom", |s| {
                 s.import_source = ImportSource::ChessCom
@@ -475,7 +559,7 @@ fn spec() -> AppSpec<State> {
                     || matches!(&key.key, rune::Key::Text(text) if text.eq_ignore_ascii_case("b"))
                     || tx.key_base() == Some('b'))
             {
-                if !s.analysis_settings_open && !tx.key_repeat() {
+                if !s.analysis_settings_open && s.folder_editor.is_none() && !tx.key_repeat() {
                     s.review_sidebar.toggle();
                 }
                 return true;
@@ -483,6 +567,7 @@ fn spec() -> AppSpec<State> {
             if (key.is_command('b') && !key.mods.shift && !key.mods.alt)
                 || rune_kit::shell::is_sidebar_toggle(key)
             {
+                s.session_drag = None;
                 s.sidebar.toggle();
                 return true;
             }
@@ -492,8 +577,17 @@ fn spec() -> AppSpec<State> {
     }
 }
 fn main() {
+    rune::set_app_id("engineroom-rune");
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    if let Err(error) =
+        rune::set_app_icon(&include_bytes!("../../../assets/icons/engineroom-rune.png")[..])
+    {
+        eprintln!("EngineRoom icon: {error}");
+    }
     rune::run(spec());
 }
+#[cfg(test)]
+mod analysis_lookup_bench;
 #[cfg(test)]
 mod perf_headless;
 #[cfg(test)]

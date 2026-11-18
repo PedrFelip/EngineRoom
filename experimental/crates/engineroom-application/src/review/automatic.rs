@@ -404,7 +404,7 @@ async fn execute(
         }
         let result = tokio::select! {
             _ = cancel.cancelled() => return Err(ReviewError::cancelled()),
-            result = waiters.join_next() => result.ok_or_else(|| queue_error("Fila encerrou sem resultado."))?.map_err(|e| ReviewError::new(ReviewErrorCode::EngineExited, "review.queue", e))?,
+            result = waiters.join_next() => result.ok_or_else(|| queue_error("Fila encerrou sem resultado."))?.map_err(|e| ReviewError::with_source(ReviewErrorCode::EngineExited, "review.queue", e))?,
         };
         let (job, reply) = result;
         let pool = pool

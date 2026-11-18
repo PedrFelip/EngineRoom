@@ -14,3 +14,7 @@ tokio = { version = "1", features = ["sync", "macros", "time", "rt"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "gzip"] }
+
+[dev-dependencies]
+# Examples generate a chess-legal PV from the FEN instead of echoing a fixed move.
+shakmaty = "0.30"

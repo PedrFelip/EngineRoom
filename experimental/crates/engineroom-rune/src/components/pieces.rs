@@ -6,12 +6,12 @@ macro_rules! piece {
         pub static $body: Icon = Icon {
             name: concat!($name, "-body"),
             view: 45.0,
-            body: concat!("<path d=\"", $shape, "\" fill=\"#fff\"/>"),
+            body: concat!("<path d=\"", $shape, "\" fill=\"currentColor\"/>"),
         };
         pub static $lines: Icon = Icon {
             name: concat!($name, "-lines"),
             view: 45.0,
-            body: concat!("<path d=\"", $shape, "\" fill=\"none\" stroke=\"#fff\" stroke-width=\"1.8\" stroke-linejoin=\"round\"/>", "<path d=\"", $detail, "\" fill=\"none\" stroke=\"#fff\" stroke-width=\"1.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>"),
+            body: concat!("<path d=\"", $shape, "\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linejoin=\"round\"/>", "<path d=\"", $detail, "\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>"),
         };
     };
 }

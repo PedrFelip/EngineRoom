@@ -8,6 +8,13 @@ struct Entry {
     name: String,
     moves: Vec<String>,
 }
+
+/// Returns the longest bundled ECO opening matching `moves`, if any.
+///
+/// # Panics
+///
+/// Panics on the first standard-start lookup if the bundled `eco.json` asset
+/// fails to deserialize, which indicates a corrupt compiled asset.
 pub fn opening(moves: &[PlayedMove]) -> Option<(usize, Eco)> {
     // ECO sequences assume the standard starting position, even when supplied
     // through an explicit PGN FEN tag.
@@ -15,8 +22,10 @@ pub fn opening(moves: &[PlayedMove]) -> Option<(usize, Eco)> {
         return None;
     }
     static DATA: OnceLock<Vec<Entry>> = OnceLock::new();
-    let data =
-        DATA.get_or_init(|| serde_json::from_str(include_str!("eco.json")).unwrap_or_default());
+    let data = DATA.get_or_init(|| {
+        serde_json::from_str(include_str!("eco.json"))
+            .expect("bundled ECO asset eco.json must deserialize into valid entries")
+    });
     let mut best: Option<&Entry> = None;
     for entry in data {
         if entry.moves.is_empty() || entry.moves.len() > moves.len() {
