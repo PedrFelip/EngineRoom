@@ -1,0 +1,9 @@
+[Event "Strobe cache fixture - short"]
+[Site "EngineRoom perf"]
+[Date "2026.11.17"]
+[Round "?"]
+[White "Fake"]
+[Black "Fake"]
+[Result "1-0"]
+
+1. e4 e5 2. Bc4 Nc6 3. Qh5 Nf6 4. Qxf7# 1-0
