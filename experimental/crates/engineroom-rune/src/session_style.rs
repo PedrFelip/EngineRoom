@@ -26,16 +26,13 @@ const STATUS_MASK: u32 = 0xF;
 pub struct GroupSlot(u32);
 
 impl GroupSlot {
-    /// Sentinel for an absent slot; it never aliases a valid handle.
-    pub const NONE: Self = Self(u32::MAX);
-
     /// Packs a workspace index and its render status into one word.
     ///
     /// Returns `None` when the index does not fit the index field, so callers
     /// can guard capacity instead of silently truncating a handle.
     pub(crate) fn new(index: usize, status: RenderStatus) -> Option<Self> {
         let index = u32::try_from(index).ok()?;
-        if index >= INDEX_MASK {
+        if index > INDEX_MASK {
             return None;
         }
         Some(Self((status.code() << INDEX_BITS) | index))
@@ -52,17 +49,9 @@ impl GroupSlot {
             .expect("group slot carries a valid render status")
     }
 
-    /// Returns `true` for the absence sentinel.
-    pub const fn is_none(self) -> bool {
-        self.0 == Self::NONE.0
-    }
-
-    /// Resolves the slot against a workspace, rejecting sentinels and indexes
-    /// that do not belong to that workspace.
+    /// Resolves the slot against a workspace, rejecting indexes that do not
+    /// belong to that workspace.
     pub fn get(self, workspace: &[WorkspaceReview]) -> Option<&WorkspaceReview> {
-        if self.is_none() {
-            return None;
-        }
         workspace.get(self.index())
     }
 }
@@ -101,7 +90,7 @@ impl SessionColor {
         }
     }
     fn from_slug(slug: &str) -> Self {
-        match slug.to_ascii_lowercase().as_str() {
+        match slug.trim().to_lowercase().as_str() {
             "blue" | "azul" => Self::Blue,
             "green" | "verde" => Self::Green,
             "amber" | "ambar" | "âmbar" => Self::Amber,
@@ -161,8 +150,21 @@ struct StoredPresentation {
 }
 impl From<StoredPresentation> for SessionPresentation {
     fn from(stored: StoredPresentation) -> Self {
+        let mut seen_ids = BTreeSet::new();
+        let folders = stored
+            .folders
+            .into_iter()
+            .filter_map(|mut folder| {
+                folder.name = folder.name.trim().to_owned();
+                let valid_id = !folder.id.is_empty()
+                    && !folder.id.contains('/')
+                    && seen_ids.insert(folder.id.clone());
+                let valid_name = !folder.name.is_empty() && folder.name.chars().count() <= 80;
+                (valid_id && valid_name).then_some(folder)
+            })
+            .collect();
         let mut result = Self {
-            folders: stored.folders,
+            folders,
             collapsed_folders: stored.collapsed_folders,
         };
         for color in stored.colors.into_values().collect::<BTreeSet<_>>() {
@@ -170,7 +172,7 @@ impl From<StoredPresentation> for SessionPresentation {
                 continue;
             }
             let id = format!("legacy-{}", color.slug());
-            if !result.folders.iter().any(|folder| folder.id == id) {
+            if seen_ids.insert(id.clone()) {
                 result.folders.push(SessionFolder {
                     id: id.clone(),
                     name: color.label().into(),
@@ -178,12 +180,12 @@ impl From<StoredPresentation> for SessionPresentation {
                 });
             }
             if stored.collapsed_groups.contains(&color) {
-                result.collapsed_folders.insert(id.clone());
+                result.collapsed_folders.insert(id);
             }
         }
         result
             .collapsed_folders
-            .retain(|id| result.folders.iter().any(|folder| &folder.id == id));
+            .retain(|id| seen_ids.contains(id.as_str()));
         result
     }
 }
@@ -192,8 +194,13 @@ impl From<StoredPresentation> for SessionPresentation {
 pub struct FolderEditor {
     pub id: Option<String>,
     pub session: Option<u64>,
-    pub name: rune::TextEdit,
     pub color: SessionColor,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FolderState {
+    Open,
+    Collapsed,
 }
 
 /// Decorative colour swatch; folder names supply the accessible identity.
@@ -204,7 +211,7 @@ pub fn marker(color: SessionColor, k: &Kit) -> El {
         .children((color != SessionColor::None).then(|| {
             el().size(7.0, 7.0)
                 .radius(3.5)
-                .fill(theme::session_swatch(color.slug(), k.dark))
+                .fill(theme::session_swatch(color.slug(), theme::kit_theme(k)))
                 .border(0.5, k.c.border_base)
         }))
         .a11y_hidden()
@@ -212,19 +219,18 @@ pub fn marker(color: SessionColor, k: &Kit) -> El {
 }
 
 /// Folder silhouette for section headers, including folders without an accent colour.
-pub fn folder_marker(color: SessionColor, open: bool, k: &Kit) -> El {
+pub fn folder_marker(color: SessionColor, state: FolderState, k: &Kit) -> El {
     icon(
-        if open {
-            &rune_kit::glyphs::FOLDER_OPEN
-        } else {
-            &rune_kit::glyphs::FOLDER
+        match state {
+            FolderState::Open => &rune_kit::glyphs::FOLDER_OPEN,
+            FolderState::Collapsed => &rune_kit::glyphs::FOLDER,
         },
         16.0,
     )
     .color(if color == SessionColor::None {
         k.c.icon_muted
     } else {
-        theme::session_swatch(color.slug(), k.dark)
+        theme::session_swatch(color.slug(), theme::kit_theme(k))
     })
     .a11y_hidden()
     .inert()
@@ -258,16 +264,16 @@ pub struct SessionDrag {
 
 fn relative_position<T: PartialEq>(
     items: impl Iterator<Item = T>,
-    source: T,
-    target: T,
+    source: &T,
+    target: &T,
 ) -> Option<InsertSide> {
     if source == target {
         return None;
     }
-    let mut matches = items.filter(|item| *item == source || *item == target);
+    let mut matches = items.filter(|item| item == source || item == target);
     let first = matches.next()?;
     matches.next()?;
-    Some(if first == source {
+    Some(if &first == source {
         InsertSide::After
     } else {
         InsertSide::Before
@@ -295,6 +301,8 @@ fn display_groups<'a>(
     presentation: &'a SessionPresentation,
     order: &BTreeMap<String, Vec<u64>>,
 ) -> Vec<SessionGroup<'a>> {
+    const UNPLACED: usize = usize::MAX;
+
     debug_assert!(workspace.windows(2).all(|pair| pair[0].key < pair[1].key));
     let mut groups = Vec::with_capacity(presentation.folders.len() + 1);
 
@@ -313,7 +321,6 @@ fn display_groups<'a>(
     // Flat, workspace-indexed placement marks replace the HashSet of placed
     // keys. The workspace keeps unique monotonic keys in sorted order, so the
     // slot index is a stable alias for a session key.
-    const UNPLACED: usize = usize::MAX;
     let mut placements = vec![UNPLACED; workspace.len()];
 
     for (folder_index, folder) in presentation.folders.iter().enumerate() {
@@ -398,8 +405,8 @@ impl State {
                         .folders
                         .iter()
                         .map(|folder| folder.id.as_str()),
-                    source.as_str(),
-                    target,
+                    &source.as_str(),
+                    &target,
                 )?;
                 Some(SessionDropTarget::Reorder(
                     DragItem::Folder(target.into()),
@@ -449,7 +456,7 @@ impl State {
     pub fn apply_session_drop(&mut self, item: DragItem, target: SessionDropTarget) {
         match (item, target) {
             (DragItem::Session(key), SessionDropTarget::Folder(id)) => {
-                self.move_session(key, Some(id))
+                self.move_session(key, Some(id));
             }
             (DragItem::Session(key), SessionDropTarget::Unfiled) => self.move_session(key, None),
             (DragItem::Folder(source), SessionDropTarget::Reorder(DragItem::Folder(target), _)) => {
@@ -470,13 +477,18 @@ impl State {
                     return;
                 }
                 let id = folder.id.clone();
-                let order = self.session_order.entry(id.clone()).or_insert_with(|| {
-                    self.workspace
-                        .iter()
-                        .filter(|entry| entry.folder_id.as_deref() == Some(&id))
-                        .map(|entry| entry.key)
-                        .collect()
+                let order = self.session_order.entry(id.clone()).or_default();
+                let mut seen = BTreeSet::new();
+                order.retain(|&key| {
+                    seen.insert(key)
+                        && workspace_entry(&self.workspace, key)
+                            .is_some_and(|entry| entry.folder_id.as_deref() == Some(&id))
                 });
+                for entry in &self.workspace {
+                    if entry.folder_id.as_deref() == Some(&id) && seen.insert(entry.key) {
+                        order.push(entry.key);
+                    }
+                }
                 move_to(order, |key| *key == source, |key| *key == target);
             }
             _ => {}
@@ -539,18 +551,16 @@ impl State {
                 .iter()
                 .find(|folder| &folder.id == id)
         });
-        self.folder_editor = Some(FolderEditor {
-            id: id.clone(),
-            session,
-            name: rune::TextEdit::new(folder.map_or("", |folder| folder.name.as_str())),
-            color: folder.map_or(SessionColor::Blue, |folder| folder.color),
-        });
+        let color = folder.map_or(SessionColor::Blue, |folder| folder.color);
+        let initial_name = folder.map_or(String::new(), |folder| folder.name.clone());
+        self.folder_name.replace_text(&initial_name);
+        self.folder_editor = Some(FolderEditor { id, session, color });
     }
     pub fn save_folder(&mut self) {
-        let Some(editor) = &self.folder_editor else {
+        if self.folder_editor.is_none() {
             return;
-        };
-        let name = editor.name.text.trim().to_string();
+        }
+        let name = self.folder_name.text.trim().to_string();
         if name.is_empty() || name.chars().count() > 80 {
             return;
         }
@@ -633,9 +643,8 @@ mod tests {
 
     fn create(state: &mut State, name: &str, color: SessionColor) -> String {
         state.edit_folder(None, None);
-        let editor = state.folder_editor.as_mut().unwrap();
-        editor.name.replace_text(name);
-        editor.color = color;
+        state.folder_name.replace_text(name);
+        state.folder_editor.as_mut().unwrap().color = color;
         state.save_folder();
         state
             .preferences
@@ -735,7 +744,7 @@ mod tests {
     }
 
     #[test]
-    fn grouping_keeps_sessions_visible_when_order_is_incomplete() {
+    fn grouping_keeps_sessions_visible_and_reorderable_when_order_is_incomplete() {
         let mut state = crate::fixtures::workspace_scene();
         let folder = create(&mut state, "Estudos", SessionColor::Blue);
         let first = state.workspace[0].key;
@@ -756,6 +765,19 @@ mod tests {
             [second, first]
         );
         assert!(groups[1].entries.is_empty());
+
+        state.apply_session_drop(
+            DragItem::Session(second),
+            SessionDropTarget::Reorder(DragItem::Session(first), InsertSide::After),
+        );
+        assert_eq!(
+            state.session_groups()[0]
+                .entries
+                .iter()
+                .map(|slot| state.workspace[slot.index()].key)
+                .collect::<Vec<_>>(),
+            [first, second]
+        );
     }
 
     #[test]
@@ -765,9 +787,8 @@ mod tests {
         let key = state.workspace[0].key;
         state.move_session(key, Some(id.clone()));
         state.edit_folder(Some(id.clone()), None);
-        let editor = state.folder_editor.as_mut().unwrap();
-        editor.name.replace_text("Estudos");
-        editor.color = SessionColor::Red;
+        state.folder_name.replace_text("Estudos");
+        state.folder_editor.as_mut().unwrap().color = SessionColor::Red;
         state.save_folder();
         let folder = state.session_folder(key).unwrap();
         assert_eq!(folder.name, "Estudos");
@@ -791,12 +812,7 @@ mod tests {
         let mut state = State::fixture();
         for name in ["   ".to_string(), "a".repeat(81)] {
             state.edit_folder(None, None);
-            state
-                .folder_editor
-                .as_mut()
-                .unwrap()
-                .name
-                .replace_text(&name);
+            state.folder_name.replace_text(&name);
             state.save_folder();
             assert!(state.folder_editor.is_some());
             assert!(state.preferences.sessions.folders.is_empty());
@@ -834,7 +850,7 @@ mod tests {
         );
     }
     #[test]
-    fn group_slot_packs_status_and_guards_capacity_and_sentinel() {
+    fn group_slot_packs_status_and_guards_capacity() {
         for status in [
             RenderStatus::Preview,
             RenderStatus::Paused,
@@ -844,12 +860,10 @@ mod tests {
             let slot = GroupSlot::new(3, status).expect("slot fits");
             assert_eq!(slot.index(), 3);
             assert_eq!(slot.status(), status);
-            assert!(!slot.is_none());
-            assert_ne!(slot, GroupSlot::NONE);
         }
-        assert!(GroupSlot::NONE.is_none());
+        assert!(GroupSlot::new(INDEX_MASK as usize, RenderStatus::Preview).is_some());
         assert_eq!(
-            GroupSlot::new(INDEX_MASK as usize, RenderStatus::Preview),
+            GroupSlot::new((1_u32 << INDEX_BITS) as usize, RenderStatus::Preview),
             None,
             "index that does not fit must be rejected"
         );
@@ -861,10 +875,37 @@ mod tests {
                 .get(&state.workspace)
                 .is_some_and(|entry| entry.key == state.workspace[0].key)
         );
-        assert!(GroupSlot::NONE.get(&state.workspace).is_none());
         let out_of_range = GroupSlot::new(state.workspace.len() + 1000, RenderStatus::Preview)
             .expect("index still fits the packed field");
         assert!(out_of_range.get(&state.workspace).is_none());
+    }
+
+    #[test]
+    fn stored_presentation_validates_folder_invariants_and_unicode_color_labels() {
+        for raw in [r#""Âmbar""#, r#""âmbar""#, r#""ÂMBAR""#, r#""amber""#] {
+            assert_eq!(
+                serde_json::from_str::<SessionColor>(raw).unwrap(),
+                SessionColor::Amber,
+                "failed for {raw}"
+            );
+        }
+        let doc = format!(
+            r#"{{"folders":[
+                {{"id":"valid","name":"  Aberturas  ","color":"Âmbar"}},
+                {{"id":"valid","name":"Duplicada","color":"blue"}},
+                {{"id":"bad/slash","name":"Com barra","color":"green"}},
+                {{"id":"","name":"Sem id","color":"red"}},
+                {{"id":"blank","name":"   ","color":"violet"}},
+                {{"id":"long","name":"{}","color":"blue"}}
+            ],"collapsed_folders":["valid","bad/slash"]}}"#,
+            "x".repeat(81)
+        );
+        let loaded: SessionPresentation = serde_json::from_str(&doc).unwrap();
+        assert_eq!(loaded.folders.len(), 1);
+        assert_eq!(loaded.folders[0].id, "valid");
+        assert_eq!(loaded.folders[0].name, "Aberturas");
+        assert_eq!(loaded.folders[0].color, SessionColor::Amber);
+        assert_eq!(loaded.collapsed_folders, BTreeSet::from(["valid".into()]));
     }
 
     #[test]
@@ -924,18 +965,20 @@ mod tests {
             let (a, b) = (a.luminance(), b.luminance());
             (a.max(b) + 0.05) / (a.min(b) + 0.05)
         };
-        for dark in [true, false] {
-            let kit = crate::theme::kit(if dark {
-                crate::state::Appearance::Dark
-            } else {
-                crate::state::Appearance::Light
-            });
+        for appearance in [
+            crate::state::Appearance::Dark,
+            crate::state::Appearance::Light,
+        ] {
+            let kit = crate::theme::kit(appearance);
+            let ui_theme = theme::kit_theme(&kit);
             for color in SessionColor::ALL
                 .into_iter()
                 .filter(|color| *color != SessionColor::None)
             {
                 for surface in [kit.c.layer_01, kit.c.layer_02] {
-                    assert!(contrast(theme::session_swatch(color.slug(), dark), surface) >= 2.0);
+                    assert!(
+                        contrast(theme::session_swatch(color.slug(), ui_theme), surface) >= 2.0
+                    );
                 }
             }
         }

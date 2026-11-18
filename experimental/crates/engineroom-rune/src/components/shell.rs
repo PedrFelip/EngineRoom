@@ -2,7 +2,8 @@
 use super::{icons, ui};
 use crate::{
     session_style::{
-        self, DragItem, InsertSide, SessionColor, SessionDrag, SessionDropTarget, SessionFolder,
+        self, DragItem, FolderState, InsertSide, SessionColor, SessionDrag, SessionDropTarget,
+        SessionFolder,
     },
     state::{Page, RenderStatus, State, WorkspaceReview},
 };
@@ -70,9 +71,9 @@ fn session_menu(
 
 fn drag_session(s: &mut State, item: DragItem, drag: &mut Drag, tx: &mut rune::Tx) {
     match drag.phase {
-        Phase::Down => s.session_drag = None,
-        Phase::Up if drag.cancelled() => s.session_drag = None,
-        Phase::Move | Phase::Up if drag.dx.hypot(drag.dy) >= 6.0 => {
+        Phase::Move | Phase::Up
+            if !drag.cancelled() && (s.session_drag.is_some() || drag.dx.hypot(drag.dy) >= 6.0) =>
+        {
             s.session_menu = None;
             s.folder_menu = None;
             let active = s.session_drag.get_or_insert(SessionDrag {
@@ -102,8 +103,8 @@ fn drag_session(s: &mut State, item: DragItem, drag: &mut Drag, tx: &mut rune::T
                 }
             });
         }
-        Phase::Up => s.session_drag = None,
-        _ => {}
+        Phase::Down | Phase::Up => s.session_drag = None,
+        Phase::Move => {}
     }
 }
 
@@ -318,7 +319,15 @@ fn sidebar(s: &State, k: &Kit, layers: &mut Vec<El>) -> El {
                     .color(k.c.icon_faint)
                     .a11y_hidden(),
                 )
-                .child(session_style::folder_marker(folder.color, !collapsed, k))
+                .child(session_style::folder_marker(
+                    folder.color,
+                    if collapsed {
+                        FolderState::Collapsed
+                    } else {
+                        FolderState::Open
+                    },
+                    k,
+                ))
                 .child(
                     ui::label(&folder.name, 13.0, k.c.text_base)
                         .grow(1.0)
@@ -345,7 +354,7 @@ fn sidebar(s: &State, k: &Kit, layers: &mut Vec<El>) -> El {
                 })
                 .opacity(if is_source { 0.55 } else { 1.0 })
                 .on_drag(move |s: &mut State, drag, tx| {
-                    drag_session(s, drag_source.clone(), drag, tx)
+                    drag_session(s, drag_source.clone(), drag, tx);
                 })
                 .expanded(!collapsed)
                 .focusable(true)
@@ -355,7 +364,7 @@ fn sidebar(s: &State, k: &Kit, layers: &mut Vec<El>) -> El {
                     tx.focus(format!("folder-toggle-{id}"), true);
                 })
                 .on_secondary_press(move |s: &mut State, press, _| {
-                    s.open_folder_menu(menu_id.clone(), press)
+                    s.open_folder_menu(menu_id.clone(), press);
                 })
                 .role("button");
             let point = s
@@ -727,18 +736,18 @@ fn folder_dialog(s: &State, k: &Kit, layers: &mut Vec<El>) {
     let Some(editor) = &s.folder_editor else {
         return;
     };
-    let valid =
-        !editor.name.text.trim().is_empty() && editor.name.text.trim().chars().count() <= 80;
+    let trimmed = s.folder_name.text.trim();
+    let valid = !trimmed.is_empty() && trimmed.chars().count() <= 80;
     let mut content = col()
         .gap(16.0)
         .padding(20.0)
         .child(ui::label("Nome", 12.0, k.c.text_muted))
         .child(
-            TextInput::new(&editor.name)
+            TextInput::new(&s.folder_name)
                 .label("Nome da pasta")
                 .placeholder("Ex.: Aberturas")
                 .width(None)
-                .on_edit(|s: &mut State| &mut s.folder_editor.as_mut().expect("open editor").name)
+                .on_edit(|s: &mut State| &mut s.folder_name)
                 .build(k)
                 .key("folder-name"),
         );
@@ -747,12 +756,13 @@ fn folder_dialog(s: &State, k: &Kit, layers: &mut Vec<El>) {
         .role("radiogroup")
         .label("Cor da pasta")
         .focus_group();
+    let ui_theme = crate::theme::kit_theme(k);
     for color in SessionColor::ALL {
         let selected = color == editor.color;
         let swatch = if color == SessionColor::None {
             k.c.layer_03
         } else {
-            crate::theme::session_swatch(color.slug(), k.dark)
+            crate::theme::session_swatch(color.slug(), ui_theme)
         };
         colors = colors.child(
             k.interactive(
@@ -986,12 +996,7 @@ mod tests {
         rt.state = State::fixture();
         let key = rt.state.workspace[0].key;
         rt.state.edit_folder(None, None);
-        rt.state
-            .folder_editor
-            .as_mut()
-            .unwrap()
-            .name
-            .replace_text("Aberturas");
+        rt.state.folder_name.replace_text("Aberturas");
         rt.state.save_folder();
         settle(&mut rt);
         let (x, y) = rt.find(&format!("session-{key}")).expect("session row");
@@ -1093,12 +1098,7 @@ mod tests {
         tap(&mut rt, "new-folder");
         settle(&mut rt);
         assert!(rt.find("folder-name").is_some());
-        rt.state
-            .folder_editor
-            .as_mut()
-            .unwrap()
-            .name
-            .replace_text("Aberturas");
+        rt.state.folder_name.replace_text("Aberturas");
         rt.invalidate();
         settle(&mut rt);
         tap(&mut rt, "folder-color-green");
@@ -1113,12 +1113,7 @@ mod tests {
         assert!(rt.find(&format!("session-{key}")).is_none());
         choose_folder_action(&mut rt, &id, "Editar pasta…");
         settle(&mut rt);
-        rt.state
-            .folder_editor
-            .as_mut()
-            .unwrap()
-            .name
-            .replace_text("Estudos");
+        rt.state.folder_name.replace_text("Estudos");
         rt.invalidate();
         settle(&mut rt);
         tap(&mut rt, "save-folder");
@@ -1354,5 +1349,44 @@ mod tests {
         settle(&mut rt);
         assert_eq!(rt.state.active_workspace, Some(session));
         assert!(rt.state.session_drag.is_none());
+    }
+
+    #[test]
+    fn dragging_back_near_origin_updates_point_and_clears_previous_target() {
+        let mut rt = rune::App::new(crate::spec()).headless_runtime(
+            (1220.0, 900.0),
+            Env {
+                system_dark: true,
+                scale: 1.0,
+            },
+        );
+        rt.state = crate::fixtures::workspace_scene();
+        let first = rt.state.workspace[0].key;
+        let second = rt.state.workspace[1].key;
+        crate::fixtures::file_session(&mut rt.state, first, SessionColor::Blue);
+        crate::fixtures::file_session(&mut rt.state, second, SessionColor::Amber);
+        settle(&mut rt);
+
+        let source = format!("session-{second}");
+        let (sx, sy) = rt.find(&source).expect("drag source");
+        let (tx, ty) = rt
+            .find("folder-toggle-fixture-blue")
+            .expect("target folder");
+        rt.pointer_down(sx, sy);
+        rt.pointer_move(tx, ty);
+        settle(&mut rt);
+        assert!(rt.state.session_drag.as_ref().unwrap().target.is_some());
+
+        // Returning within the 6px start hysteresis must still update the active drag.
+        rt.pointer_move(sx + 2.0, sy + 1.0);
+        settle(&mut rt);
+        let active = rt.state.session_drag.as_ref().expect("drag remains active");
+        assert_eq!(active.point, [sx + 2.0, sy + 1.0]);
+        assert_eq!(active.target, None);
+
+        rt.pointer_up(sx + 2.0, sy + 1.0);
+        settle(&mut rt);
+        assert!(rt.state.session_drag.is_none());
+        assert_eq!(rt.state.session_folder(second).unwrap().id, "fixture-amber");
     }
 }

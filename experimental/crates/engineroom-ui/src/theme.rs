@@ -128,7 +128,9 @@ pub fn kit(theme: Theme) -> Kit {
 
 /// A discreet, theme-aware accent from the app's own colour scales for a named swatch.
 /// Unknown names are transparent so callers can keep the marker's layout without ink.
-pub fn session_swatch(name: &str, dark: bool) -> Color {
+#[must_use]
+pub fn session_swatch(name: &str, theme: Theme) -> Color {
+    let dark = theme == Theme::Dark;
     // Step 9 reads on dark surfaces; step 11 keeps the same hues legible on light ones.
     let step = if dark { 9 } else { 11 };
     let scale = |name: &str| rune_theme_opencode::scale(name, dark, step);

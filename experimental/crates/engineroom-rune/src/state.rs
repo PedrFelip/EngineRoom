@@ -120,6 +120,7 @@ pub struct State {
     pub session_drag: Option<crate::session_style::SessionDrag>,
     pub folder_menu: Option<(String, PointerPress)>,
     pub folder_editor: Option<crate::session_style::FolderEditor>,
+    pub folder_name: TextEdit,
     /// Secondary-press target for the sidebar's context menu: session key and anchor point.
     pub session_menu: Option<(u64, PointerPress)>,
     next_workspace_key: u64,
@@ -208,6 +209,7 @@ impl Default for State {
             session_drag: None,
             folder_menu: None,
             folder_editor: None,
+            folder_name: TextEdit::new(""),
             session_menu: None,
             next_workspace_key: 0,
             preference_store: None,
@@ -711,7 +713,6 @@ impl State {
     }
     fn sync_live(&mut self) {
         use engineroom_backend::review::types::{LiveRequest, LiveSettings};
-        use shakmaty::{EnPassantMode, fen::Fen};
         let Some(id) = self.session.id().map(str::to_owned) else {
             return;
         };
@@ -721,13 +722,11 @@ impl State {
         ) {
             return;
         }
-        let fen = Fen::from_position(self.position(), EnPassantMode::Legal).to_string();
+        let fen = self.current_fen().to_owned();
         let node_id = self.variation_node_id();
         let source_fen = self.active_variation.and_then(|i| {
             let v = &self.variations[i];
-            v.cursor
-                .checked_sub(1)
-                .map(|j| engineroom_backend::review::core::fen(&v.positions[j]))
+            v.cursor.checked_sub(1).map(|j| v.fen_at(j).to_owned())
         });
         let source_analysis = source_fen
             .as_deref()
@@ -1331,7 +1330,7 @@ impl State {
     pub fn position(&self) -> &Chess {
         match self.active_variation {
             Some(i) => self.variations[i].position(),
-            None => &self.game.positions[self.ply],
+            None => &self.game.positions()[self.ply],
         }
     }
     /// FEN of the current position from the flat mainline/variation arrays.
@@ -1371,7 +1370,7 @@ impl State {
                     .parse::<shakmaty::san::SanPlus>()
                     .ok()?
                     .san
-                    .to_move(&self.game.positions[i])
+                    .to_move(&self.game.positions()[i])
                     .ok()
             })
             .map(review_data::squares)
@@ -1386,8 +1385,8 @@ impl State {
             "{}:{}:{}:{}",
             i,
             variation.cursor,
-            engineroom_backend::review::core::fen(&variation.positions[variation.cursor - 1]),
-            engineroom_backend::review::core::fen(variation.position())
+            variation.fen_at(variation.cursor - 1),
+            variation.fen()
         ))
     }
     fn apply_variation_classification(
@@ -1677,8 +1676,8 @@ impl State {
             .is_some_and(|class| class.critical())
             && match self.learning_side {
                 LearningSide::All => true,
-                LearningSide::White => self.game.positions[ply - 1].turn().is_white(),
-                LearningSide::Black => self.game.positions[ply - 1].turn().is_black(),
+                LearningSide::White => self.game.positions()[ply - 1].turn().is_white(),
+                LearningSide::Black => self.game.positions()[ply - 1].turn().is_black(),
             }
     }
     pub fn next_critical(&mut self) {
@@ -1787,8 +1786,8 @@ mod council_regressions {
     #[test]
     fn mainline_repeated_fen_uses_its_ply_and_live_candidate_policy() {
         let mut state = State::fixture();
-        state.game.positions[1] = state.game.positions[0].clone();
-        state.game.fens[1] = state.game.fens[0].clone();
+        let initial = state.game.positions()[0].clone();
+        state.game.replace_position(1, initial);
         let positions = &mut state.real_result.as_mut().unwrap().positions;
         positions[1].fen = positions[0].fen.clone();
         positions[0].cp = 10;

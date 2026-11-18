@@ -33,8 +33,13 @@ use tokio::sync::watch;
 struct CountingAllocator;
 static ALLOCS: AtomicUsize = AtomicUsize::new(0);
 static BYTES: AtomicUsize = AtomicUsize::new(0);
+// SAFETY: All allocation, deallocation, and reallocation methods delegate
+// directly to `std::alloc::System` with the caller-provided `Layout` and
+// pointer unchanged, preserving `GlobalAlloc`'s alignment, size, and ownership
+// invariants while updating atomic counters on success.
 unsafe impl GlobalAlloc for CountingAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        // SAFETY: Forwarded unchanged from the caller's `GlobalAlloc::alloc` contract.
         let ptr = unsafe { System.alloc(layout) };
         if !ptr.is_null() {
             ALLOCS.fetch_add(1, Ordering::Relaxed);
@@ -43,9 +48,11 @@ unsafe impl GlobalAlloc for CountingAllocator {
         ptr
     }
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+        // SAFETY: Forwarded unchanged from the caller's `GlobalAlloc::dealloc` contract.
         unsafe { System.dealloc(ptr, layout) }
     }
     unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+        // SAFETY: Forwarded unchanged from the caller's `GlobalAlloc::realloc` contract.
         let next = unsafe { System.realloc(ptr, layout, new_size) };
         if !next.is_null() {
             ALLOCS.fetch_add(1, Ordering::Relaxed);

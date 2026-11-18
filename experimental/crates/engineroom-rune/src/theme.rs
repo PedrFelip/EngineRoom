@@ -2,12 +2,16 @@
 
 use crate::state::Appearance;
 
-pub use engineroom_ui::{FAMILIES, FONTS, session_swatch};
+pub use engineroom_ui::{FAMILIES, FONTS, Theme, session_swatch};
+
+pub fn kit_theme(k: &rune_kit::Kit) -> Theme {
+    if k.dark { Theme::Dark } else { Theme::Light }
+}
 
 pub fn kit(appearance: Appearance) -> rune_kit::Kit {
     let theme = match appearance {
-        Appearance::Dark => engineroom_ui::Theme::Dark,
-        Appearance::Light => engineroom_ui::Theme::Light,
+        Appearance::Dark => Theme::Dark,
+        Appearance::Light => Theme::Light,
     };
     engineroom_ui::kit(theme)
 }

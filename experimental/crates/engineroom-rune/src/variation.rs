@@ -5,9 +5,9 @@ use shakmaty::{Chess, Move, Position, san::SanPlus};
 pub struct Variation {
     pub root_ply: usize,
     pub branch_from: Option<(usize, usize)>,
-    pub positions: Vec<Chess>,
+    positions: Vec<Chess>,
     /// FEN for each position, parallel to `positions`.
-    pub fens: Vec<String>,
+    fens: Vec<String>,
     pub moves: Vec<Move>,
     pub san: Vec<String>,
     pub classifications: Vec<Option<engineroom_backend::review::types::Classification>>,
@@ -41,8 +41,15 @@ impl Variation {
         self.positions.push(position);
         self.cursor += 1;
     }
+    pub fn positions(&self) -> &[Chess] {
+        &self.positions
+    }
     pub fn position(&self) -> &Chess {
         &self.positions[self.cursor]
+    }
+    /// Cached FEN for the position at `index`.
+    pub fn fen_at(&self, index: usize) -> &str {
+        &self.fens[index]
     }
     /// Cached FEN for the current cursor position.
     pub fn fen(&self) -> &str {
