@@ -43,7 +43,7 @@ impl Pipeline {
         let pgn = config.pgn.clone();
         let game = tokio::task::spawn_blocking(move || core::extract(&pgn))
             .await
-            .map_err(|e| ReviewError::new(ReviewErrorCode::InvalidPgn, "pgn", e))??;
+            .map_err(|e| ReviewError::with_source(ReviewErrorCode::InvalidPgn, "pgn", e))??;
         cancel.check()?;
         if let Some(profile) = adaptive::profile(config.analysis_kind)? {
             self.discard().await;
@@ -61,7 +61,7 @@ impl Pipeline {
         let phases = core::phases(&game.fens);
         let mode = config.mode;
         let value = if mode == Mode::Time {
-            config.movetime_ms.unwrap_or(5000)
+            config.movetime_ms.unwrap_or(DEFAULT_MOVETIME_MS)
         } else {
             config.engine.depth
         };

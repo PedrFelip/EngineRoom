@@ -1,0 +1,12 @@
+[Event "Strobe cache fixture - long"]
+[Site "EngineRoom perf"]
+[Date "2026.11.17"]
+[Round "?"]
+[White "Fake"]
+[Black "Fake"]
+[Result "*"]
+
+1. a3 a6 2. b3 a5 3. c3 a4 4. bxa4 b6 5. d3 b5 6. axb5 c6 7. bxc6 dxc6
+8. e3 c5 9. f3 c4 10. dxc4 e6 11. g3 e5 12. h3 e4 13. fxe4 f6 14. a4 f5
+15. exf5 g6 16. fxg6 hxg6 17. e4 g5 18. g4 Na6 19. h4 gxh4 20. a5 h3
+21. c5 h2 22. c4 hxg1=Q *

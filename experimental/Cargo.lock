@@ -945,6 +945,7 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+ "shakmaty",
  "tokio",
 ]
 
@@ -960,7 +961,7 @@ dependencies = [
 
 [[package]]
 name = "engineroom-rune"
-version = "3.0.0-alpha.2"
+version = "3.0.0-alpha.3"
 dependencies = [
  "blake3",
  "directories",

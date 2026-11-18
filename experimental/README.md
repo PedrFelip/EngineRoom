@@ -206,6 +206,10 @@ O histórico carrega páginas de até 100 revisões com "Carregar mais"; reabrir
 reanalisar e excluir usam o banco experimental. As preferências ficam no
 `preferences.json` ao lado do banco. Os cenários headless mantêm fixtures determinísticas e não abrem o motor nem o banco.
 
+Para testar e medir partes da pipeline de análise com Strobe (engine falsa,
+cache SQLite, análise ao vivo e perfil automático), veja
+[perf/README.md](perf/README.md).
+
 Para reproduzir a medição Strobe da cena de revisão headless e consultar suas
 limitações, veja [strobe-study.md](strobe-study.md).
 

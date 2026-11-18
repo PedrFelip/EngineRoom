@@ -1,5 +1,8 @@
 //! Rust owns the entire UCI exchange and exclusive process lease.
-use super::{scoring::win_pct, types::*};
+use super::{
+    scoring::win_pct,
+    types::{RawLine, RawPosition, Result, ReviewError, ReviewErrorCode},
+};
 use std::{future::Future, pin::Pin, time::Duration};
 use tokio::sync::watch;
 pub type Task<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
@@ -186,14 +189,14 @@ pub fn parse_info(line: &str) -> Option<RawLine> {
         san: None,
     })
 }
-/// MultiPV rank is 1-based; higher ranks are malformed reports and discarded.
-/// Stockfish caps MultiPV at 256, so this bound keeps the slot vector bounded
+/// `MultiPV` rank is 1-based; higher ranks are malformed reports and discarded.
+/// Stockfish caps `MultiPV` at 256, so this bound keeps the slot vector bounded
 /// without rejecting any rank a configured search can produce.
 const MAX_MULTIPV_RANK: u32 = 256;
 
-/// Latest completed report per MultiPV rank, stored in a flat slot vector.
+/// Latest completed report per `MultiPV` rank, stored in a flat slot vector.
 ///
-/// MultiPV ranks are dense in practice, so a `Vec<Option<RawLine>>` gives O(1)
+/// `MultiPV` ranks are dense in practice, so a `Vec<Option<RawLine>>` gives O(1)
 /// updates and ascending-rank iteration without a tree node per rank. Gaps stay
 /// empty and are skipped when the lines are collected, preserving sparse and
 /// malformed reports exactly as the previous ordered map did.

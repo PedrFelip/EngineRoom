@@ -1,0 +1,10 @@
+[Event "Strobe cache fixture - initial FEN"]
+[Site "EngineRoom perf"]
+[Date "2026.11.17"]
+[Round "?"]
+[White "Fake"]
+[Black "Fake"]
+[Result "*"]
+[FEN "r1bqkbnr/pppp1ppp/2n5/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 3 3"]
+
+3... Nf6 4. O-O Be7 5. Nc3 d6 *
