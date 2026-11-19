@@ -1,4 +1,5 @@
 //! Strobe-only harness for the production manual review pipeline.
+use engineroom_application::db::mode::Mode;
 use engineroom_backend::review::{
     core,
     engine::Cancellation,
@@ -7,7 +8,6 @@ use engineroom_backend::review::{
     repository::SqliteRepository,
     types::{AnalysisKind, EngineTier, Event, ReviewConfig},
 };
-use engineroom_domain::db::mode::Mode;
 use std::{path::PathBuf, sync::Arc};
 
 #[tokio::main(flavor = "current_thread")]

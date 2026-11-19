@@ -15,6 +15,7 @@
 //! result, counter and teardown invariants before printing `strobe:metric`
 //! lines for Strobe's `cli()` target.
 
+use engineroom_application::db::mode::Mode;
 use engineroom_backend::review::{
     core,
     engine::{Cancellation, EngineFactory, EnginePort, Task},
@@ -25,7 +26,6 @@ use engineroom_backend::review::{
         ReviewErrorCode, ReviewResult,
     },
 };
-use engineroom_domain::db::mode::Mode;
 use shakmaty::{CastlingMode, Position};
 use std::{
     collections::{HashSet, VecDeque},

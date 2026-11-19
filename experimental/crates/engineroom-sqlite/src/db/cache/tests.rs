@@ -29,8 +29,8 @@ fn mixed_coverage_flush_rolls_back_all_entries_on_failure() {
     assert!(
         matches!(&error, rusqlite::Error::SqliteFailure(_, Some(message)) if message == "write failed")
     );
-    let review_error = crate::review::types::ReviewError::with_source(
-        crate::review::types::ReviewErrorCode::Cache,
+    let review_error = engineroom_application::review::types::ReviewError::with_source(
+        engineroom_application::review::types::ReviewErrorCode::Cache,
         "cache.put",
         error,
     );
@@ -44,9 +44,9 @@ fn mixed_coverage_flush_rolls_back_all_entries_on_failure() {
         Some(rusqlite::ErrorCode::ConstraintViolation)
     );
     assert_eq!(
-        serde_json::to_value(crate::review::types::ReviewErrorPayload::from(
-            &review_error
-        ))
+        serde_json::to_value(
+            engineroom_application::review::types::ReviewErrorPayload::from(&review_error)
+        )
         .unwrap(),
         serde_json::json!({
             "code": "cache", "operation": "cache.put", "message": "write failed",

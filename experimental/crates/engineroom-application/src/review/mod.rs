@@ -1,13 +1,13 @@
-pub use engineroom_domain::review::adaptive;
+pub mod adaptive;
 mod automatic;
-pub use engineroom_domain::review::core;
+pub mod core;
 pub mod engine;
 pub mod pipeline;
 mod pool;
 pub mod repository;
-pub use engineroom_domain::review::scoring;
+pub mod scoring;
 pub mod session;
-pub use engineroom_domain::review::types;
+pub mod types;
 
 #[cfg(test)]
 mod tests;

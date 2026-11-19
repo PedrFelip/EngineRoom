@@ -27,8 +27,9 @@ O workspace separa a aplicação desktop, os componentes reutilizáveis e o back
 - `crates/engineroom-rune`: aplicação desktop, estado, navegação e telas Rune.
 - `crates/engineroom-ui`: tema, fontes e primitivas de interface compartilháveis.
 
-- `crates/engineroom-domain`: tipos de análise, modo, transformações de xadrez, pontuação e perfis adaptativos.
-- `crates/engineroom-application`: portas de motor e repositório, pipeline, pool, sessões e normalização de revisões.
+- `crates/engineroom-application`: tipos de análise, modo, transformações de xadrez,
+  pontuação e perfis adaptativos, além das portas de motor e repositório,
+  pipeline, pool, sessões e normalização de revisões.
 - `crates/engineroom-uci`: adaptador do processo Stockfish via UCI.
 - `crates/engineroom-sqlite`: cache, histórico, migrações e estatísticas em SQLite.
 - `crates/engineroom-backend`: fachada de revisão e importações HTTP nativas.

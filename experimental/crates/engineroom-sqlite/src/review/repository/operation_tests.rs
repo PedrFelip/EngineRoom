@@ -32,14 +32,15 @@ async fn cache_advertises_only_produced_lines_and_their_common_depth() {
             .is_some()
     );
     for (multipv, depth, root) in [(2, 12, "d2d4"), (3, 15, "g1f3")] {
-        raw.lines.push(crate::review::types::RawLine {
-            multipv,
-            depth: Some(depth),
-            cp: 10,
-            pv: vec![root.into()],
-            san: None,
-            unstable: false,
-        });
+        raw.lines
+            .push(engineroom_application::review::types::RawLine {
+                multipv,
+                depth: Some(depth),
+                cp: 10,
+                pv: vec![root.into()],
+                san: None,
+                unstable: false,
+            });
     }
     repo.put(&[raw.clone()], Mode::Time, 1000, 3).await.unwrap();
     assert!(

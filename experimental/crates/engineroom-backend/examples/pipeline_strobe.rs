@@ -5,6 +5,7 @@
 //! reproducible without Stockfish; the real-engine scenarios live in the
 //! existing `strobe_review.rs` example. Each scenario prints `strobe:metric`
 //! lines so Strobe's `cli()` target can read counters alongside CPU and time.
+use engineroom_application::db::mode::Mode;
 use engineroom_backend::review::{
     core,
     engine::{Cancellation, EngineFactory, EnginePort, Task},
@@ -15,7 +16,6 @@ use engineroom_backend::review::{
         ReviewError, ReviewErrorCode,
     },
 };
-use engineroom_domain::db::mode::Mode;
 use std::{
     collections::VecDeque,
     path::{Path, PathBuf},
