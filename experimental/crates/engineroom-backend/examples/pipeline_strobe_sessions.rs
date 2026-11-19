@@ -8,6 +8,7 @@
 //! not processes. Watchdog timeouts only detect hangs; they never pace a
 //! scenario. Each scenario prints `strobe:metric` lines for the Strobe `cli()`
 //! target, alongside CPU and wall time.
+use engineroom_application::db::mode::Mode;
 use engineroom_backend::review::{
     core,
     engine::{Cancellation, EngineFactory, EnginePort, Task},
@@ -18,7 +19,6 @@ use engineroom_backend::review::{
         ReviewError, ReviewErrorCode,
     },
 };
-use engineroom_domain::db::mode::Mode;
 use std::{
     collections::VecDeque,
     sync::{

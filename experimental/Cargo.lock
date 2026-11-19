@@ -928,7 +928,8 @@ checksum = "66b7e2430c6dff6a955451e2cfc438f09cea1965a9d6f87f7e3b90decc014099"
 name = "engineroom-application"
 version = "0.1.0"
 dependencies = [
- "engineroom-domain",
+ "pgn-reader",
+ "serde",
  "serde_json",
  "shakmaty",
  "tokio",
@@ -939,7 +940,6 @@ name = "engineroom-backend"
 version = "0.1.0"
 dependencies = [
  "engineroom-application",
- "engineroom-domain",
  "engineroom-sqlite",
  "engineroom-uci",
  "reqwest",
@@ -947,16 +947,6 @@ dependencies = [
  "serde_json",
  "shakmaty",
  "tokio",
-]
-
-[[package]]
-name = "engineroom-domain"
-version = "0.1.0"
-dependencies = [
- "pgn-reader",
- "serde",
- "serde_json",
- "shakmaty",
 ]
 
 [[package]]
@@ -987,7 +977,6 @@ name = "engineroom-sqlite"
 version = "0.1.0"
 dependencies = [
  "engineroom-application",
- "engineroom-domain",
  "rusqlite",
  "serde",
  "serde_json",
@@ -1000,7 +989,6 @@ name = "engineroom-uci"
 version = "0.1.0"
 dependencies = [
  "engineroom-application",
- "engineroom-domain",
  "shakmaty",
  "tokio",
 ]

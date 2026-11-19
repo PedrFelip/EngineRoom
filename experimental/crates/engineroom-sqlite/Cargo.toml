@@ -6,7 +6,6 @@ license = "GPL-3.0-or-later"
 publish = false
 
 [dependencies]
-engineroom-domain = { path = "../engineroom-domain" }
 tokio = { version = "1", features = ["sync", "rt"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
