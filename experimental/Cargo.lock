@@ -968,6 +968,7 @@ dependencies = [
  "serde",
  "serde_json",
  "shakmaty",
+ "tempfile",
  "tokio",
  "unicode-normalization",
 ]

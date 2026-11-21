@@ -29,6 +29,14 @@ def scene_errors(tree, scene, panel_open):
         "preview": ["move-list"],
     }
     errors = []
+    export_key = "export-annotated-pgn"
+    if scene in ("review", "review-light"):
+        nodes = {n.get("key"): n for n in walk(tree["accessibility"])}
+        export = nodes.get(export_key, {})
+        if export_key not in keys or export.get("role") != "button" or export.get("name") != "Exportar PGN anotado":
+            errors.append("Missing accessible annotated PGN export button")
+    elif scene in ("preview", "demo-progress", "demo-error") and export_key in keys:
+        errors.append(f"Scene {scene}: export is available without a completed review")
     if panel_open and ("compact-review-tabs" not in keys or "compact-panel" in keys):
         errors += [f"Scene {scene}: missing {key}" for key in required[scene] if key not in keys]
         if scene in ("review-light-variation", "review-white-variation"):
