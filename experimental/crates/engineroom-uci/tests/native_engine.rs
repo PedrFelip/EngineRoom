@@ -185,11 +185,10 @@ async fn real_native_stockfish_checkpoint_precedes_completion_and_cancel_release
     };
     assert_eq!(result.unwrap_err().code, ReviewErrorCode::Cancelled);
     let (_close, fresh) = cancel();
+    let probe = tokio::time::timeout(Duration::from_millis(30), factory.acquire(&fresh)).await;
     assert!(
-        tokio::time::timeout(Duration::from_millis(30), factory.acquire(&fresh))
-            .await
-            .is_err(),
-        "cancelled search still owns its child and lease through teardown"
+        probe.is_err(),
+        "acquiring must time out while the cancelled search still owns its child and lease"
     );
     port.shutdown().await;
     let mut next = tokio::time::timeout(Duration::from_secs(5), factory.acquire(&fresh))

@@ -146,14 +146,19 @@ async fn pool_checkpoints_are_scoped_to_each_go_and_completion_remains_reliable(
         .await
         .expect("acquire worker");
     let mut first = pool
-        .submit_position(0, fen.clone(), None, 100, 2)
+        .submit_position(0, fen.clone(), None, 100, 1)
         .await
         .expect("submit first search");
     tokio::time::timeout(Duration::from_secs(1), first.checkpoint.changed())
         .await
         .expect("checkpoint before bestmove")
         .expect("checkpoint channel");
-    assert_eq!(first.checkpoint.borrow().as_ref().unwrap().depth, 12);
+    {
+        let latest = first.checkpoint.borrow();
+        let checkpoint = latest.as_ref().expect("first go checkpoint");
+        assert_eq!(checkpoint.depth, 12);
+        assert_eq!(checkpoint.lines.len(), 1);
+    }
     assert!(matches!(
         first.completed.try_recv(),
         Err(tokio::sync::oneshot::error::TryRecvError::Empty)
@@ -165,11 +170,22 @@ async fn pool_checkpoints_are_scoped_to_each_go_and_completion_remains_reliable(
         .submit_position(0, fen, None, 100, 2)
         .await
         .expect("reuse the same worker");
-    assert!(second.checkpoint.borrow().is_none());
     tokio::time::timeout(Duration::from_secs(1), second.checkpoint.changed())
         .await
         .expect("fresh checkpoint")
         .expect("checkpoint channel");
+    {
+        let latest = second.checkpoint.borrow();
+        let checkpoint = latest.as_ref().expect("second go checkpoint");
+        assert_eq!(
+            checkpoint
+                .lines
+                .iter()
+                .map(|line| line.multipv)
+                .collect::<Vec<_>>(),
+            [1, 2],
+        );
+    }
     assert!(
         first.checkpoint.has_changed().is_err(),
         "the prior go's sender closed"
@@ -177,6 +193,10 @@ async fn pool_checkpoints_are_scoped_to_each_go_and_completion_remains_reliable(
     close.send_replace(true);
     let result = second.completed.await.expect("cancellation reply");
     assert!(matches!(result, Err(error) if error.code == ReviewErrorCode::Cancelled));
+    assert!(
+        second.checkpoint.has_changed().is_err(),
+        "the cancelled go's sender closed"
+    );
     pool.close().await.expect("drain cancelled search");
     assert_eq!(factory.activity.closed.load(Ordering::SeqCst), 1);
 }

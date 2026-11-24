@@ -146,6 +146,14 @@ cargo test --workspace
 ./scripts/check-responsive.sh
 ```
 
+Os testes de integração UCI com Stockfish real são executados manualmente.
+Com o binário em `experimental/resources/stockfish`, rode de `experimental/`:
+
+```sh
+ENGINE_ROOM_STOCKFISH="$PWD/resources/stockfish" \
+  cargo test --locked -p engineroom-uci real_native_stockfish -- --ignored
+```
+
 Os scripts renderizam as telas e os estados de interação em `artifacts/` e verificam
 as árvores exportadas. Requer Python 3. Abra os PNGs para a inspeção visual.
 

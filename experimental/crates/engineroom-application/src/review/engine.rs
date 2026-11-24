@@ -776,8 +776,9 @@ mod tests {
             "info depth 4 multipv 1 score cp 10 time 10 nodes 500 pv e2e4",
             "info depth 4 multipv 3 score cp 40 pv g1f3",
             "info depth 4 multipv 2 score cp 30 pv c2c4",
-            "info depth 5 multipv 1 score cp 40 pv g1f3",
-            "info depth 5 multipv 2 score cp 35 upperbound pv c2c4",
+            "info depth 5 multipv 1 score cp 40 time 999 nodes 9999 pv e2e4",
+            "info depth 5 multipv 1 score cp 35 upperbound pv c2c4",
+            "info depth 5 multipv 1 score cp 41 pv g1f3",
             "info depth 5 multipv 2 score cp 32 time 15 nodes 613 pv c2c4",
             "info depth 5 multipv 1 score cp 45 pv b1c3",
             "info depth 6 multipv 1 score cp 50 pv e2e4",
@@ -855,6 +856,20 @@ mod tests {
                 .observe(&parse_info_header(older).unwrap(), older)
                 .is_none()
         );
+    }
+
+    #[tokio::test]
+    async fn checkpoints_require_a_legal_position_even_when_the_engine_returns_scores() {
+        let mut port =
+            Transcript(vec!["info depth 4 score cp 20 pv e2e4", "bestmove e2e4"].into_iter());
+        let cancel = cancel();
+        let (publish, observed) = SearchCheckpoints::channel(1);
+        let raw =
+            evaluate_with_checkpoints(&mut port, "invalid FEN", None, 50, 1000, &cancel, publish)
+                .await
+                .expect("the unchecked FEN still follows the existing UCI result path");
+        assert_eq!(raw.depth, 4);
+        assert!(observed.borrow().is_none());
     }
 
     /// Engine port that records every sent command and replays scripted stdout lines.
