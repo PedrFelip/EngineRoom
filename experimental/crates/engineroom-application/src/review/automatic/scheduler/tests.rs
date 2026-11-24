@@ -46,11 +46,10 @@ fn exact_fen_reservation_skips_blocked_work_and_resumes_stronger_demand() {
     );
 
     let mut queue = VecDeque::from([4, 2, 3]);
-    let mut blocks = vec![VecDeque::new(); 2];
     scheduler.reserve(first);
-    assert_eq!(scheduler.take_triage(0, &mut queue, &mut blocks), Some(2));
-    assert_eq!(scheduler.take_triage(1, &mut queue, &mut blocks), Some(3));
-    assert_eq!(scheduler.take_triage(1, &mut queue, &mut blocks), None);
+    assert_eq!(scheduler.take_triage(&mut queue), Some(2));
+    assert_eq!(scheduler.take_triage(&mut queue), Some(3));
+    assert_eq!(scheduler.take_triage(&mut queue), None);
 
     assert_eq!(
         scheduler.complete(first, Demand::time(180, 1), &evidence(&game.fens[0], &[12])),
@@ -63,7 +62,7 @@ fn exact_fen_reservation_skips_blocked_work_and_resumes_stronger_demand() {
             .is_none()
     );
     assert!(scheduler.lookup(first, Demand::time(500, 1)).is_none());
-    assert_eq!(scheduler.take_triage(1, &mut queue, &mut blocks), Some(4));
+    assert_eq!(scheduler.take_triage(&mut queue), Some(4));
 }
 
 #[test]

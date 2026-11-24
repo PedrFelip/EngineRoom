@@ -620,7 +620,6 @@ async fn execute(
         queue.retain(|&i| state.baseline[i].is_none());
     }
     let mut waiters = JoinSet::new();
-    let mut blocks: Vec<VecDeque<usize>> = vec![];
     // Keep the latest complete checkpoint scoped to its active dispatch.
     // A future continuation policy can sample it here. Scheduling and cache
     // coverage in this phase use the completed result from bestmove.
@@ -716,10 +715,7 @@ async fn execute(
             .as_ref()
             .is_some_and(|native| native.latest.is_some());
         if pool.is_none() && (!queue.is_empty() || needs_refinement || needs_live) {
-            let acquired = Pool::acquire(factory, state.sizing, count, cancel).await?;
-            let workers = acquired.len();
-            *pool = Some(acquired);
-            blocks = (0..workers).map(|_| VecDeque::new()).collect();
+            *pool = Some(Pool::acquire(factory, state.sizing, count, cancel).await?);
         }
         if let Some(pool) = pool.as_ref() {
             for worker in 0..pool.len() {
@@ -753,36 +749,11 @@ async fn execute(
                         demand: Demand::time(target.search.ms, target.search.multipv),
                     })
                 } else if let Some(native) = &native {
-                    std::iter::from_fn(|| {
-                        native
-                            .scheduler
-                            .take_triage(worker, &mut queue, &mut blocks)
-                    })
-                    .find(|&index| state.baseline[index].is_none())
-                    .map(|index| Job::triage(worker, index, profile))
+                    std::iter::from_fn(|| native.scheduler.take_triage(&mut queue))
+                        .find(|&index| state.baseline[index].is_none())
+                        .map(|index| Job::triage(worker, index, profile))
                 } else {
-                    if blocks[worker].is_empty() {
-                        // Claim at most four consecutive positions. Missing cache
-                        // entries can have gaps, so do not join separate runs.
-                        while blocks[worker].len() < 4 {
-                            let Some(&next) = queue.front() else {
-                                break;
-                            };
-                            if blocks[worker].back().is_some_and(|last| next != last + 1) {
-                                break;
-                            }
-                            if let Some(index) = queue.pop_front() {
-                                blocks[worker].push_back(index);
-                            }
-                        }
-                    }
-                    // A refiner may have paused its block. Let a free triage
-                    // worker take those remaining positions rather than idle.
-                    let preferred = pool.len() - 1;
-                    if blocks[worker].is_empty() && worker != preferred {
-                        blocks[worker] = std::mem::take(&mut blocks[preferred]);
-                    }
-                    blocks[worker]
+                    queue
                         .pop_front()
                         .map(|index| Job::triage(worker, index, profile))
                 };

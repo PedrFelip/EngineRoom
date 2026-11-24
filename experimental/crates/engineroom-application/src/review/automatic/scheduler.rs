@@ -322,34 +322,14 @@ impl<'game> Scheduler<'game> {
         None
     }
 
-    pub fn take_triage(
-        &self,
-        worker: usize,
-        queue: &mut VecDeque<usize>,
-        blocks: &mut [VecDeque<usize>],
-    ) -> Option<usize> {
+    /// Takes the oldest queued position without a search in flight.
+    ///
+    /// Blocked entries stay queued and never prevent a worker from taking the
+    /// next ready position.
+    pub fn take_triage(&self, queue: &mut VecDeque<usize>) -> Option<usize> {
         let available = |ply: &usize| self.ply_id(*ply).is_none_or(|id| self.available(id));
-        if let Some(slot) = blocks[worker].iter().position(available) {
-            return blocks[worker].remove(slot);
-        }
-        if let Some(slot) = queue.iter().position(available) {
-            let index = queue.remove(slot)?;
-            // Keep the usual consecutive batch limit. Blocked entries stay
-            // pending and never prevent a worker from claiming another run.
-            for next in (index + 1..index + 4).take(if blocks[worker].is_empty() { 3 } else { 0 }) {
-                if queue.get(slot) != Some(&next) || !available(&next) {
-                    break;
-                }
-                blocks[worker].extend(queue.remove(slot));
-            }
-            return Some(index);
-        }
-        for block in blocks.iter_mut() {
-            if let Some(slot) = block.iter().position(available) {
-                return block.remove(slot);
-            }
-        }
-        None
+        let slot = queue.iter().position(available)?;
+        queue.remove(slot)
     }
 }
 

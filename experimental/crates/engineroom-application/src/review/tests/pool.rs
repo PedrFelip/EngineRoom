@@ -405,13 +405,15 @@ async fn mixed_queue_starts_critical_refinements_before_triage_finishes() {
         .rposition(|(_, value)| *value == 180)
         .unwrap();
     assert!(first_refinement < last_triage, "{searches:?}");
-    let mut first_block_starts: Vec<_> = searches[..3]
+    let mut first_dispatch: Vec<_> = searches[..3]
         .iter()
         .map(|(fen, _)| game.fens.iter().position(|f| f == fen).unwrap())
         .collect();
-    first_block_starts.sort_unstable();
-    assert_eq!(first_block_starts, vec![0, 4, 8]);
-    assert_eq!(updates[0].0, 8); // No waiting for the slower position zero.
+    first_dispatch.sort_unstable();
+    assert_eq!(first_dispatch, vec![0, 1, 2]);
+    // The shared queue hands out the next ready position, so the slow first
+    // position does not gate the first published triage result.
+    assert_ne!(updates[0].0, 0);
     assert!(
         updates
             .iter()
