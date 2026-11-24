@@ -654,7 +654,9 @@ fn parse_cache_mode<'a>(
     let mut cli = None;
     let mut args = args.into_iter();
     while let Some(arg) = args.next() {
-        if arg == "--cache" {
+        if arg == "--no-cache" {
+            cli = Some(CacheMode::Bypass);
+        } else if arg == "--cache" {
             let value = args.next().ok_or("Valor ausente para --cache.")?;
             cli = Some(parse_cache_label(value, "--cache")?);
         } else if let Some(value) = arg.strip_prefix("--cache=") {

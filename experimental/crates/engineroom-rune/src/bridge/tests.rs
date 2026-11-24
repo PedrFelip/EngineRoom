@@ -1281,6 +1281,22 @@ fn cache_mode_defaults_to_enabled_and_cli_overrides_environment() {
         CacheMode::Bypass
     );
     assert_eq!(
+        parse_cache_mode(["--no-cache"], None).unwrap(),
+        CacheMode::Bypass
+    );
+    assert_eq!(
+        parse_cache_mode(["--no-cache"], Some("on")).unwrap(),
+        CacheMode::Bypass
+    );
+    assert_eq!(
+        parse_cache_mode(["--no-cache", "--cache=on"], Some("off")).unwrap(),
+        CacheMode::Enabled
+    );
+    assert_eq!(
+        parse_cache_mode(["--cache=on", "--no-cache"], Some("on")).unwrap(),
+        CacheMode::Bypass
+    );
+    assert_eq!(
         parse_cache_mode(["--cache", "on"], Some("off")).unwrap(),
         CacheMode::Enabled
     );
