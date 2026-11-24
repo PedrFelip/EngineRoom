@@ -66,7 +66,7 @@ impl Native<'_, '_> {
         }
     }
 
-    fn accept(&mut self, request: LiveDemand) {
+    fn accept(&mut self, mut request: LiveDemand) {
         self.latest = None;
         self.latest_dispatched = false;
         if request.reply.is_closed() {
@@ -83,12 +83,14 @@ impl Native<'_, '_> {
         };
         match position {
             Ok(position) => {
+                let canonical = core::fen(&position);
                 if let Some(cp) = core::terminal_position(&position) {
-                    let _ = request.reply.send(Ok(core::terminal_raw(&request.fen, cp)));
+                    let _ = request.reply.send(Ok(core::terminal_raw(&canonical, cp)));
                 } else {
                     let id = self
                         .scheduler
-                        .intern_live(&request.fen, || position.legal_moves().len());
+                        .intern_live(&canonical, || position.legal_moves().len());
+                    request.fen = canonical;
                     self.latest = Some(PendingLive { id, request });
                 }
             }
@@ -103,9 +105,10 @@ impl Native<'_, '_> {
             return;
         };
         let demand = Demand::time(live.request.value, live.request.multipv);
-        if let Some(raw) = self.scheduler.lookup(live.id, demand)
+        if let Some(mut raw) = self.scheduler.lookup(live.id, demand)
             && let Some(live) = self.latest.take()
         {
+            raw.fen = live.request.fen.clone();
             let _ = live.request.reply.send(Ok(raw));
         }
     }
@@ -166,6 +169,7 @@ struct State<'a> {
     baseline: Vec<Option<RawPosition>>,
     refined: Vec<Option<RawPosition>>,
     budgets: Vec<Option<SearchBudget>>,
+    attempted: Vec<Option<SearchBudget>>,
     critical: Vec<Option<adaptive::Critical>>,
     book: usize,
     cached: usize,
@@ -182,7 +186,9 @@ impl State<'_> {
         self.final_targets.as_deref().unwrap_or(&self.ready_targets)
     }
     fn satisfied(&self, target: &Target) -> bool {
-        self.budgets[target.position_index].is_some_and(|b| covers(b, target.search))
+        let index = target.position_index;
+        self.budgets[index].is_some_and(|b| covers(b, target.search))
+            || self.attempted[index].is_some_and(|b| covers(b, target.search))
     }
     fn baseline(&self, index: usize) -> Result<&RawPosition> {
         self.baseline
@@ -250,7 +256,9 @@ impl State<'_> {
         {
             for index in std::iter::once(index).chain(plies) {
                 if self.baseline[index].is_none() {
-                    self.baseline[index] = Some(raw.clone());
+                    let mut ply_raw = raw.clone();
+                    ply_raw.fen = self.game.fens[index].clone();
+                    self.baseline[index] = Some(ply_raw);
                     self.cached += 1;
                     self.discover(index);
                     self.progress(index, Some(self.baseline(index)?), emit);
@@ -389,6 +397,7 @@ async fn run_review(
         baseline: vec![None; count],
         refined: vec![None; count],
         budgets: vec![None; count],
+        attempted: vec![None; count],
         critical: vec![None; game.moves.len()],
         book: core::opening(&game.moves).map_or(0, |(n, _)| n),
         cached: 0,
@@ -512,10 +521,11 @@ async fn execute(
             }
             let search = target.search;
             let demand = Demand::time(search.ms, search.multipv);
-            if let Some(raw) = native
+            if let Some(mut raw) = native
                 .as_ref()
                 .and_then(|n| n.scheduler.lookup(n.scheduler.ply_id(i)?, demand))
             {
+                raw.fen = game.fens[i].clone();
                 state.budgets[i] = Some(search);
                 state.refined[i] = Some(raw);
                 state.cached += 1;
@@ -712,11 +722,15 @@ async fn execute(
             .map_err(|e| failure.unwrap_or(e))?;
         busy.remove(job.worker);
         let raw = completed.raw;
-        if let (Some(native), Some(id)) = (&mut native, fen_id) {
-            native
-                .scheduler
-                .complete(id, Demand::time(completed.value, job.demand.multipv), &raw);
-        }
+        let covered_multipv = if let (Some(native), Some(id)) = (&mut native, fen_id) {
+            Some(native.scheduler.complete(
+                id,
+                Demand::time(completed.value, job.demand.multipv),
+                &raw,
+            ))
+        } else {
+            None
+        };
         // Both stages use unrestricted searches and can populate the FEN cache.
         let buffer = pending
             .iter()
@@ -730,9 +744,20 @@ async fn execute(
         pending[buffer].2.push(raw.clone());
         match job.purpose {
             Purpose::Refinement(index) => {
+                let covered_multipv = covered_multipv.unwrap_or_else(|| {
+                    scheduler::covered_multipv(
+                        &raw,
+                        job.demand.multipv,
+                        game.positions[index].legal_moves().len(),
+                    )
+                });
                 state.searched += 1;
                 refining.remove(index);
                 state.budgets[index] = Some(SearchBudget {
+                    ms: completed.value,
+                    multipv: covered_multipv.max(1),
+                });
+                state.attempted[index] = Some(SearchBudget {
                     ms: completed.value,
                     multipv: job.demand.multipv,
                 });

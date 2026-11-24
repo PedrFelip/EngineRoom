@@ -42,6 +42,7 @@ fn missing_baseline_is_an_error_even_with_a_refinement() {
         baseline: vec![None; 2],
         refined: vec![Some(core::terminal_raw(&game.fens[0], 0)), None],
         budgets: vec![None; 2],
+        attempted: vec![None; 2],
         critical: vec![None],
         book: 0,
         cached: 0,
@@ -61,10 +62,13 @@ fn missing_baseline_is_an_error_even_with_a_refinement() {
 async fn native_review_reuses_exact_fen_before_flush_and_publishes_both_plies() {
     use crate::review::tests::{FakeState, MemoryRepo, factory};
 
-    // A validated game normally has unique FENs because its move clocks advance.
-    // Duplicate a position explicitly to exercise two consumers of one search.
+    // Share positions with matching halfmove clocks even when fullmove counters
+    // differ, while keeping differing halfmove clocks distinct.
     let mut game = core::extract("1. Nf3 Nf6 2. Ng1 Ng8").unwrap();
-    game.fens[4] = game.fens[0].clone();
+    game.fens[2] = game.fens[0].replace(" 0 1", " 2 1");
+    game.positions[2] = core::position(&game.fens[2]).unwrap();
+    game.fens[4] = game.fens[0].replace(" 0 1", " 0 3");
+    game.positions[4] = core::position(&game.fens[4]).unwrap();
     let profile = adaptive::profile(AnalysisKind::Fast).unwrap().unwrap();
     let fen = game.fens[0].clone();
     let mut raw = core::terminal_raw(&fen, 0);
@@ -80,8 +84,14 @@ async fn native_review_reuses_exact_fen_before_flush_and_publishes_both_plies() 
             san: None,
         })
         .collect();
+    let mut raw_different_clock = raw.clone();
+    raw_different_clock.fen = game.fens[2].clone();
     let factory = factory(FakeState {
-        scores: [(fen.clone(), raw)].into(),
+        scores: [
+            (fen.clone(), raw),
+            (game.fens[2].clone(), raw_different_clock),
+        ]
+        .into(),
         ..FakeState::default()
     });
     let repo = MemoryRepo::default();
@@ -118,19 +128,26 @@ async fn native_review_reuses_exact_fen_before_flush_and_publishes_both_plies() 
     .await
     .unwrap();
     assert_eq!(result.positions.len(), 5);
+    for (index, position) in result.positions.iter().enumerate() {
+        assert_eq!(position.fen, game.fens[index], "ply {index}");
+    }
     published.sort_unstable();
     assert_eq!(published, [0, 1, 2, 3, 4]);
     let state = factory.state.lock().unwrap();
-    let fen_command = format!("position fen {fen}");
     let go_command = format!("go movetime {}", profile.triage_ms);
-    assert_eq!(
-        state
-            .sent
-            .windows(2)
-            .filter(|pair| pair[0] == fen_command && pair[1] == go_command)
-            .count(),
-        1,
-    );
+    for expected_fen in [&game.fens[0], &game.fens[2]] {
+        let fen_command = format!("position fen {expected_fen}");
+        assert_eq!(
+            state
+                .sent
+                .windows(2)
+                .filter(|pair| pair[0] == fen_command && pair[1] == go_command)
+                .count(),
+            1,
+        );
+    }
+    let shared_fen_command = format!("position fen {}", game.fens[4]);
+    assert!(state.sent.iter().all(|cmd| cmd != &shared_fen_command));
 }
 
 #[tokio::test]
@@ -139,11 +156,13 @@ async fn native_refinement_shares_stronger_evidence_without_overwriting_triage()
 
     let pgn = "[FEN \"7k/8/8/8/8/8/8/R6K w - - 0 1\"]\n1. Ra2 Kh7 2. Ra1 Kh8 3. Ra2";
     let mut game = core::extract(pgn).unwrap();
-    game.fens[4] = game.fens[0].clone();
-    game.fens[5] = game.fens[1].clone();
+    game.fens[4] = game.fens[0].replace(" 0 1", " 0 3");
+    game.positions[4] = core::position(&game.fens[4]).unwrap();
+    game.fens[5] = game.fens[1].replace(" 1 1", " 1 3");
+    game.positions[5] = core::position(&game.fens[5]).unwrap();
     let fen = &game.fens[0];
-    let scored = |moves: &[&str], cp, depth| {
-        let mut raw = core::terminal_raw(fen, cp);
+    let scored = |target_fen: &str, moves: &[&str], cp, depth| {
+        let mut raw = core::terminal_raw(target_fen, cp);
         raw.depth = depth;
         raw.lines = moves
             .iter()
@@ -161,11 +180,29 @@ async fn native_refinement_shares_stronger_evidence_without_overwriting_triage()
     };
     let factory = factory(FakeState {
         scores: [
-            (fen.clone(), scored(&["a1a2", "a1a3", "a1a4"], 700, 10)),
-            (game.fens[1].clone(), core::terminal_raw(&game.fens[1], 0)),
+            (fen.clone(), scored(fen, &["a1a2", "a1a3", "a1a4"], 700, 10)),
+            (
+                game.fens[4].clone(),
+                scored(&game.fens[4], &["a1a2", "a1a3", "a1a4"], 700, 10),
+            ),
+            (
+                game.fens[1].clone(),
+                scored(&game.fens[1], &["h8g8", "h8g7", "h8h7"], 0, 10),
+            ),
+            (
+                game.fens[5].clone(),
+                scored(&game.fens[5], &["h8g8", "h8g7", "h8h7"], 0, 10),
+            ),
         ]
         .into(),
-        refined_scores: [(fen.clone(), scored(&["a1a8", "a1a7"], 800, 20))].into(),
+        refined_scores: [
+            (fen.clone(), scored(fen, &["a1a8", "a1a7"], 800, 20)),
+            (
+                game.fens[4].clone(),
+                scored(&game.fens[4], &["a1a8", "a1a7"], 800, 20),
+            ),
+        ]
+        .into(),
         ..FakeState::default()
     });
     let (_closed, receiver) = tokio::sync::watch::channel(false);
@@ -191,6 +228,9 @@ async fn native_refinement_shares_stronger_evidence_without_overwriting_triage()
     .await
     .unwrap();
 
+    for (index, position) in result.positions.iter().enumerate() {
+        assert_eq!(position.fen, game.fens[index], "ply {index}");
+    }
     for index in [0, 4] {
         let position = &result.positions[index];
         assert_eq!(position.depth, 20, "ply {index}");
@@ -201,12 +241,19 @@ async fn native_refinement_shares_stronger_evidence_without_overwriting_triage()
             "ply {index}"
         );
     }
-    let fen_command = format!("position fen {fen}");
+    let shared_commands = [
+        format!("position fen {}", game.fens[0]),
+        format!("position fen {}", game.fens[4]),
+    ];
     let state = factory.state.lock().unwrap();
     let budgets: Vec<_> = state
         .sent
         .windows(2)
-        .filter_map(|pair| (pair[0] == fen_command).then_some(pair[1].as_str()))
+        .filter_map(|pair| {
+            shared_commands
+                .contains(&pair[0])
+                .then_some(pair[1].as_str())
+        })
         .collect();
     assert_eq!(budgets, ["go movetime 180", "go movetime 2000"]);
 }
@@ -494,4 +541,223 @@ fn sqlite_time_misses_only_rule_out_stricter_demands_on_the_same_ply() {
     misses.record(0, budget(100, 1), 2);
     assert_eq!(misses.0[0], [budget(100, 1)]);
     assert!(misses.rules_out(0, budget(150, 2)));
+}
+
+#[test]
+fn live_demand_canonicalizes_pseudo_legal_en_passant_and_preserves_six_field_fen() {
+    let game = core::extract("1. Nf3 Nf6 2. Ng1 Ng8 3. e4").unwrap();
+    let (_sender, mut demands) = mpsc::channel(1);
+    let mut native = Native {
+        scheduler: Scheduler::new(&game),
+        demands: &mut demands,
+        latest: None,
+        receiving: true,
+        live_running: false,
+        latest_dispatched: false,
+    };
+    let pseudo_ep = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1";
+    let canonical = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1";
+    let (reply, mut result) = oneshot::channel();
+    native.accept(LiveDemand {
+        fen: pseudo_ep.into(),
+        value: 180,
+        multipv: 1,
+        reply,
+    });
+    let mainline_id = native.scheduler.ply_id(5).unwrap();
+    let pending = native.latest.as_ref().expect("live demand accepted");
+    assert_eq!(pending.id, mainline_id);
+    assert_eq!(pending.request.fen, canonical);
+    assert_ne!(pending.request.fen, game.fens[5]);
+
+    native.scheduler.reserve(mainline_id);
+    let mut mainline_raw = core::terminal_raw(&game.fens[5], -30);
+    mainline_raw.depth = 12;
+    mainline_raw.lines[0].depth = Some(12);
+    native
+        .scheduler
+        .complete(mainline_id, Demand::time(180, 1), &mainline_raw);
+    native.resolve_live();
+    let resolved = result.try_recv().unwrap().unwrap();
+    assert_eq!(resolved.fen, canonical);
+    assert_eq!(resolved.depth, 12);
+}
+
+#[tokio::test]
+async fn refinement_records_effective_multipv_without_repeating_partial_searches() {
+    use crate::review::tests::{FakeState, MemoryRepo, factory};
+
+    let pgn = "[FEN \"7k/6p1/8/8/8/8/8/R5K1 w - - 0 1\"]\n1. Ra8+ Kh7";
+    let game = core::extract(pgn).unwrap();
+    assert!(game.positions[0].legal_moves().len() > 1);
+    assert_eq!(game.positions[1].legal_moves().len(), 1);
+    let profile = adaptive::profile(AnalysisKind::Fast).unwrap().unwrap();
+    let single_pv = |fen: &str, uci: &str, cp, depth| {
+        let mut raw = core::terminal_raw(fen, cp);
+        raw.depth = depth;
+        raw.pv = vec![uci.into()];
+        raw.lines = vec![RawLine {
+            multipv: 1,
+            cp,
+            depth: Some(depth),
+            pv: vec![uci.into()],
+            unstable: false,
+            san: None,
+        }];
+        raw
+    };
+
+    for native_mode in [false, true] {
+        let factory = factory(FakeState {
+            scores: [
+                (
+                    game.fens[0].clone(),
+                    single_pv(&game.fens[0], "a1a8", 700, 10),
+                ),
+                (
+                    game.fens[1].clone(),
+                    single_pv(&game.fens[1], "h8h7", 0, 10),
+                ),
+                (
+                    game.fens[2].clone(),
+                    single_pv(&game.fens[2], "a8a7", 0, 10),
+                ),
+            ]
+            .into(),
+            refined_scores: [
+                (
+                    game.fens[0].clone(),
+                    single_pv(&game.fens[0], "a1a7", 750, 20),
+                ),
+                (
+                    game.fens[1].clone(),
+                    single_pv(&game.fens[1], "h8h7", 0, 20),
+                ),
+            ]
+            .into(),
+            ..FakeState::default()
+        });
+        let repo = MemoryRepo::default();
+        let (_closed, receiver) = tokio::sync::watch::channel(false);
+        let cancel = Cancellation {
+            closed: receiver,
+            revision: None,
+        };
+        let result = if native_mode {
+            let (live_tx, mut demands) = mpsc::channel(1);
+            let (reply, _live_rx) = oneshot::channel();
+            // Queue a prior partial Live search at the refinement budget on ply 0
+            // (>1 legal moves): it must not satisfy the refinement target.
+            live_tx
+                .try_send(LiveDemand {
+                    fen: game.fens[0].clone(),
+                    value: profile.high_ms,
+                    multipv: profile.refinement_multipv,
+                    reply,
+                })
+                .unwrap();
+            review_native(
+                factory.as_ref(),
+                &repo,
+                &game,
+                profile,
+                None,
+                NativeLive {
+                    cancel: &cancel,
+                    demands: &mut demands,
+                },
+                &mut |_| {},
+            )
+            .await
+            .unwrap()
+        } else {
+            review(
+                factory.as_ref(),
+                &repo,
+                &game,
+                profile,
+                None,
+                &cancel,
+                &mut |_| {},
+            )
+            .await
+            .unwrap()
+        };
+
+        assert_eq!(
+            result.positions[0].search.as_ref().unwrap().multipv,
+            1,
+            "native={native_mode}"
+        );
+        assert_eq!(
+            result.positions[1].search.as_ref().unwrap().multipv,
+            profile.refinement_multipv,
+            "native={native_mode}"
+        );
+        let state = factory.state.lock().unwrap();
+        let ply0_refinements = state
+            .sent
+            .windows(2)
+            .filter(|pair| {
+                pair[0] == format!("position fen {}", game.fens[0]) && pair[1] == "go movetime 2000"
+            })
+            .count();
+        // In native mode, ply 0 runs once for the partial Live demand and once
+        // for Purpose::Refinement(0) (not satisfied by partial Live, not looping).
+        assert_eq!(
+            ply0_refinements,
+            if native_mode { 2 } else { 1 },
+            "native={native_mode}"
+        );
+    }
+}
+
+#[test]
+fn attempted_refinement_blocks_equal_budget_but_allows_stronger_target() {
+    let game = core::extract("1. e4").unwrap();
+    let profile = adaptive::profile(AnalysisKind::Fast).unwrap().unwrap();
+    let mut state = State {
+        game: &game,
+        profile,
+        sizing: None,
+        phases: core::phases(&game.fens),
+        terminals: vec![None; 2],
+        baseline: vec![None; 2],
+        refined: vec![None; 2],
+        budgets: vec![
+            Some(SearchBudget {
+                ms: 2000,
+                multipv: 1,
+            }),
+            None,
+        ],
+        attempted: vec![
+            Some(SearchBudget {
+                ms: 2000,
+                multipv: 2,
+            }),
+            None,
+        ],
+        critical: vec![None],
+        book: 0,
+        cached: 0,
+        searched: 1,
+        refinement_stage: true,
+        final_targets: None,
+        ready_targets: vec![],
+    };
+    let target = |ms, multipv| Target {
+        position_index: 0,
+        score: 50,
+        hard: true,
+        kind: adaptive::RefinementKind::Critical,
+        search: SearchBudget { ms, multipv },
+    };
+    assert!(state.satisfied(&target(2000, 2)));
+    assert!(state.satisfied(&target(1000, 2)));
+    assert!(!state.satisfied(&target(6000, 2)));
+    assert!(!state.satisfied(&target(2000, 3)));
+
+    state.attempted[0] = None;
+    assert!(!state.satisfied(&target(2000, 2)));
 }

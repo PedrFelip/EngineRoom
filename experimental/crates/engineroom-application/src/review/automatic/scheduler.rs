@@ -33,8 +33,9 @@ struct EvidenceNode {
 }
 
 impl EvidenceNode {
-    fn covering(&self, demand: Demand) -> Option<RawPosition> {
-        if demand.multipv == 0 || demand.multipv > self.multipv {
+    fn covering(&self, demand: Demand, legal_moves: u8) -> Option<RawPosition> {
+        let required_multipv = demand.multipv.min(u32::from(legal_moves).max(1));
+        if demand.multipv == 0 || required_multipv > self.multipv {
             return None;
         }
         let covers_budget = match demand.mode {
@@ -48,6 +49,41 @@ impl EvidenceNode {
         raw.lines.truncate(demand.multipv as usize);
         Some(raw)
     }
+}
+
+fn fen_key(fen: &str) -> &str {
+    fen.rsplit_once(' ').map_or(fen, |(prefix, _)| prefix)
+}
+
+pub(super) fn covered_multipv(
+    raw: &RawPosition,
+    requested_multipv: u32,
+    legal_moves: usize,
+) -> u32 {
+    let covered = if raw.lines.is_sorted_by_key(|line| line.multipv) {
+        raw.lines
+            .iter()
+            .enumerate()
+            .take_while(|(i, line)| line.multipv as usize == i + 1)
+            .count()
+    } else {
+        let mut ranks: Vec<u32> = raw.lines.iter().map(|line| line.multipv).collect();
+        ranks.sort_unstable();
+        ranks
+            .into_iter()
+            .enumerate()
+            .take_while(|(i, multipv)| *multipv as usize == i + 1)
+            .count()
+    }
+    .min(requested_multipv as usize);
+    if covered == 0 {
+        return 0;
+    }
+    let mut multipv = covered as u32;
+    if multipv < requested_multipv && covered >= legal_moves {
+        multipv = requested_multipv;
+    }
+    multipv
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -89,7 +125,8 @@ fn link(index: usize) -> u32 {
 }
 
 struct FenIndex<'game> {
-    // Exact UCI FEN, including the move clocks. Mainline keys borrow the game.
+    // Canonical five-field FEN prefix, retaining the halfmove clock and omitting
+    // the fullmove counter. Mainline keys borrow the game.
     ids: HashMap<Cow<'game, str>, FenId>,
     ply_ids: Vec<FenId>,
     ply_head: Vec<u32>,
@@ -131,7 +168,7 @@ impl<'game> FenIndex<'game> {
             evidence: Vec::new(),
         };
         for (fen, position) in game.fens.iter().zip(&game.positions) {
-            let id = index.intern(Cow::Borrowed(fen), || position.legal_moves().len());
+            let id = index.intern(Cow::Borrowed(fen_key(fen)), || position.legal_moves().len());
             index.ply_ids.push(id);
         }
         for (ply, id) in index.ply_ids.iter().enumerate().rev() {
@@ -165,12 +202,13 @@ impl<'game> Scheduler<'game> {
     }
 
     pub fn intern_live(&mut self, fen: &str, legal_moves: impl FnOnce() -> usize) -> FenId {
+        let key = fen_key(fen);
         let index = self.mainline_index();
         index
             .ids
-            .get(fen)
+            .get(key)
             .copied()
-            .unwrap_or_else(|| index.intern(Cow::Owned(fen.to_owned()), legal_moves))
+            .unwrap_or_else(|| index.intern(Cow::Owned(key.to_owned()), legal_moves))
     }
 
     pub fn ply_id(&self, ply: usize) -> Option<FenId> {
@@ -205,7 +243,7 @@ impl<'game> Scheduler<'game> {
             .insert(id.index());
     }
 
-    pub fn complete(&mut self, id: FenId, demand: Demand, raw: &RawPosition) {
+    pub fn complete(&mut self, id: FenId, demand: Demand, raw: &RawPosition) -> u32 {
         let index = self.index.as_mut().expect("interned FEN");
         let slot = id.index();
         index.active.remove(slot);
@@ -219,18 +257,18 @@ impl<'game> Scheduler<'game> {
             .count()
             .min(demand.multipv as usize);
         raw.lines.truncate(covered);
-        let mut multipv = covered as u32;
-        if multipv < demand.multipv && covered >= usize::from(index.legal_moves[slot]) {
-            multipv = demand.multipv;
-        }
         let Some(reached_depth) = raw
             .lines
             .iter()
             .map(|line| line.depth.unwrap_or(raw.depth))
             .min()
         else {
-            return;
+            return 0;
         };
+        let mut multipv = covered as u32;
+        if multipv < demand.multipv && covered >= usize::from(index.legal_moves[slot]) {
+            multipv = demand.multipv;
+        }
         let new_link = link(index.evidence.len());
         index.evidence.push(EvidenceNode {
             next: 0,
@@ -245,14 +283,16 @@ impl<'game> Scheduler<'game> {
         } else {
             index.evidence_head[slot] = new_link;
         }
+        multipv
     }
 
     pub fn lookup(&self, id: FenId, demand: Demand) -> Option<RawPosition> {
         let index = self.index.as_ref().expect("interned FEN");
+        let legal_moves = index.legal_moves[id.index()];
         let mut link = index.evidence_head[id.index()];
         while let Some(slot) = link.checked_sub(1) {
             let evidence = &index.evidence[slot as usize];
-            if let Some(raw) = evidence.covering(demand) {
+            if let Some(raw) = evidence.covering(demand, legal_moves) {
                 return Some(raw);
             }
             link = evidence.next;
