@@ -240,22 +240,27 @@ tempo solicitado ao motor por busca, com duração total variável.
 
 #### Decisão sobre a fila e a parada antecipada
 
-O Native mantém blocos de até quatro posições consecutivas por worker. A fila
-compartilhada antecipou o primeiro par de triagem em todos os 11 pares do A/B
-com Stockfish 19, cache frio e a Partida Imortal. No Fast (dois e três workers),
-o par chegou 164–192 ms antes e a revisão inteira demorou mais em 7 de 8 pares.
-No Deep (três workers), o par chegou 436–444 ms antes e o tempo total variou de
-0,9 s a menos a 6,6 s a mais. O teste mediu o primeiro par de triagem. A latência
-até a primeira decisão crítica verificada ainda ficou sem medição.
+O Native entrega a cada worker a próxima posição pronta da fila compartilhada,
+sem reservar blocos de posições consecutivas. Em 20 pares fixados nos núcleos da
+máquina (Stockfish 19, cache frio, a Partida Imortal), a fila antecipou o
+primeiro par de triagem em todos os pares: 182 ms no Fast com dois workers,
+171 ms com três e 446 ms no Deep. O tempo total da revisão ficou dentro do
+ruído, com mediana da diferença de −6 ms, +81 ms e +426 ms (a fila ficou à
+frente em 5/8, 3/7 e 2/5 pares); no Fast, o CPU medido também empatou. A
+dispersão de 2–5 s vem do número de buscas de refinamento, que variou de 58 a
+64 nos dois arranjos; cada busca extra custa cerca de 0,5 s no Fast e 1,8 s no
+Deep. O teste mede o primeiro par de triagem; a latência até a primeira decisão
+crítica verificada ainda está sem medição.
 
 Um experimento de parada em modo sombra observou 696 buscas em 12 execuções
 (Partida Imortal, Larsen–Spassky e Carlsen–Ernst, Fast e Deep, três workers,
-cache frio). A política exigia evidência das avaliações vizinhas já concluídas
-no despacho, MultiPV completo e estabilidade da classificação. Com FIFO,
-1 de 350 buscas foi elegível. Com blocos, 9 de 346. Nenhuma atingiu todos os
-critérios para sugerir parada. Um vizinho pendente no despacho foi o veto mais
-frequente, com 272 casos na FIFO e 234 nos blocos. A busca automática continua
-até `bestmove` com o orçamento do perfil.
+cache frio), comparando os dois arranjos de fila antes desta troca. A política
+exigia evidência das avaliações vizinhas já concluídas no despacho, MultiPV
+completo e estabilidade da classificação. Com a fila posição a posição, 1 de 350
+buscas foi elegível; com blocos, 9 de 346. Nenhuma atingiu todos os critérios
+para sugerir parada. Um vizinho pendente no despacho foi o veto mais frequente,
+com 272 casos na fila e 234 nos blocos. A busca automática continua até
+`bestmove` com o orçamento do perfil.
 
 O exemplo de benchmark mede o tempo até o primeiro par de triagem e a conclusão
 da revisão. De `experimental/`:
