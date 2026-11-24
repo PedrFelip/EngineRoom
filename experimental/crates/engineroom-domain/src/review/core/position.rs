@@ -41,6 +41,29 @@ fn insufficient(p: &Chess) -> bool {
         }
     }
 }
+/// Returns the contiguous legal, distinct MultiPV prefix and its minimum depth.
+pub fn observed_coverage(raw: &RawPosition, limit: usize) -> Option<(usize, u32, usize)> {
+    let position = position(&raw.fen).ok()?;
+    let mut roots = Vec::new();
+    let mut depth = u32::MAX;
+    for (index, line) in raw.lines.iter().take(limit).enumerate() {
+        if line.multipv as usize != index + 1 {
+            break;
+        }
+        let Some(root) = line
+            .pv
+            .first()
+            .and_then(|uci| uci.parse::<UciMove>().ok())
+            .and_then(|uci| uci.to_move(&position).ok())
+            .filter(|root| !roots.contains(root))
+        else {
+            break;
+        };
+        roots.push(root);
+        depth = depth.min(line.depth.unwrap_or(raw.depth));
+    }
+    (!roots.is_empty()).then(|| (roots.len(), depth, position.legal_moves().len()))
+}
 pub fn add_san(raw: &mut RawPosition) {
     let Ok(position) = position(&raw.fen) else {
         return;

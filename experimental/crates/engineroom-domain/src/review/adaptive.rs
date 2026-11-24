@@ -79,7 +79,7 @@ impl Profile {
         SearchBudget { ms, multipv }
     }
 }
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Reason {
     #[serde(rename = "perda de avaliação")]
     Loss,
@@ -100,7 +100,7 @@ pub enum Reason {
     #[serde(rename = "promoção")]
     Promotion,
 }
-fn refinement_kind(m: &Critical) -> RefinementKind {
+pub fn refinement_kind(m: &Critical) -> RefinementKind {
     let has = |reason| m.reasons.contains(&reason);
     if has(Reason::Mate) {
         RefinementKind::Mate

@@ -1,6 +1,7 @@
 //! Assemble evaluated positions into a complete review.
 use super::{Game, invalid, opening, phases};
 use crate::review::{scoring::*, types::*};
+use shakmaty::uci::UciMove;
 
 pub fn position_analysis(raw: &RawPosition, ply: usize, phase: Phase) -> PositionAnalysis {
     let white = raw.fen.split_whitespace().nth(1) != Some("b");
@@ -14,6 +15,7 @@ pub fn position_analysis(raw: &RawPosition, ply: usize, phase: Phase) -> Positio
         pv: raw.pv.clone(),
         search: None,
         triage_lines: None,
+        evidence: None,
         lines: raw
             .lines
             .iter()
@@ -49,6 +51,17 @@ pub fn build(game: &Game, raw: &[RawPosition]) -> Result<ReviewResult> {
             let win_pct_after = 100.0 - win_pct(after.cp);
             let win_pct_loss = (win_pct_before - win_pct_after).max(0.0);
             let is_book = book.as_ref().is_some_and(|(n, _)| m.ply <= *n);
+            let best_uci = before
+                .pv
+                .first()
+                .filter(|uci| {
+                    uci.parse::<UciMove>()
+                        .ok()
+                        .and_then(|uci| uci.to_move(&game.positions[m.ply - 1]).ok())
+                        .is_some()
+                })
+                .cloned();
+            let best_move_available = best_uci.is_some();
             MoveAnalysis {
                 played: m.clone(),
                 classification: classify(win_pct_loss, is_book),
@@ -56,7 +69,13 @@ pub fn build(game: &Game, raw: &[RawPosition]) -> Result<ReviewResult> {
                 win_pct_after,
                 win_pct_loss,
                 cp_loss: (before.cp as f64 + after.cp as f64).max(0.0),
-                best_uci: before.pv.first().cloned(),
+                best_uci,
+                decision_evidence: Some(DecisionEvidence {
+                    before_ply: m.ply - 1,
+                    best_move_available,
+                    played_move_value_ply: m.ply,
+                }),
+                critical_verification: None,
                 is_book,
                 eco: if is_book {
                     book.as_ref().map(|(_, e)| e.clone())

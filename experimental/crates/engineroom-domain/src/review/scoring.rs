@@ -261,6 +261,8 @@ mod tests {
                 win_pct_loss: 0.0,
                 cp_loss: 0.0,
                 best_uci: None,
+                decision_evidence: None,
+                critical_verification: None,
                 is_book: false,
                 eco: None,
             })
