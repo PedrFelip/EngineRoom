@@ -23,6 +23,16 @@ async fn run_session_auto(
     fens: Vec<String>,
     mode: SchedulerMode,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    let analysis_kind = match std::env::var("STROBE_REVIEW_PROFILE").as_deref() {
+        Ok("deep") => AnalysisKind::Deep,
+        Ok("fast") | Err(std::env::VarError::NotPresent) => AnalysisKind::Fast,
+        _ => return Err("expected STROBE_REVIEW_PROFILE=fast or deep".into()),
+    };
+    let threads = match std::env::var("STROBE_REVIEW_THREADS") {
+        Ok(value) => value.parse::<u32>()?,
+        Err(std::env::VarError::NotPresent) => 4,
+        Err(error) => return Err(error.into()),
+    };
     let config = ReviewConfig {
         pgn,
         meta,
@@ -33,7 +43,7 @@ async fn run_session_auto(
             hint: String::new(),
         },
         mode: Mode::Time,
-        analysis_kind: AnalysisKind::Fast,
+        analysis_kind,
         movetime_ms: None,
         lines: 3,
         initial_result: None,
@@ -44,13 +54,14 @@ async fn run_session_auto(
         factory,
         repository,
         Some(Resources {
-            threads: 4,
+            threads,
             memory_mb: 2048,
         }),
     )
     .with_scheduler(mode);
 
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let started = Instant::now();
     sessions.open("strobe", "main", config, move |envelope| {
         tx.send(envelope.event).is_ok()
     })?;
@@ -67,6 +78,9 @@ async fn run_session_auto(
     let mut searched = 0usize;
     let mut positions = 0usize;
     let mut moves = 0usize;
+    let mut first_pair_ms = None;
+    let mut triage_seen = vec![false; fens.len()];
+    let mut review_ms = None;
     let mut completed = false;
     let mut live_done = false;
 
@@ -79,6 +93,18 @@ async fn run_session_auto(
                 Event::Progress { progress } => {
                     cached = progress.cached_positions;
                     searched = progress.engine_positions;
+                    if first_pair_ms.is_none()
+                        && progress.stage == "triage"
+                        && let Some(update) = progress.update
+                    {
+                        let index = update.index;
+                        triage_seen[index] = true;
+                        if (index > 0 && triage_seen[index - 1])
+                            || triage_seen.get(index + 1) == Some(&true)
+                        {
+                            first_pair_ms = Some(started.elapsed().as_millis());
+                        }
+                    }
                     if !live_sent && progress.engine_positions >= 1 {
                         live_sent = true;
                         live_sent_at = Some(Instant::now());
@@ -105,6 +131,7 @@ async fn run_session_auto(
                     }
                 }
                 Event::Completed { result } => {
+                    review_ms = Some(started.elapsed().as_millis());
                     positions = result.positions.len();
                     moves = result.moves.len();
                     if live_before_completed.is_none() {
@@ -134,6 +161,10 @@ async fn run_session_auto(
     sessions.close("strobe", "main").await?;
     sessions.shutdown().await;
     let live_order = live_before_completed.unwrap_or(0);
+    let first_pair_ms = first_pair_ms.ok_or("expected adjacent triage evaluations")?;
+    let review_ms = review_ms.ok_or("expected review completion time")?;
+    println!("strobe:metric first_pair_ms={first_pair_ms} lower");
+    println!("strobe:metric review_ms={review_ms} lower");
     println!("strobe:metric positions={positions} higher");
     println!("strobe:metric moves={moves} higher");
     println!("strobe:metric cached={cached} higher");
@@ -165,7 +196,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     {
         return Err("expected fresh, warm, seed, reuse, pipeline-auto or native-auto".into());
     }
-    let pgn = std::fs::read_to_string("perf/data/immortal.pgn")?;
+    let pgn_path = std::env::var_os("STROBE_REVIEW_PGN")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("perf/data/immortal.pgn"));
+    let pgn = std::fs::read_to_string(pgn_path)?;
     let game = core::extract(&pgn)?;
     let dir = PathBuf::from(format!("target/strobe-runs/{}", std::process::id()));
     std::fs::create_dir_all(&dir)?;
