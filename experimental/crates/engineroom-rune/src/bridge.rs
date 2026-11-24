@@ -7,6 +7,7 @@ use engineroom_backend::review::{
     types::{Envelope, LiveRequest, LiveSettings, ReviewConfig, ReviewError},
 };
 use std::{
+    collections::{BTreeMap, BTreeSet},
     path::PathBuf,
     sync::{
         Arc,
@@ -141,7 +142,7 @@ impl Bridge {
             Arc::new(move || (wake)()),
             http,
             Some(db),
-            None,
+            detect_resources(),
             scheduler,
         )
     }
@@ -681,6 +682,144 @@ fn parse_cache_label(value: &str, source: &str) -> Result<CacheMode, String> {
         Err(format!(
             "Modo de cache inválido em {source}: '{value}' (use 'on' ou 'off')."
         ))
+    }
+}
+
+/// Fallback memory budget in MiB when host total RAM cannot be read.
+const FALLBACK_MEMORY_MB: u32 = 2048;
+/// Minimum host memory budget in MiB reported to session sizing.
+const MIN_MEMORY_MB: u32 = 16;
+/// Maximum thread count reported to session sizing.
+const MAX_DETECTED_THREADS: u32 = 256;
+
+pub(crate) fn detect_resources() -> Option<Resources> {
+    let threads = read_proc_file("/proc/cpuinfo")
+        .as_deref()
+        .and_then(parse_cpuinfo_physical_cores)
+        .or_else(|| {
+            std::thread::available_parallelism()
+                .ok()
+                .map(|n| u32::try_from((n.get() / 2).max(1)).unwrap_or(MAX_DETECTED_THREADS))
+        })?
+        .clamp(1, MAX_DETECTED_THREADS);
+    let memory_mb = read_proc_file("/proc/meminfo")
+        .as_deref()
+        .and_then(parse_meminfo_mb)
+        .unwrap_or(FALLBACK_MEMORY_MB)
+        .clamp(MIN_MEMORY_MB, u32::MAX);
+    Some(Resources { threads, memory_mb })
+}
+
+pub(crate) fn parse_cpuinfo_physical_cores(cpuinfo: &str) -> Option<u32> {
+    #[derive(Default)]
+    struct CpuBlock {
+        seen_processor: bool,
+        physical_id: Option<u32>,
+        core_id: Option<u32>,
+        cpu_cores: Option<u32>,
+    }
+
+    impl CpuBlock {
+        fn is_empty(&self) -> bool {
+            !self.seen_processor
+                && self.physical_id.is_none()
+                && self.core_id.is_none()
+                && self.cpu_cores.is_none()
+        }
+    }
+
+    let mut unique_cores = BTreeSet::new();
+    let mut sockets_with_core_id = BTreeSet::new();
+    let mut socket_cpu_cores = BTreeMap::new();
+    let mut block = CpuBlock::default();
+
+    let mut flush = |block: &mut CpuBlock| {
+        let pid = block.physical_id.unwrap_or(0);
+        if let Some(cid) = block.core_id {
+            unique_cores.insert((pid, cid));
+            sockets_with_core_id.insert(pid);
+        } else if let Some(cores) = block.cpu_cores.filter(|&c| c > 0) {
+            socket_cpu_cores
+                .entry(pid)
+                .and_modify(|existing: &mut u32| *existing = (*existing).max(cores))
+                .or_insert(cores);
+        }
+        *block = CpuBlock::default();
+    };
+
+    for line in cpuinfo.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            flush(&mut block);
+            continue;
+        }
+        let Some((key, value)) = trimmed.split_once(':') else {
+            continue;
+        };
+        let key = key.trim();
+        let value = value.trim();
+        match key {
+            "processor" => {
+                if !block.is_empty() {
+                    flush(&mut block);
+                }
+                block.seen_processor = true;
+            }
+            "physical id" => {
+                if let Ok(parsed) = value.parse::<u32>() {
+                    block.physical_id = Some(parsed);
+                }
+            }
+            "core id" => {
+                if let Ok(parsed) = value.parse::<u32>() {
+                    block.core_id = Some(parsed);
+                }
+            }
+            "cpu cores" => {
+                if let Ok(parsed) = value.parse::<u32>() {
+                    block.cpu_cores = Some(parsed);
+                }
+            }
+            _ => {}
+        }
+    }
+    flush(&mut block);
+
+    let mut total = u32::try_from(unique_cores.len()).unwrap_or(u32::MAX);
+    for (pid, cores) in socket_cpu_cores {
+        if !sockets_with_core_id.contains(&pid) {
+            total = total.saturating_add(cores);
+        }
+    }
+    (total > 0).then_some(total)
+}
+
+pub(crate) fn parse_meminfo_mb(meminfo: &str) -> Option<u32> {
+    for line in meminfo.lines() {
+        if let Some(rest) = line.trim_start().strip_prefix("MemTotal:") {
+            let mut parts = rest.split_whitespace();
+            let kb = parts.next()?.parse::<u64>().ok()?;
+            if let Some(unit) = parts.next()
+                && !unit.eq_ignore_ascii_case("kb")
+            {
+                return None;
+            }
+            let mb = u32::try_from(kb / 1024).unwrap_or(u32::MAX);
+            return Some(mb);
+        }
+    }
+    None
+}
+
+fn read_proc_file(path: &str) -> Option<String> {
+    #[cfg(target_os = "linux")]
+    {
+        std::fs::read_to_string(path).ok()
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = path;
+        None
     }
 }
 

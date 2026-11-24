@@ -1304,6 +1304,129 @@ fn cache_mode_defaults_to_enabled_and_cli_overrides_environment() {
     assert!(parse_cache_mode([], Some("invalid")).is_err());
 }
 
+#[test]
+fn cpuinfo_physical_cores_deduplicates_smt_and_handles_socket_fallbacks() {
+    let smt_dual_socket = "\
+processor\t: 0
+physical id\t: 0
+core id\t\t: 0
+cpu cores\t: 2
+
+processor\t: 1
+physical id\t: 0
+core id\t\t: 4
+cpu cores\t: 2
+
+processor\t: 2
+physical id\t: 0
+core id\t\t: 0
+cpu cores\t: 2
+
+processor\t: 3
+physical id\t: 0
+core id\t\t: 4
+cpu cores\t: 2
+
+processor\t: 4
+physical id\t: 1
+core id\t\t: 0
+cpu cores\t: 2
+
+processor\t: 5
+physical id\t: 1
+core id\t\t: 8
+cpu cores\t: 2
+";
+    assert_eq!(parse_cpuinfo_physical_cores(smt_dual_socket), Some(4));
+
+    let without_core_id = "\
+processor\t: 0
+physical id\t: 0
+cpu cores\t: 4
+
+processor\t: 1
+physical id\t: 0
+cpu cores\t: 4
+
+processor\t: 2
+physical id\t: 1
+cpu cores\t: 2
+";
+    assert_eq!(parse_cpuinfo_physical_cores(without_core_id), Some(6));
+
+    let single_socket_cpu_cores_only = "\
+processor\t: 0
+cpu cores\t: 6
+
+processor\t: 1
+cpu cores\t: 6
+";
+    assert_eq!(
+        parse_cpuinfo_physical_cores(single_socket_cpu_cores_only),
+        Some(6)
+    );
+
+    let hybrid_sockets = "\
+processor\t: 0
+physical id\t: 0
+core id\t\t: 0
+
+processor\t: 1
+physical id\t: 0
+core id\t\t: 1
+
+processor\t: 2
+physical id\t: 1
+cpu cores\t: 4
+";
+    assert_eq!(parse_cpuinfo_physical_cores(hybrid_sockets), Some(6));
+
+    let no_topology = "\
+processor\t: 0
+BogoMIPS\t: 108.00
+
+processor\t: 1
+BogoMIPS\t: 108.00
+";
+    assert_eq!(parse_cpuinfo_physical_cores(no_topology), None);
+    assert_eq!(parse_cpuinfo_physical_cores(""), None);
+}
+
+#[test]
+fn meminfo_mb_converts_kilobytes_and_saturates_overflow() {
+    let meminfo = "\
+MemFree:          512000 kB
+MemTotal:       16777216 kB
+MemAvailable:   12000000 kB
+";
+    assert_eq!(parse_meminfo_mb(meminfo), Some(16384));
+    assert_eq!(parse_meminfo_mb("MemTotal: 2097152\n"), Some(2048));
+    assert_eq!(parse_meminfo_mb("MemTotal: 8192 kB\n"), Some(8));
+    assert_eq!(
+        parse_meminfo_mb(&format!("MemTotal: {} kB\n", u64::MAX)),
+        Some(u32::MAX)
+    );
+    assert_eq!(parse_meminfo_mb(""), None);
+    assert_eq!(parse_meminfo_mb("MemFree: 1024 kB\n"), None);
+    assert_eq!(parse_meminfo_mb("MemTotal: invalid kB\n"), None);
+    assert_eq!(parse_meminfo_mb("MemTotal: 16 MB\n"), None);
+}
+
+#[test]
+fn detect_resources_returns_bounded_threads_and_memory() {
+    let resources = detect_resources().expect("host resources should be detected");
+    assert!(
+        (1..=256).contains(&resources.threads),
+        "threads out of bounds: {}",
+        resources.threads
+    );
+    assert!(
+        resources.memory_mb >= 16,
+        "memory_mb below minimum: {}",
+        resources.memory_mb
+    );
+}
+
 #[tokio::test]
 async fn bypass_skips_cache_and_delegates_history_and_cleanup() {
     let inner = Arc::new(MemoryRepo::default());
