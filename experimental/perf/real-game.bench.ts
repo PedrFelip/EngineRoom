@@ -38,5 +38,29 @@ export default bench({
       metrics: ["run.duration", "memory.peak"],
       run: (ctx) => ctx.exec(command("warm")),
     },
+    "auto-pipeline": {
+      primary: "cpu.work",
+      metrics: [
+        "run.duration",
+        "memory.peak",
+        "metric.cached",
+        "metric.searched",
+        "metric.live_before_completed",
+        "metric.live_latency_ms",
+      ],
+      run: (ctx) => ctx.exec(command("pipeline-auto")),
+    },
+    "auto-native": {
+      primary: "cpu.work",
+      metrics: [
+        "run.duration",
+        "memory.peak",
+        "metric.cached",
+        "metric.searched",
+        "metric.live_before_completed",
+        "metric.live_latency_ms",
+      ],
+      run: (ctx) => ctx.exec(command("native-auto")),
+    },
   },
 })
