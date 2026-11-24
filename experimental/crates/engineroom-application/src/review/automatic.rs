@@ -621,8 +621,9 @@ async fn execute(
     }
     let mut waiters = JoinSet::new();
     let mut blocks: Vec<VecDeque<usize>> = vec![];
-    // The watch receiver belongs to this dispatch and retains its latest
-    // complete evidence while the worker is busy, independently of completion.
+    // Keep the latest complete checkpoint scoped to its active dispatch.
+    // A future continuation policy can sample it here. Scheduling and cache
+    // coverage in this phase use the completed result from bestmove.
     let mut active_searches = HashMap::new();
     let mut refining = BitSet::default();
     let mut cache_misses = CacheMisses::default();

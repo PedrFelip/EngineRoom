@@ -431,22 +431,23 @@ impl CheckpointCollector {
         })
     }
 
+    fn clear_pending(&mut self) {
+        self.pending.clear();
+        self.time_ms = None;
+        self.nodes = None;
+    }
+
     fn observe(&mut self, header: &InfoHeader, line: &str) -> Option<SearchCheckpoint> {
-        if header.depth <= self.published_depth || header.depth < self.depth {
+        if !header.exact || header.depth <= self.published_depth || header.depth < self.depth {
             return None;
         }
         if header.multipv == 1 || header.depth > self.depth {
             self.depth = header.depth;
-            self.pending.clear();
-            self.time_ms = None;
-            self.nodes = None;
-        }
-        if !header.exact {
-            return None;
+            self.clear_pending();
         }
         let rank = header.multipv as usize;
         if rank != self.pending.len() + 1 || rank > self.width {
-            self.pending.clear();
+            self.clear_pending();
             return None;
         }
         let root = header
@@ -455,7 +456,7 @@ impl CheckpointCollector {
             .and_then(|uci| uci.to_move(&self.position).ok())
             .filter(|root| self.pending.iter().all(|(seen, _)| seen != root));
         let Some(root) = root else {
-            self.pending.clear();
+            self.clear_pending();
             return None;
         };
         self.time_ms = self.time_ms.max(header.time_ms);
@@ -772,6 +773,9 @@ mod tests {
             "info depth 4 multipv 1 score cp 25 pv e2e4",
             "info depth 4 multipv 2 score cp 10 pv e7e5",
             "info depth 4 multipv 2 score cp 30 pv c2c4",
+            "info depth 4 multipv 1 score cp 10 time 10 nodes 500 pv e2e4",
+            "info depth 4 multipv 3 score cp 40 pv g1f3",
+            "info depth 4 multipv 2 score cp 30 pv c2c4",
             "info depth 5 multipv 1 score cp 40 pv g1f3",
             "info depth 5 multipv 2 score cp 35 upperbound pv c2c4",
             "info depth 5 multipv 2 score cp 32 time 15 nodes 613 pv c2c4",
@@ -781,8 +785,9 @@ mod tests {
             "info depth 6 multipv 2 score cp 42 pv c2c4",
             "info depth 7 multipv 1 score cp 55 pv c2c4",
             "info depth 7 multipv 1 score cp 56 lowerbound pv c2c4",
-            "info depth 7 multipv 2 score cp 53 pv d2d4",
-            "bestmove c2c4",
+            "info depth 7 multipv 2 score cp 53 time 30 nodes 1500 pv d2d4",
+            "info depth 8 multipv 1 score cp 70 time 40 nodes 2000 pv e2e4",
+            "bestmove e2e4",
         ];
         let (_closed, receiver) = watch::channel(false);
         let cancel = Cancellation {
@@ -799,7 +804,11 @@ mod tests {
             .collect();
         assert_eq!(
             iterations,
-            [(3, Some(3), Some(90)), (5, Some(15), Some(613))]
+            [
+                (3, Some(3), Some(90)),
+                (5, Some(15), Some(613)),
+                (7, Some(30), Some(1500)),
+            ]
         );
 
         let mut port = Transcript(transcript.into_iter());
@@ -811,7 +820,7 @@ mod tests {
         let checkpoint = observed.as_ref().expect("at least one complete iteration");
         assert_eq!(
             (checkpoint.depth, checkpoint.time_ms, checkpoint.nodes),
-            (5, Some(15), Some(613))
+            (7, Some(30), Some(1500))
         );
         assert_eq!(
             checkpoint
@@ -819,10 +828,10 @@ mod tests {
                 .iter()
                 .map(|line| (line.multipv, line.depth, line.pv[0].as_str()))
                 .collect::<Vec<_>>(),
-            [(1, Some(5), "g1f3"), (2, Some(5), "c2c4")],
+            [(1, Some(7), "c2c4"), (2, Some(7), "d2d4")],
         );
-        assert_eq!(final_result.depth, 7);
-        assert_eq!(final_result.pv, ["c2c4"]);
+        assert_eq!(final_result.depth, 8);
+        assert_eq!(final_result.pv, ["e2e4"]);
         assert_eq!(final_result.lines[1].pv, ["d2d4"]);
     }
 
