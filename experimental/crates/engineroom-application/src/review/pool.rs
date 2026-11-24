@@ -1,6 +1,6 @@
 //! Persistent workers under one session lease. Every worker owns its UCI stream.
 use super::{
-    engine::{self, Cancellation, EngineFactory, EnginePort},
+    engine::{self, Cancellation, EngineFactory, EnginePort, SearchCheckpoint, SearchCheckpoints},
     types::*,
 };
 use crate::db::mode::Mode;
@@ -16,11 +16,16 @@ pub struct Completed {
     /// UCI time budget used for this search.
     pub value: u32,
 }
-pub type Evaluation = oneshot::Receiver<Result<Completed>>;
+pub(super) struct Evaluation {
+    pub(super) completed: oneshot::Receiver<Result<Completed>>,
+    pub(super) checkpoint: watch::Receiver<Option<SearchCheckpoint>>,
+}
+
 struct Job {
     fen: String,
     history: Option<super::core::PositionContext>,
     result: oneshot::Sender<Result<Completed>>,
+    checkpoints: SearchCheckpoints,
     value: u32,
     multipv: u32,
 }
@@ -101,9 +106,11 @@ impl Pool {
         fen: String,
         value: u32,
         multipv: u32,
-    ) -> Result<Evaluation> {
-        self.submit_position(worker, fen, None, value, multipv)
-            .await
+    ) -> Result<oneshot::Receiver<Result<Completed>>> {
+        Ok(self
+            .submit_position(worker, fen, None, value, multipv)
+            .await?
+            .completed)
     }
 
     pub(super) async fn submit_position(
@@ -114,7 +121,8 @@ impl Pool {
         value: u32,
         multipv: u32,
     ) -> Result<Evaluation> {
-        let (result, receiver) = oneshot::channel();
+        let (result, completed) = oneshot::channel();
+        let (checkpoints, checkpoint) = SearchCheckpoints::channel(multipv);
         if let Some(error) = self.failure()? {
             return Err(error);
         }
@@ -131,6 +139,7 @@ impl Pool {
                 fen,
                 history,
                 result,
+                checkpoints,
                 value,
                 multipv,
             })
@@ -145,7 +154,10 @@ impl Pool {
                     )
                 }),
             })?;
-        Ok(receiver)
+        Ok(Evaluation {
+            completed,
+            checkpoint,
+        })
     }
     pub async fn close(&mut self) -> Result<()> {
         let mut cleanup_error = None;
@@ -201,7 +213,14 @@ async fn worker(
     let mut configured = None;
     let mut identity = None;
     loop {
-        let job = tokio::select! {
+        let Job {
+            fen,
+            history,
+            result: reply,
+            checkpoints,
+            value,
+            multipv,
+        } = tokio::select! {
             _ = root.cancelled() => break,
             _ = local.cancelled() => break,
             job = jobs.recv() => match job { Some(job) => job, None => break },
@@ -214,49 +233,36 @@ async fn worker(
                     port.as_mut(),
                     Some(threads),
                     Some(memory),
-                    job.multipv,
+                    multipv,
                     &local,
                 )
                 .await?;
-            } else if configured != Some(job.multipv) {
+            } else if configured != Some(multipv) {
                 engine::send(
                     port.as_mut(),
-                    &format!("setoption name MultiPV value {}", job.multipv),
+                    &format!("setoption name MultiPV value {}", multipv),
                     &local,
                 )
                 .await?;
                 engine::ask(port.as_mut(), "isready", "readyok", 10000, &local).await?;
             }
-            configured = Some(job.multipv);
-            let timeout = super::pipeline::timeout(Mode::Time, job.value);
-            let mut raw = if let Some(history) = &job.history {
-                engine::evaluate_position(
-                    port.as_mut(),
-                    Some(&history.initial_fen),
-                    &history.uci_path,
-                    &job.fen,
-                    Mode::Time,
-                    job.value,
-                    timeout,
-                    &local,
-                )
-                .await?
-            } else {
-                engine::evaluate(
-                    port.as_mut(),
-                    &job.fen,
-                    Mode::Time,
-                    job.value,
-                    timeout,
-                    &local,
-                )
-                .await?
-            };
+            configured = Some(multipv);
+            let timeout = super::pipeline::timeout(Mode::Time, value);
+            let mut raw = engine::evaluate_with_checkpoints(
+                port.as_mut(),
+                &fen,
+                history.as_ref(),
+                value,
+                timeout,
+                &local,
+                checkpoints,
+            )
+            .await?;
             super::core::add_san(&mut raw);
             Ok(Completed {
                 raw,
                 engine: identity.clone(),
-                value: job.value,
+                value,
             })
         };
         let mut result = tokio::select! {
@@ -273,7 +279,7 @@ async fn worker(
             }
             stop.send_replace(true);
         }
-        let _ = job.result.send(result);
+        let _ = reply.send(result);
         if failed {
             break;
         }
@@ -395,6 +401,7 @@ mod tests {
                     history: None,
                     fen: String::new(),
                     result,
+                    checkpoints: SearchCheckpoints::channel(1).0,
                     value: 1,
                     multipv: 1,
                 })

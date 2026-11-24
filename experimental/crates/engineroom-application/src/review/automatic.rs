@@ -3,7 +3,7 @@ use super::{
     adaptive::{self, Profile, SearchBudget, Target},
     contextual::ContextualReview,
     core::{self, Game},
-    engine::{Cancellation, EngineFactory},
+    engine::{Cancellation, EngineFactory, SearchCheckpoint},
     pipeline::cancellable,
     pool::{Completed, Pool},
     repository::{ContextualEvaluation, Repository},
@@ -12,9 +12,9 @@ use super::{
 };
 use crate::db::mode::Mode;
 use shakmaty::Position;
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use tokio::{
-    sync::{mpsc, oneshot},
+    sync::{mpsc, oneshot, watch},
     task::JoinSet,
 };
 
@@ -161,6 +161,12 @@ impl Job {
         }
     }
 }
+struct ActiveSearch {
+    job: Job,
+    fen_id: Option<FenId>,
+    checkpoint: watch::Receiver<Option<SearchCheckpoint>>,
+}
+
 struct State<'a> {
     context: Option<ContextualReview>,
     baseline_evidence: Vec<Option<PositionEvidence>>,
@@ -615,7 +621,9 @@ async fn execute(
     }
     let mut waiters = JoinSet::new();
     let mut blocks: Vec<VecDeque<usize>> = vec![];
-    let mut busy = BitSet::default();
+    // The watch receiver belongs to this dispatch and retains its latest
+    // complete evidence while the worker is busy, independently of completion.
+    let mut active_searches = HashMap::new();
     let mut refining = BitSet::default();
     let mut cache_misses = CacheMisses::default();
     loop {
@@ -714,7 +722,7 @@ async fn execute(
         }
         if let Some(pool) = pool.as_ref() {
             for worker in 0..pool.len() {
-                if busy.contains(worker) {
+                if active_searches.contains_key(&worker) {
                     continue;
                 }
                 let prefer_refinement =
@@ -778,6 +786,7 @@ async fn execute(
                         .map(|index| Job::triage(worker, index, profile))
                 };
                 if let Some(job) = job {
+                    let worker = job.worker;
                     let (fen, fen_id) = match job.purpose {
                         Purpose::Triage(index) | Purpose::Refinement(index) => {
                             let id = native
@@ -805,14 +814,21 @@ async fn execute(
                         }
                         _ => None,
                     };
-                    let receiver = pool
+                    let evaluation = pool
                         .submit_position(worker, fen, history, job.demand.value, job.demand.multipv)
                         .await?;
-                    busy.insert(worker);
                     if let Purpose::Refinement(index) = job.purpose {
                         refining.insert(index);
                     }
-                    waiters.spawn(async move { (job, fen_id, receiver.await) });
+                    active_searches.insert(
+                        worker,
+                        ActiveSearch {
+                            job,
+                            fen_id,
+                            checkpoint: evaluation.checkpoint,
+                        },
+                    );
+                    waiters.spawn(async move { (worker, evaluation.completed.await) });
                 }
             }
         }
@@ -857,7 +873,15 @@ async fn execute(
             },
             result = waiters.join_next() => result.ok_or_else(|| queue_error("Fila encerrou sem resultado."))?.map_err(|e| ReviewError::with_source(ReviewErrorCode::EngineExited, "review.queue", e))?,
         };
-        let (job, fen_id, reply) = result;
+        let (worker, reply) = result;
+        let ActiveSearch {
+            job,
+            fen_id,
+            checkpoint,
+        } = active_searches
+            .remove(&worker)
+            .ok_or_else(|| queue_error("Resultado sem busca ativa."))?;
+        drop(checkpoint);
         let pool = pool
             .as_ref()
             .ok_or_else(|| queue_error("Pool indisponível."))?;
@@ -865,7 +889,6 @@ async fn execute(
         let completed: Completed = reply
             .map_err(|_| disconnected_worker_error(failure.clone(), cancel))?
             .map_err(|e| failure.unwrap_or(e))?;
-        busy.remove(job.worker);
         let raw = completed.raw;
         let covered_multipv = if let (Some(native), Some(id)) = (&mut native, fen_id) {
             Some(native.scheduler.complete(

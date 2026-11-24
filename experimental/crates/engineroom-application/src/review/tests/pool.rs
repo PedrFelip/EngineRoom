@@ -1,6 +1,7 @@
 use super::*;
 use crate::review::pool::Pool;
 use std::sync::atomic::AtomicBool;
+use tokio::sync::Notify;
 
 #[derive(Default)]
 struct Activity {
@@ -9,6 +10,8 @@ struct Activity {
     closed: AtomicUsize,
     fail: AtomicBool,
     stall: AtomicBool,
+    hold_bestmove: AtomicBool,
+    release_bestmove: Notify,
     searches: Mutex<Vec<(String, u32)>>,
     delays: Mutex<HashMap<String, u64>>,
 }
@@ -102,6 +105,9 @@ impl EnginePort for GroupPort {
             }
             let line = self.inner.next().await?;
             if line.starts_with("bestmove") && self.searching {
+                if self.activity.hold_bestmove.load(Ordering::SeqCst) {
+                    self.activity.release_bestmove.notified().await;
+                }
                 self.searching = false;
                 self.activity.active.fetch_sub(1, Ordering::SeqCst);
             }
@@ -128,6 +134,51 @@ fn group() -> Arc<GroupFactory> {
         activity: Arc::new(Activity::default()),
         permit: Arc::new(Semaphore::new(1)),
     })
+}
+
+#[tokio::test]
+async fn pool_checkpoints_are_scoped_to_each_go_and_completion_remains_reliable() {
+    let factory = group();
+    factory.activity.hold_bestmove.store(true, Ordering::SeqCst);
+    let (close, cancel) = cancel();
+    let fen = core::fen(&shakmaty::Chess::default());
+    let mut pool = Pool::acquire(factory.as_ref(), None, 1, &cancel)
+        .await
+        .expect("acquire worker");
+    let mut first = pool
+        .submit_position(0, fen.clone(), None, 100, 2)
+        .await
+        .expect("submit first search");
+    tokio::time::timeout(Duration::from_secs(1), first.checkpoint.changed())
+        .await
+        .expect("checkpoint before bestmove")
+        .expect("checkpoint channel");
+    assert_eq!(first.checkpoint.borrow().as_ref().unwrap().depth, 12);
+    assert!(matches!(
+        first.completed.try_recv(),
+        Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+    ));
+    factory.activity.release_bestmove.notify_one();
+    assert_eq!(first.completed.await.unwrap().unwrap().raw.depth, 12);
+
+    let mut second = pool
+        .submit_position(0, fen, None, 100, 2)
+        .await
+        .expect("reuse the same worker");
+    assert!(second.checkpoint.borrow().is_none());
+    tokio::time::timeout(Duration::from_secs(1), second.checkpoint.changed())
+        .await
+        .expect("fresh checkpoint")
+        .expect("checkpoint channel");
+    assert!(
+        first.checkpoint.has_changed().is_err(),
+        "the prior go's sender closed"
+    );
+    close.send_replace(true);
+    let result = second.completed.await.expect("cancellation reply");
+    assert!(matches!(result, Err(error) if error.code == ReviewErrorCode::Cancelled));
+    pool.close().await.expect("drain cancelled search");
+    assert_eq!(factory.activity.closed.load(Ordering::SeqCst), 1);
 }
 
 #[tokio::test]

@@ -1,7 +1,7 @@
 //! Rust owns the entire UCI exchange and exclusive process lease.
 use super::types::*;
 use crate::db::mode::Mode;
-use shakmaty::{fen::Fen, uci::UciMove};
+use shakmaty::{Chess, Move, Position, fen::Fen, uci::UciMove};
 use std::{future::Future, ops::Range, pin::Pin, time::Duration};
 use tokio::sync::watch;
 pub type Task<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
@@ -263,13 +263,16 @@ pub async fn send_position(
 }
 pub fn parse_info(line: &str) -> Option<RawLine> {
     let info = parse_info_header(line)?;
-    Some(info.into_raw(line, false))
+    info.exact.then(|| info.to_raw(line, false))
 }
 
 struct InfoHeader {
     depth: u32,
     multipv: u32,
     cp: i32,
+    exact: bool,
+    time_ms: Option<u64>,
+    nodes: Option<u64>,
     pv: Range<usize>,
     first_move_end: usize,
 }
@@ -279,13 +282,13 @@ impl InfoHeader {
         (self.pv.start < self.first_move_end).then(|| &line[self.pv.start..self.first_move_end])
     }
 
-    fn into_raw(self, line: &str, unstable: bool) -> RawLine {
+    fn to_raw(&self, line: &str, unstable: bool) -> RawLine {
         RawLine {
             unstable,
             depth: Some(self.depth),
             multipv: self.multipv,
             cp: self.cp,
-            pv: line[self.pv]
+            pv: line[self.pv.clone()]
                 .split_whitespace()
                 .map(str::to_owned)
                 .collect(),
@@ -308,6 +311,9 @@ fn parse_info_header(line: &str) -> Option<InfoHeader> {
     let mut depth = 0;
     let mut multipv = 1;
     let mut cp = None;
+    let mut exact = true;
+    let mut time_ms = None;
+    let mut nodes = None;
     let mut pv = line.len()..line.len();
     let mut first_move_end = line.len();
     while let Some(token) = words.next() {
@@ -317,6 +323,16 @@ fn parse_info_header(line: &str) -> Option<InfoHeader> {
                 multipv = words.next()?.parse().ok()?;
                 if multipv == 0 {
                     return None;
+                }
+            }
+            "time" | "nodes" => {
+                if let Some(value) = words.clone().next().and_then(|value| value.parse().ok()) {
+                    words.next();
+                    if token == "time" {
+                        time_ms = Some(value);
+                    } else {
+                        nodes = Some(value);
+                    }
                 }
             }
             "score" => {
@@ -346,7 +362,7 @@ fn parse_info_header(line: &str) -> Option<InfoHeader> {
             }
             // Bounds from an unfinished aspiration window are not exact
             // evaluations and must not overwrite a completed score.
-            "lowerbound" | "upperbound" => return None,
+            "lowerbound" | "upperbound" => exact = false,
             "string" => break,
             _ => {}
         }
@@ -355,10 +371,109 @@ fn parse_info_header(line: &str) -> Option<InfoHeader> {
         depth,
         multipv,
         cp: cp?,
+        exact,
+        time_ms,
+        nodes,
         pv,
         first_move_end,
     })
 }
+/// Exact, complete MultiPV evidence observed during one UCI search.
+#[derive(Debug, Clone)]
+pub struct SearchCheckpoint {
+    /// Completed iteration depth. Published depths increase within a search.
+    pub depth: u32,
+    /// Greatest elapsed time reported for the lines in this iteration.
+    pub time_ms: Option<u64>,
+    /// Greatest cumulative node count reported for the lines in this iteration.
+    pub nodes: Option<u64>,
+    /// Exact lines in MultiPV rank order, all at the checkpoint depth.
+    pub lines: Vec<RawLine>,
+}
+
+/// A single-search channel. Each receiver identifies its own search, even on a reused worker.
+#[derive(Debug)]
+pub struct SearchCheckpoints {
+    multipv: u32,
+    latest: watch::Sender<Option<SearchCheckpoint>>,
+}
+
+impl SearchCheckpoints {
+    /// Keeps only the latest complete checkpoint, independently of final result delivery.
+    pub fn channel(multipv: u32) -> (Self, watch::Receiver<Option<SearchCheckpoint>>) {
+        let (latest, receiver) = watch::channel(None);
+        (Self { multipv, latest }, receiver)
+    }
+}
+
+struct CheckpointCollector {
+    position: Chess,
+    width: usize,
+    published_depth: u32,
+    depth: u32,
+    time_ms: Option<u64>,
+    nodes: Option<u64>,
+    pending: Vec<(Move, RawLine)>,
+}
+
+impl CheckpointCollector {
+    fn new(fen: &str, multipv: u32) -> Option<Self> {
+        let position = super::core::position(fen).ok()?;
+        let width = position.legal_moves().len().min(multipv as usize);
+        (width > 0).then(|| Self {
+            position,
+            width,
+            published_depth: 0,
+            depth: 0,
+            time_ms: None,
+            nodes: None,
+            pending: Vec::with_capacity(width),
+        })
+    }
+
+    fn observe(&mut self, header: &InfoHeader, line: &str) -> Option<SearchCheckpoint> {
+        if header.depth <= self.published_depth || header.depth < self.depth {
+            return None;
+        }
+        if header.multipv == 1 || header.depth > self.depth {
+            self.depth = header.depth;
+            self.pending.clear();
+            self.time_ms = None;
+            self.nodes = None;
+        }
+        if !header.exact {
+            return None;
+        }
+        let rank = header.multipv as usize;
+        if rank != self.pending.len() + 1 || rank > self.width {
+            self.pending.clear();
+            return None;
+        }
+        let root = header
+            .first_move(line)
+            .and_then(|uci| uci.parse::<UciMove>().ok())
+            .and_then(|uci| uci.to_move(&self.position).ok())
+            .filter(|root| self.pending.iter().all(|(seen, _)| seen != root));
+        let Some(root) = root else {
+            self.pending.clear();
+            return None;
+        };
+        self.time_ms = self.time_ms.max(header.time_ms);
+        self.nodes = self.nodes.max(header.nodes);
+        self.pending.push((root, header.to_raw(line, false)));
+        if self.pending.len() != self.width {
+            return None;
+        }
+        self.published_depth = self.depth;
+        Some(SearchCheckpoint {
+            depth: self.depth,
+            time_ms: self.time_ms,
+            nodes: self.nodes,
+            lines: self.pending.drain(..).map(|(_, line)| line).collect(),
+        })
+    }
+}
+
 fn go_command(mode: Mode, value: u32) -> String {
     format!(
         "go {} {value}",
@@ -380,6 +495,7 @@ async fn search(
     fen: &str,
     timeout: u64,
     cancel: &Cancellation,
+    checkpoints: Option<SearchCheckpoints>,
 ) -> Result<RawPosition> {
     cancel.check()?;
     let read = async {
@@ -388,6 +504,12 @@ async fn search(
         // Stockfish supports up to 500 PVs. Keep larger ranks from custom
         // engines sparse so one rank cannot force an unbounded resize.
         const DENSE_MULTIPV: u32 = 500;
+        let mut collector = checkpoints.and_then(|observer| {
+            Some((
+                CheckpointCollector::new(fen, observer.multipv)?,
+                observer.latest,
+            ))
+        });
         let mut latest: Vec<Option<LatestInfo>> = Vec::new();
         let mut extra: Vec<(u32, Option<LatestInfo>)> = Vec::new();
         loop {
@@ -398,6 +520,14 @@ async fn search(
             let Some(header) = parse_info_header(&line) else {
                 continue;
             };
+            if let Some((collector, latest)) = &mut collector
+                && let Some(checkpoint) = collector.observe(&header, &line)
+            {
+                let _ = latest.send(Some(checkpoint));
+            }
+            if !header.exact {
+                continue;
+            }
             let slot = if header.multipv <= DENSE_MULTIPV {
                 let index = (header.multipv - 1) as usize;
                 if index >= latest.len() {
@@ -436,7 +566,7 @@ async fn search(
             .into_iter()
             .chain(extra.into_iter().map(|(_, info)| info))
             .flatten()
-            .map(|info| info.header.into_raw(&info.line, info.unstable))
+            .map(|info| info.header.to_raw(&info.line, info.unstable))
             .collect();
         let principal = lines.first().filter(|l| l.multipv == 1).ok_or_else(|| {
             ReviewError::new(
@@ -476,6 +606,7 @@ pub async fn evaluate(
         fen,
         timeout,
         cancel,
+        None,
     )
     .await
 }
@@ -517,7 +648,42 @@ pub async fn evaluate_position(
     cancel.check()?;
     let position = position_command(base, moves)?;
     let go = go_command(mode, value);
-    search(port, &position, &go, result_fen, timeout, cancel).await
+    search(port, &position, &go, result_fen, timeout, cancel, None).await
+}
+
+/// Runs one automatic time-budget search, publishing complete checkpoints before bestmove.
+///
+/// The observer width must match the MultiPV setting on the configured engine.
+///
+/// # Errors
+///
+/// Returns a UCI, validation, timeout, or cancellation error. A failed search
+/// must be followed by engine teardown before the lease is reused.
+pub async fn evaluate_with_checkpoints(
+    port: &mut dyn EnginePort,
+    fen: &str,
+    history: Option<&super::core::PositionContext>,
+    value: u32,
+    timeout: u64,
+    cancel: &Cancellation,
+    checkpoints: SearchCheckpoints,
+) -> Result<RawPosition> {
+    cancel.check()?;
+    let position = match history {
+        Some(history) => position_command(Some(&history.initial_fen), &history.uci_path)?,
+        None => format!("position fen {fen}"),
+    };
+    let go = go_command(Mode::Time, value);
+    search(
+        port,
+        &position,
+        &go,
+        fen,
+        timeout,
+        cancel,
+        Some(checkpoints),
+    )
+    .await
 }
 
 #[cfg(test)]
@@ -594,6 +760,92 @@ mod tests {
         );
         assert_eq!(result.lines[1].pv, ["d2d4", "g8f6"]);
         assert!(result.lines[2].pv.is_empty());
+    }
+
+    #[tokio::test]
+    async fn checkpoints_coalesce_complete_iterations_and_keep_the_final_result_independent() {
+        let transcript = vec![
+            "info depth 3 multipv 1 score cp 20 time 2 nodes 50 pv e2e4",
+            "info depth 3 multipv 2 score cp 10 time 3 nodes 90 pv d2d4",
+            "info depth 4 multipv 1 score cp 25 pv d2d4",
+            "info depth 4 multipv 2 score cp 15 pv d2d4",
+            "info depth 4 multipv 1 score cp 25 pv e2e4",
+            "info depth 4 multipv 2 score cp 10 pv e7e5",
+            "info depth 4 multipv 2 score cp 30 pv c2c4",
+            "info depth 5 multipv 1 score cp 40 pv g1f3",
+            "info depth 5 multipv 2 score cp 35 upperbound pv c2c4",
+            "info depth 5 multipv 2 score cp 32 time 15 nodes 613 pv c2c4",
+            "info depth 5 multipv 1 score cp 45 pv b1c3",
+            "info depth 6 multipv 1 score cp 50 pv e2e4",
+            "info depth 7 multipv 2 score cp 60 pv d2d4",
+            "info depth 6 multipv 2 score cp 42 pv c2c4",
+            "info depth 7 multipv 1 score cp 55 pv c2c4",
+            "info depth 7 multipv 1 score cp 56 lowerbound pv c2c4",
+            "info depth 7 multipv 2 score cp 53 pv d2d4",
+            "bestmove c2c4",
+        ];
+        let (_closed, receiver) = watch::channel(false);
+        let cancel = Cancellation {
+            closed: receiver,
+            revision: None,
+        };
+        let (publish, observed) = SearchCheckpoints::channel(2);
+        let fen = super::super::core::fen(&Chess::default());
+        let mut collector = CheckpointCollector::new(&fen, 2).expect("valid starting position");
+        let iterations: Vec<_> = transcript
+            .iter()
+            .filter_map(|line| collector.observe(&parse_info_header(line)?, line))
+            .map(|checkpoint| (checkpoint.depth, checkpoint.time_ms, checkpoint.nodes))
+            .collect();
+        assert_eq!(
+            iterations,
+            [(3, Some(3), Some(90)), (5, Some(15), Some(613))]
+        );
+
+        let mut port = Transcript(transcript.into_iter());
+        let final_result =
+            evaluate_with_checkpoints(&mut port, &fen, None, 50, 1000, &cancel, publish)
+                .await
+                .expect("the completed go returns its final evaluation");
+        let observed = observed.borrow();
+        let checkpoint = observed.as_ref().expect("at least one complete iteration");
+        assert_eq!(
+            (checkpoint.depth, checkpoint.time_ms, checkpoint.nodes),
+            (5, Some(15), Some(613))
+        );
+        assert_eq!(
+            checkpoint
+                .lines
+                .iter()
+                .map(|line| (line.multipv, line.depth, line.pv[0].as_str()))
+                .collect::<Vec<_>>(),
+            [(1, Some(5), "g1f3"), (2, Some(5), "c2c4")],
+        );
+        assert_eq!(final_result.depth, 7);
+        assert_eq!(final_result.pv, ["c2c4"]);
+        assert_eq!(final_result.lines[1].pv, ["d2d4"]);
+    }
+
+    #[test]
+    fn checkpoint_width_is_capped_by_legal_roots_and_metrics_may_be_absent() {
+        // Black has only Kh7 available.
+        let fen = "R6k/6p1/8/8/8/8/8/6K1 b - - 1 1";
+        let mut collector = CheckpointCollector::new(fen, 5).expect("position with a legal move");
+        let line = "info depth 8 score cp -520 pv h8h7";
+        let checkpoint = collector
+            .observe(&parse_info_header(line).expect("valid info"), line)
+            .expect("single legal root completes the iteration");
+        assert_eq!(checkpoint.lines.len(), 1);
+        assert_eq!(
+            (checkpoint.depth, checkpoint.time_ms, checkpoint.nodes),
+            (8, None, None)
+        );
+        let older = "info depth 7 score cp -500 pv h8h7";
+        assert!(
+            collector
+                .observe(&parse_info_header(older).unwrap(), older)
+                .is_none()
+        );
     }
 
     /// Engine port that records every sent command and replays scripted stdout lines.
