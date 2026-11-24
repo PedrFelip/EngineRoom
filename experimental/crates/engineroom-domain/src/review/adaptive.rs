@@ -273,17 +273,14 @@ pub fn targets(critical: &[Critical], count: usize, profile: Profile) -> Vec<Tar
     let mut order = Vec::new();
     let mut selected: Vec<Option<Target>> = vec![None; count];
     let mut chosen = 0usize;
-    for m in ranked {
-        let kind = refinement_kind(m);
-        let pair = [m.ply - 1, m.ply];
+    for ((hard, kind, score), ply) in ranked {
+        let pair = [ply - 1, ply];
         let indexes = if kind == RefinementKind::Complex {
             &pair[..1]
         } else {
             &pair[..]
         };
-        if !m.hard
-            && indexes.iter().any(|&i| i >= count || selected[i].is_none())
-            && chosen >= limit
+        if !hard && indexes.iter().any(|&i| i >= count || selected[i].is_none()) && chosen >= limit
         {
             continue;
         }
