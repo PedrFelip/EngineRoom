@@ -618,6 +618,20 @@ fn moves_panel(s: &State, k: &Kit) -> El {
     if s.real_result.is_some() {
         content = content.child(learning(s, k));
     }
+    if s.active_variation.is_none()
+        && let Some(verification) = s
+            .ply
+            .checked_sub(1)
+            .and_then(|index| s.real_result.as_ref()?.moves.get(index))
+            .and_then(|decision| decision.critical_verification.as_ref())
+        && !verification.pending_plies.is_empty()
+    {
+        content = content.child(
+            rune::text("Verificação crítica incompleta para este lance.")
+                .font(k.ty.ui_medium)
+                .color(k.c.text_base),
+        );
+    }
     content = content.child(move_list(s, k));
     content
 }

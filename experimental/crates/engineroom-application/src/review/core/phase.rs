@@ -20,13 +20,15 @@ fn region(y: i32, w: usize, b: usize) -> i32 {
     }
 }
 pub fn phase(fen: &str) -> Phase {
-    let ranks: Vec<_> = fen
-        .split_whitespace()
-        .next()
-        .unwrap_or("")
-        .split('/')
-        .collect();
-    if ranks.len() != 8 {
+    let mut split_ranks = fen.split_whitespace().next().unwrap_or("").split('/');
+    let mut ranks = [""; 8];
+    for rank in &mut ranks {
+        let Some(next) = split_ranks.next() else {
+            return Phase::Opening;
+        };
+        *rank = next;
+    }
+    if split_ranks.next().is_some() {
         return Phase::Opening;
     }
     let pieces = ranks
@@ -43,14 +45,20 @@ pub fn phase(fen: &str) -> Phase {
     {
         return Phase::Middlegame;
     }
-    let mut board = [[None; 8]; 8];
+    let mut white = 0_u64;
+    let mut black = 0_u64;
     for (i, rank) in ranks.iter().enumerate() {
         let mut file = 0;
         for c in rank.chars() {
             if let Some(n) = c.to_digit(10) {
                 file += n as usize;
             } else if file < 8 {
-                board[7 - i][file] = Some(c.is_ascii_uppercase());
+                let square = 1_u64 << ((7 - i) * 8 + file);
+                if c.is_ascii_uppercase() {
+                    white |= square;
+                } else {
+                    black |= square;
+                }
                 file += 1;
             }
         }
@@ -58,18 +66,11 @@ pub fn phase(fen: &str) -> Phase {
     let mut mixed = 0;
     for y in 0..7 {
         for x in 0..7 {
-            let mut w = 0;
-            let mut b = 0;
-            for dy in 0..2 {
-                for dx in 0..2 {
-                    match board[y + dy][x + dx] {
-                        Some(true) => w += 1,
-                        Some(false) => b += 1,
-                        _ => {}
-                    }
-                }
-            }
-            mixed += region(y as i32 + 1, w, b);
+            // The low two bits of each of two adjacent ranks form a 2×2 region.
+            let region_mask = 0x0303_u64 << (y * 8 + x);
+            let w = (white & region_mask).count_ones() as usize;
+            let b = (black & region_mask).count_ones() as usize;
+            mixed += region(y + 1, w, b);
         }
     }
     if mixed > 150 {

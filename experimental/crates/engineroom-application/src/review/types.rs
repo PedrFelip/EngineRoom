@@ -155,12 +155,42 @@ pub struct Eco {
     pub code: String,
     pub name: String,
 }
+/// Evidence for a move judgment, indexed by ply in the same review's positions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DecisionEvidence {
+    /// Evaluation used to judge the position before the move.
+    pub before_ply: usize,
+    /// Whether the before evaluation identifies a legal recommended move.
+    pub best_move_available: bool,
+    /// Evaluation of the position reached by playing the move.
+    pub played_move_value_ply: usize,
+}
+
+/// Screening snapshot and remaining work for a critical move decision.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CriticalVerification {
+    pub screening_classification: Classification,
+    /// Screening scores in each position's side-to-move perspective.
+    pub screening_before_cp: i32,
+    pub screening_after_cp: i32,
+    pub reasons: Vec<super::adaptive::Reason>,
+    /// Positions for which the verification budget was not covered.
+    pub pending_plies: Vec<usize>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MoveAnalysis {
     #[serde(flatten)]
     pub played: PlayedMove,
     pub classification: Classification,
+    /// Absent on reviews saved before decision evidence was recorded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub decision_evidence: Option<DecisionEvidence>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub critical_verification: Option<CriticalVerification>,
     pub win_pct_before: f64,
     pub win_pct_after: f64,
     pub win_pct_loss: f64,
@@ -187,6 +217,97 @@ pub struct Search {
     pub movetime_ms: u32,
     pub multipv: u32,
 }
+/// Origin of the evaluation selected for a reviewed position.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum EvidenceOrigin {
+    Engine,
+    Cache,
+    Terminal,
+}
+
+/// Scope of the position sent to the engine.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum EvidenceScope {
+    /// All legal roots, with the known PGN prefix supplied to the engine.
+    Mainline,
+    /// All legal roots, with only the current position supplied to the engine.
+    FenOnly,
+}
+
+/// Requested search parameters, independent of the returned depth and lines.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EvidenceBudget {
+    pub mode: crate::db::mode::Mode,
+    pub value: u32,
+    pub multipv: u32,
+}
+
+/// Successful end condition of a recorded evaluation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum EvidenceCompletion {
+    BestMove,
+    Terminal,
+}
+
+/// Context and coverage of the evaluation backing a reviewed position.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PositionEvidence {
+    /// Ply through which the stored review's PGN prefix was supplied, if any.
+    pub history_ply: Option<usize>,
+    pub scope: EvidenceScope,
+    pub origin: EvidenceOrigin,
+    pub completion: EvidenceCompletion,
+    /// Engine identity reported by UCI, when available.
+    pub engine: Option<String>,
+    /// Fingerprint of the engine executable used for cache compatibility.
+    pub engine_build: Option<String>,
+    /// Requested budget for the search, distinct from observed coverage.
+    pub requested: Option<EvidenceBudget>,
+    /// Lowest observed depth among the recorded principal variations.
+    pub reached_depth: u32,
+    /// Number of recorded principal variations.
+    pub observed_lines: usize,
+}
+
+impl PositionEvidence {
+    /// Describes the completed evaluation using the coverage actually returned.
+    pub fn from_raw(
+        raw: &RawPosition,
+        history_ply: Option<usize>,
+        origin: EvidenceOrigin,
+        engine: Option<String>,
+        requested: Option<EvidenceBudget>,
+    ) -> Self {
+        let limit = requested.map_or(raw.lines.len(), |budget| budget.multipv as usize);
+        let (observed_lines, reached_depth) = super::core::observed_coverage(raw, limit)
+            .map_or((0, 0), |(lines, depth, _)| (lines, depth));
+        Self {
+            history_ply,
+            scope: if history_ply.is_some() {
+                EvidenceScope::Mainline
+            } else {
+                EvidenceScope::FenOnly
+            },
+            origin,
+            completion: if origin == EvidenceOrigin::Terminal {
+                EvidenceCompletion::Terminal
+            } else {
+                EvidenceCompletion::BestMove
+            },
+            engine,
+            engine_build: None,
+            requested,
+            reached_depth,
+            observed_lines,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PositionAnalysis {
@@ -202,6 +323,8 @@ pub struct PositionAnalysis {
     pub search: Option<Search>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub triage_lines: Option<Vec<PvLine>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evidence: Option<PositionEvidence>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Accuracy {

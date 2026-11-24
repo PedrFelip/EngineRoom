@@ -2,11 +2,12 @@
 use engineroom_backend::review::{
     engine::EngineFactory,
     native_engine::NativeEngineFactory,
-    repository::{Repository, SqliteRepository},
-    session::ReviewSessions,
+    repository::{BypassCacheRepository, CacheMode, Repository, SqliteRepository},
+    session::{Resources, ReviewSessions, SchedulerMode},
     types::{Envelope, LiveRequest, LiveSettings, ReviewConfig, ReviewError},
 };
 use std::{
+    collections::{BTreeMap, BTreeSet},
     path::PathBuf,
     sync::{
         Arc,
@@ -93,6 +94,7 @@ pub enum DataEvent {
 }
 
 pub struct Bridge {
+    scheduler: SchedulerMode,
     runtime: tokio::runtime::Runtime,
     import_actor: Option<tokio::task::JoinHandle<()>>,
     import_intents: Option<tokio::sync::mpsc::UnboundedSender<ImportIntent>>,
@@ -111,7 +113,15 @@ pub struct Bridge {
     data_wake: Arc<dyn Fn() + Send + Sync>,
 }
 impl Bridge {
-    pub fn new(wake: rune::Waker) -> Result<Self, String> {
+    pub fn new_with_scheduler(wake: rune::Waker, scheduler: SchedulerMode) -> Result<Self, String> {
+        Self::new_with_modes(wake, scheduler, CacheMode::Enabled)
+    }
+
+    pub fn new_with_modes(
+        wake: rune::Waker,
+        scheduler: SchedulerMode,
+        cache: CacheMode,
+    ) -> Result<Self, String> {
         // A missing engine must not disable storage, history, file and Chess.com
         // imports: the acquisition error is reported only when a review starts.
         let engine = engine_path();
@@ -125,18 +135,39 @@ impl Bridge {
             Arc::new(engineroom_backend::imports::ChessComHttp::new().map_err(|e| e.to_string())?);
         Self::with_data_ports(
             Arc::new(NativeEngineFactory::new(engine)),
-            repository.clone(),
+            match cache {
+                CacheMode::Enabled => repository.clone(),
+                CacheMode::Bypass => Arc::new(BypassCacheRepository::new(repository.clone())),
+            },
             Some(repository),
             Arc::new(move || (wake)()),
             http,
             Some(db),
+            detect_resources(),
+            scheduler,
         )
+    }
+
+    #[must_use]
+    pub fn scheduler(&self) -> SchedulerMode {
+        self.scheduler
     }
 
     #[cfg(test)]
     pub fn with_ports(
         factory: Arc<dyn EngineFactory>,
         repository: Arc<dyn Repository>,
+        wake: Arc<dyn Fn() + Send + Sync>,
+    ) -> Result<Self, String> {
+        Self::with_ports_and_scheduler(factory, repository, None, SchedulerMode::default(), wake)
+    }
+
+    #[cfg(test)]
+    pub fn with_ports_and_scheduler(
+        factory: Arc<dyn EngineFactory>,
+        repository: Arc<dyn Repository>,
+        resources: Option<Resources>,
+        scheduler: SchedulerMode,
         wake: Arc<dyn Fn() + Send + Sync>,
     ) -> Result<Self, String> {
         Self::with_data_ports(
@@ -146,8 +177,14 @@ impl Bridge {
             wake,
             Arc::new(engineroom_backend::imports::ChessComHttp::new().map_err(|e| e.to_string())?),
             None,
+            resources,
+            scheduler,
         )
     }
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "internal bridge constructor wires all injected native ports"
+    )]
     fn with_data_ports(
         factory: Arc<dyn EngineFactory>,
         repository: Arc<dyn Repository>,
@@ -155,6 +192,8 @@ impl Bridge {
         wake: Arc<dyn Fn() + Send + Sync>,
         http: Arc<dyn engineroom_backend::imports::Http>,
         db_path: Option<PathBuf>,
+        resources: Option<Resources>,
+        scheduler: SchedulerMode,
     ) -> Result<Self, String> {
         let runtime = tokio::runtime::Runtime::new().map_err(|e| e.to_string())?;
         let (import_tx, import_events) = mpsc::channel();
@@ -192,7 +231,9 @@ impl Bridge {
                 shutdown.await;
             }
         });
-        let sessions = Arc::new(ReviewSessions::new(factory.clone(), repository, None));
+        let sessions = Arc::new(
+            ReviewSessions::new(factory.clone(), repository, resources).with_scheduler(scheduler),
+        );
         let (sender, events) = mpsc::channel();
         let (lifecycle_tx, lifecycle) = mpsc::channel();
         let (files_tx, files) = mpsc::channel();
@@ -281,7 +322,8 @@ impl Bridge {
                         }
                     }
                     Intent::Cancel { id, request_id } => {
-                        if let Err(error) = sessions.cancel_live(&id, "window", request_id).await {
+                        if let Err(error) = sessions.enqueue_live_cancel(&id, "window", request_id)
+                        {
                             publish_lifecycle(
                                 &lifecycle_tx,
                                 &wake,
@@ -394,6 +436,7 @@ impl Bridge {
             sessions.shutdown().await;
         });
         Ok(Self {
+            scheduler,
             runtime,
             import_actor: Some(import_actor),
             import_intents: Some(import_intents),
@@ -560,6 +603,256 @@ impl Bridge {
         self.lifecycle.try_iter().collect()
     }
 }
+/// Resolves the review scheduler mode from CLI arguments or `ENGINE_ROOM_SCHEDULER`.
+///
+/// Uses [`SchedulerMode::Native`] when no mode is selected.
+pub fn resolve_scheduler_mode() -> Result<SchedulerMode, String> {
+    let env = match std::env::var_os("ENGINE_ROOM_SCHEDULER") {
+        Some(value) => Some(
+            value
+                .into_string()
+                .map_err(|_| "ENGINE_ROOM_SCHEDULER não é UTF-8 válido.".to_string())?,
+        ),
+        None => None,
+    };
+    parse_scheduler_mode(
+        rune::extra_args().iter().map(String::as_str),
+        env.as_deref(),
+    )
+}
+
+pub(crate) fn parse_scheduler_mode<'a>(
+    args: impl IntoIterator<Item = &'a str>,
+    env: Option<&str>,
+) -> Result<SchedulerMode, String> {
+    let mut cli = None;
+    let mut iter = args.into_iter();
+    while let Some(arg) = iter.next() {
+        match arg {
+            "--native-scheduler" => cli = Some(SchedulerMode::Native),
+            "--pipeline-scheduler" => cli = Some(SchedulerMode::Pipeline),
+            "--scheduler" => {
+                let value = iter
+                    .next()
+                    .ok_or_else(|| "Valor ausente para --scheduler.".to_string())?;
+                cli = Some(parse_scheduler_label(value, "--scheduler")?);
+            }
+            _ if arg.starts_with("--scheduler=") => {
+                let value = &arg["--scheduler=".len()..];
+                cli = Some(parse_scheduler_label(value, "--scheduler")?);
+            }
+            _ => {}
+        }
+    }
+    if let Some(mode) = cli {
+        return Ok(mode);
+    }
+    match env.map(str::trim).filter(|value| !value.is_empty()) {
+        None => Ok(SchedulerMode::default()),
+        Some(value) => parse_scheduler_label(value, "ENGINE_ROOM_SCHEDULER"),
+    }
+}
+
+fn parse_scheduler_label(value: &str, source: &str) -> Result<SchedulerMode, String> {
+    if value.eq_ignore_ascii_case("native") {
+        Ok(SchedulerMode::Native)
+    } else if value.eq_ignore_ascii_case("pipeline") {
+        Ok(SchedulerMode::Pipeline)
+    } else {
+        Err(format!(
+            "Modo de agendador inválido em {source}: '{value}' (use 'pipeline' ou 'native')."
+        ))
+    }
+}
+
+/// Resolves the position cache mode with CLI options taking precedence.
+pub fn resolve_cache_mode() -> Result<CacheMode, String> {
+    let env = std::env::var("ENGINE_ROOM_CACHE");
+    let env = match &env {
+        Ok(value) => Some(value.as_str()),
+        Err(std::env::VarError::NotPresent) => None,
+        Err(std::env::VarError::NotUnicode(_)) => {
+            return Err("ENGINE_ROOM_CACHE não é UTF-8 válido.".into());
+        }
+    };
+    parse_cache_mode(rune::extra_args().iter().map(String::as_str), env)
+}
+
+fn parse_cache_mode<'a>(
+    args: impl IntoIterator<Item = &'a str>,
+    env: Option<&str>,
+) -> Result<CacheMode, String> {
+    let mut cli = None;
+    let mut args = args.into_iter();
+    while let Some(arg) = args.next() {
+        if arg == "--no-cache" {
+            cli = Some(CacheMode::Bypass);
+        } else if arg == "--cache" {
+            let value = args.next().ok_or("Valor ausente para --cache.")?;
+            cli = Some(parse_cache_label(value, "--cache")?);
+        } else if let Some(value) = arg.strip_prefix("--cache=") {
+            cli = Some(parse_cache_label(value, "--cache")?);
+        }
+    }
+    if let Some(mode) = cli {
+        return Ok(mode);
+    }
+    match env.map(str::trim).filter(|value| !value.is_empty()) {
+        None => Ok(CacheMode::default()),
+        Some(value) => parse_cache_label(value, "ENGINE_ROOM_CACHE"),
+    }
+}
+
+fn parse_cache_label(value: &str, source: &str) -> Result<CacheMode, String> {
+    if value.eq_ignore_ascii_case("on") {
+        Ok(CacheMode::Enabled)
+    } else if value.eq_ignore_ascii_case("off") {
+        Ok(CacheMode::Bypass)
+    } else {
+        Err(format!(
+            "Modo de cache inválido em {source}: '{value}' (use 'on' ou 'off')."
+        ))
+    }
+}
+
+/// Fallback memory budget in MiB when host total RAM cannot be read.
+const FALLBACK_MEMORY_MB: u32 = 2048;
+/// Minimum host memory budget in MiB reported to session sizing.
+const MIN_MEMORY_MB: u32 = 16;
+/// Maximum thread count reported to session sizing.
+const MAX_DETECTED_THREADS: u32 = 256;
+
+pub(crate) fn detect_resources() -> Option<Resources> {
+    let threads = read_proc_file("/proc/cpuinfo")
+        .as_deref()
+        .and_then(parse_cpuinfo_physical_cores)
+        .or_else(|| {
+            std::thread::available_parallelism()
+                .ok()
+                .map(|n| u32::try_from((n.get() / 2).max(1)).unwrap_or(MAX_DETECTED_THREADS))
+        })?
+        .clamp(1, MAX_DETECTED_THREADS);
+    let memory_mb = read_proc_file("/proc/meminfo")
+        .as_deref()
+        .and_then(parse_meminfo_mb)
+        .unwrap_or(FALLBACK_MEMORY_MB)
+        .clamp(MIN_MEMORY_MB, u32::MAX);
+    Some(Resources { threads, memory_mb })
+}
+
+pub(crate) fn parse_cpuinfo_physical_cores(cpuinfo: &str) -> Option<u32> {
+    #[derive(Default)]
+    struct CpuBlock {
+        seen_processor: bool,
+        physical_id: Option<u32>,
+        core_id: Option<u32>,
+        cpu_cores: Option<u32>,
+    }
+
+    impl CpuBlock {
+        fn is_empty(&self) -> bool {
+            !self.seen_processor
+                && self.physical_id.is_none()
+                && self.core_id.is_none()
+                && self.cpu_cores.is_none()
+        }
+    }
+
+    let mut unique_cores = BTreeSet::new();
+    let mut sockets_with_core_id = BTreeSet::new();
+    let mut socket_cpu_cores = BTreeMap::new();
+    let mut block = CpuBlock::default();
+
+    let mut flush = |block: &mut CpuBlock| {
+        let pid = block.physical_id.unwrap_or(0);
+        if let Some(cid) = block.core_id {
+            unique_cores.insert((pid, cid));
+            sockets_with_core_id.insert(pid);
+        } else if let Some(cores) = block.cpu_cores.filter(|&c| c > 0) {
+            socket_cpu_cores
+                .entry(pid)
+                .and_modify(|existing: &mut u32| *existing = (*existing).max(cores))
+                .or_insert(cores);
+        }
+        *block = CpuBlock::default();
+    };
+
+    for line in cpuinfo.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            flush(&mut block);
+            continue;
+        }
+        let Some((key, value)) = trimmed.split_once(':') else {
+            continue;
+        };
+        let key = key.trim();
+        let value = value.trim();
+        match key {
+            "processor" => {
+                if !block.is_empty() {
+                    flush(&mut block);
+                }
+                block.seen_processor = true;
+            }
+            "physical id" => {
+                if let Ok(parsed) = value.parse::<u32>() {
+                    block.physical_id = Some(parsed);
+                }
+            }
+            "core id" => {
+                if let Ok(parsed) = value.parse::<u32>() {
+                    block.core_id = Some(parsed);
+                }
+            }
+            "cpu cores" => {
+                if let Ok(parsed) = value.parse::<u32>() {
+                    block.cpu_cores = Some(parsed);
+                }
+            }
+            _ => {}
+        }
+    }
+    flush(&mut block);
+
+    let mut total = u32::try_from(unique_cores.len()).unwrap_or(u32::MAX);
+    for (pid, cores) in socket_cpu_cores {
+        if !sockets_with_core_id.contains(&pid) {
+            total = total.saturating_add(cores);
+        }
+    }
+    (total > 0).then_some(total)
+}
+
+pub(crate) fn parse_meminfo_mb(meminfo: &str) -> Option<u32> {
+    for line in meminfo.lines() {
+        if let Some(rest) = line.trim_start().strip_prefix("MemTotal:") {
+            let mut parts = rest.split_whitespace();
+            let kb = parts.next()?.parse::<u64>().ok()?;
+            if let Some(unit) = parts.next()
+                && !unit.eq_ignore_ascii_case("kb")
+            {
+                return None;
+            }
+            let mb = u32::try_from(kb / 1024).unwrap_or(u32::MAX);
+            return Some(mb);
+        }
+    }
+    None
+}
+
+fn read_proc_file(path: &str) -> Option<String> {
+    #[cfg(target_os = "linux")]
+    {
+        std::fs::read_to_string(path).ok()
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = path;
+        None
+    }
+}
+
 /// Resolves Stockfish without making a missing executable fatal for the bridge.
 fn engine_path() -> PathBuf {
     crate::desktop_paths::stockfish_path().unwrap_or_else(|_| {

@@ -139,6 +139,7 @@ pub struct State {
         std::collections::HashMap<String, engineroom_backend::review::types::PositionAnalysis>,
     pub live_running: bool,
     pub live_error: Option<String>,
+    live_during_review: bool,
     live_key: Option<String>,
     pub page: Page,
     pub previous_page: Page,
@@ -229,6 +230,7 @@ impl Default for State {
             live_positions: std::collections::HashMap::new(),
             live_running: false,
             live_error: None,
+            live_during_review: false,
             live_key: None,
             page: Page::Home,
             previous_page: Page::Home,
@@ -392,11 +394,38 @@ impl State {
     pub fn toggle_live_engine(&mut self) {
         self.preferences.live_engine = !self.preferences.live_engine;
     }
-    pub fn setup_bridge(&mut self, wake: rune::Waker) {
-        match crate::bridge::Bridge::new(wake) {
+    pub fn setup_bridge_with_scheduler(
+        &mut self,
+        wake: rune::Waker,
+        scheduler: engineroom_backend::review::session::SchedulerMode,
+    ) {
+        match crate::bridge::Bridge::new_with_scheduler(wake, scheduler) {
             Ok(bridge) => self.bridge = Some(bridge),
             Err(error) => self.bridge_error = Some(error),
         }
+    }
+    pub fn setup_bridge_with_cache_bypass(
+        &mut self,
+        wake: rune::Waker,
+        scheduler: engineroom_backend::review::session::SchedulerMode,
+    ) {
+        use engineroom_backend::review::repository::CacheMode;
+
+        match crate::bridge::Bridge::new_with_modes(wake, scheduler, CacheMode::Bypass) {
+            Ok(bridge) => self.bridge = Some(bridge),
+            Err(error) => self.bridge_error = Some(error),
+        }
+    }
+    pub(crate) fn live_ready(&self) -> bool {
+        self.real_result.is_some() || (self.real_progress.is_some() && self.live_during_review)
+    }
+    pub(crate) fn allows_live_during_review(
+        bridge: &crate::bridge::Bridge,
+        config: &engineroom_backend::review::types::ReviewConfig,
+    ) -> bool {
+        bridge.scheduler() == engineroom_backend::review::session::SchedulerMode::Native
+            && config.initial_result.is_none()
+            && config.analysis_kind != engineroom_backend::review::types::AnalysisKind::Manual
     }
     pub fn setup_file_dialog(&mut self, wake: rune::Waker) {
         match crate::file_dialog::FileDialog::new(move || (wake)()) {
@@ -460,15 +489,21 @@ impl State {
                 .as_nanos()
         );
         if let Some(bridge) = &self.bridge {
+            let live_during_review = Self::allows_live_during_review(bridge, &config);
             match bridge.open(&id, config) {
                 Ok(()) => {
                     self.session.open(id);
                     self.bridge_error = None;
+                    self.live_during_review = live_during_review;
                     self.real_progress = Some((0, self.game.moves.len() + 1));
                 }
-                Err(e) => self.bridge_error = Some(e),
+                Err(e) => {
+                    self.live_during_review = false;
+                    self.bridge_error = Some(e);
+                }
             }
         } else {
+            self.live_during_review = false;
             self.bridge_error = Some("Service de análise indisponível.".into());
         }
         self.navigate(Page::Review);
@@ -483,6 +518,7 @@ impl State {
         self.live_positions.clear();
         self.live_running = false;
         self.live_error = None;
+        self.live_during_review = false;
         self.live_key = None;
     }
     pub fn can_export_pgn(&self) -> bool {
@@ -731,9 +767,13 @@ impl State {
                     self.real_progress = Some((progress.completed, progress.total))
                 }
                 Event::Completed { result } => {
+                    let was_live_during_review =
+                        std::mem::replace(&mut self.live_during_review, false);
                     self.real_result = Some(result);
                     self.real_progress = None;
-                    self.live_key = None;
+                    if !was_live_during_review {
+                        self.live_key = None;
+                    }
                 }
                 Event::Error {
                     error,
@@ -744,6 +784,7 @@ impl State {
                 Event::Error { error, fen: None } => {
                     self.bridge_error = Some(error.to_string());
                     self.real_progress = None;
+                    self.live_during_review = false;
                     self.live_running = false;
                     self.playing = false;
                 }
@@ -811,10 +852,11 @@ impl State {
         }
         self.live_key = Some(key);
         let request_id = self.session.invalidate_live();
-        self.live_running = p.live_engine && self.real_result.is_some();
+        let ready = self.live_ready();
+        self.live_running = p.live_engine && ready;
         self.live_error = None;
         if let Some(bridge) = &self.bridge {
-            if p.live_engine && self.real_result.is_some() {
+            if p.live_engine && ready {
                 let request = LiveRequest {
                     fen,
                     variation_node_id: node_id,
@@ -868,6 +910,8 @@ impl State {
         origin: crate::bridge::LifecycleOrigin,
     ) {
         use engineroom_backend::review::types::ReviewErrorCode;
+        // Any lifecycle error ends live navigation that was allowed during a review.
+        self.live_during_review = false;
         let recoverable_live = matches!(
             origin,
             crate::bridge::LifecycleOrigin::Analyze | crate::bridge::LifecycleOrigin::Cancel
@@ -944,12 +988,18 @@ impl State {
                                 .as_nanos()
                         );
                         if let Some(bridge) = &self.bridge {
+                            let live_during_review =
+                                Self::allows_live_during_review(bridge, &config);
                             match bridge.open(&id, *config) {
                                 Ok(()) => {
                                     self.session.open(id);
+                                    self.live_during_review = live_during_review;
                                     self.real_progress = Some((0, self.game.moves.len() + 1));
                                 }
-                                Err(e) => self.bridge_error = Some(e),
+                                Err(e) => {
+                                    self.live_during_review = false;
+                                    self.bridge_error = Some(e);
+                                }
                             }
                         }
                         self.navigate(Page::Review);
@@ -1689,7 +1739,7 @@ impl State {
         }
         // Keep playback on the current position until its live search has completed;
         // manual navigation still cancels it immediately through the session intent.
-        if self.live_running && self.preferences.live_engine && self.real_result.is_some() {
+        if self.live_running && self.preferences.live_engine && self.live_ready() {
             return false;
         }
         let Some(i) = self.active_variation else {

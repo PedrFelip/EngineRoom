@@ -2,9 +2,11 @@
 use super::{Repository, normalize, shape};
 use crate::db::{
     cache::{Cache, CachedPositionPut},
+    evidence::{EvidenceCache, EvidencePut},
     games::{NewGame, Store, StoredGame},
     mode::Mode,
 };
+use engineroom_application::review::repository::ContextualEvaluation;
 use engineroom_application::review::{core, engine::Task, types::*};
 use shakmaty::Position;
 use std::path::PathBuf;
@@ -77,7 +79,10 @@ impl SqliteRepository {
     /// Clears all cached evaluations.
     pub async fn clear_cache(&self) -> Result<()> {
         self.db("cache.clear", ReviewErrorCode::Cache, move |c| {
-            Cache::new(c).clear()
+            let tx = c.unchecked_transaction()?;
+            Cache::new(&tx).clear()?;
+            EvidenceCache::new(&tx).clear()?;
+            tx.commit()
         })
         .await
     }
@@ -211,6 +216,90 @@ impl Repository for SqliteRepository {
             .await
         })
     }
+    fn lookup_context<'a>(
+        &'a self,
+        keys: &'a [String],
+        mode: Mode,
+        value: u32,
+        multipv: u32,
+    ) -> Task<'a, Result<Vec<Option<ContextualEvaluation>>>> {
+        Box::pin(async move {
+            let keys = keys.to_vec();
+            self.db("cache.context.lookup", ReviewErrorCode::Cache, move |c| {
+                let rows = EvidenceCache::new(c).lookup_bulk(&keys, mode, value, multipv)?;
+                Ok(rows
+                    .into_iter()
+                    .zip(keys)
+                    .map(|(row, key)| {
+                        let row = row?;
+                        let mut entry: ContextualEvaluation =
+                            serde_json::from_str(&row.payload_json).ok()?;
+                        if entry.key != key {
+                            return None;
+                        }
+                        let (depth, coverage, lines) = contextual_coverage(&entry.raw, multipv)?;
+                        let requested = entry.evidence.requested?;
+                        if coverage < multipv
+                            || match mode {
+                                Mode::Depth => depth < value,
+                                Mode::Time => {
+                                    requested.mode != Mode::Time || requested.value < value
+                                }
+                            }
+                        {
+                            return None;
+                        }
+                        entry.raw.lines.truncate(lines);
+                        entry.evidence.reached_depth = depth;
+                        entry.evidence.observed_lines = entry.raw.lines.len();
+                        Some(entry)
+                    })
+                    .collect())
+            })
+            .await
+        })
+    }
+
+    fn put_context<'a>(
+        &'a self,
+        entries: &'a [ContextualEvaluation],
+        mode: Mode,
+        value: u32,
+    ) -> Task<'a, Result<()>> {
+        Box::pin(async move {
+            let mut writes = Vec::with_capacity(entries.len());
+            for entry in entries {
+                let Some(budget) = entry.evidence.requested else {
+                    continue;
+                };
+                if budget.mode != mode || budget.value != value {
+                    continue;
+                }
+                let Some((reached_depth, multipv, _)) =
+                    contextual_coverage(&entry.raw, budget.multipv)
+                else {
+                    continue;
+                };
+                let encode = |error| {
+                    ReviewError::with_source(ReviewErrorCode::Cache, "cache.context.encode", error)
+                };
+                writes.push((
+                    EvidencePut {
+                        context_key: entry.key.clone(),
+                        reached_depth,
+                        cp: entry.raw.cp,
+                        lines_json: serde_json::to_string(&entry.raw.lines).map_err(encode)?,
+                        payload_json: serde_json::to_string(entry).map_err(encode)?,
+                    },
+                    multipv,
+                ));
+            }
+            self.db("cache.context.put", ReviewErrorCode::Cache, move |c| {
+                EvidenceCache::new(c).store_many_covered(&writes, mode, value)
+            })
+            .await
+        })
+    }
     fn save<'a>(
         &'a self,
         config: &'a ReviewConfig,
@@ -321,4 +410,15 @@ fn review_config(stored: StoredGame) -> Result<ReviewConfig> {
         lines: stored.summary.multipv,
         initial_result: Some(review),
     })
+}
+
+// A reusable set must have contiguous ranks and distinct legal roots.
+fn contextual_coverage(raw: &RawPosition, requested: u32) -> Option<(u32, u32, usize)> {
+    let (lines, depth, legal) = core::observed_coverage(raw, requested as usize)?;
+    let coverage = if lines == legal {
+        requested
+    } else {
+        lines as u32
+    };
+    Some((depth, coverage, lines))
 }

@@ -38,7 +38,19 @@ pub(super) fn migrate(conn: &Connection) -> rusqlite::Result<()> {
             review_json TEXT NOT NULL,
             created_at TEXT NOT NULL DEFAULT (datetime('now')),
             UNIQUE (pgn, analysis_kind, mode, depth, multipv)
-        );",
+         );
+         CREATE TABLE IF NOT EXISTS evidence_cache (
+            context_key TEXT NOT NULL,
+            reached_depth INTEGER NOT NULL,
+            multipv INTEGER NOT NULL,
+            source_mode TEXT NOT NULL,
+            source_value INTEGER NOT NULL,
+            cp INTEGER NOT NULL,
+            lines_json TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            PRIMARY KEY (context_key, reached_depth, multipv)
+         );",
     )?;
     migrate_position_cache_mode(&tx)?;
     migrate_position_cache_reached_depth(&tx)?;

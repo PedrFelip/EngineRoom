@@ -150,6 +150,14 @@ cargo test --workspace
 ./scripts/check-responsive.sh
 ```
 
+Os testes de integração UCI com Stockfish real são executados manualmente.
+Com o binário em `experimental/resources/stockfish`, rode de `experimental/`:
+
+```sh
+ENGINE_ROOM_STOCKFISH="$PWD/resources/stockfish" \
+  cargo test --locked -p engineroom-uci real_native_stockfish -- --ignored
+```
+
 Os scripts renderizam as telas e os estados de interação em `artifacts/` e verificam
 as árvores exportadas. Requer Python 3. Abra os PNGs para a inspeção visual.
 
@@ -219,6 +227,55 @@ limitações, veja [strobe-study.md](strobe-study.md).
 
 Para cenários Strobe com uma partida histórica, Stockfish real, cache SQLite
 isolado e abertura da janela nativa, veja [real-game-strobe.md](real-game-strobe.md).
+
+### Revisão automática rápida e profunda
+
+O Rune usa o scheduler `Native` por padrão nos dois modos automáticos. Ambos
+enviam ao Stockfish a linha principal conhecida do PGN e reaproveitam evidência
+de contexto e cobertura compatíveis. Os perfis compartilham as regras de
+classificação e de verificação crítica.
+
+O Rápido usa uma triagem menor e explora menos posições de contexto. O Profundo
+analisa mais candidatas na triagem, concede mais tempo às verificações e amplia
+a janela de contexto. A cota de refinamentos opcionais não limita as verificações
+críticas. Os orçamentos ficam em
+[`profiles.json`](crates/engineroom-domain/src/review/profiles.json) e representam
+tempo solicitado ao motor por busca, com duração total variável.
+
+#### Decisão sobre a fila e a parada antecipada
+
+O Native entrega a cada worker a próxima posição pronta da fila compartilhada,
+sem reservar blocos de posições consecutivas. Em 20 pares fixados nos núcleos da
+máquina (Stockfish 19, cache frio, a Partida Imortal), a fila antecipou o
+primeiro par de triagem em todos os pares: 182 ms no Fast com dois workers,
+171 ms com três e 446 ms no Deep. O tempo total da revisão ficou dentro do
+ruído, com mediana da diferença de −6 ms, +81 ms e +426 ms (a fila ficou à
+frente em 5/8, 3/7 e 2/5 pares); no Fast, o CPU medido também empatou. A
+dispersão de 2–5 s vem do número de buscas de refinamento, que variou de 58 a
+64 nos dois arranjos; cada busca extra custa cerca de 0,5 s no Fast e 1,8 s no
+Deep. O teste mede o primeiro par de triagem; a latência até a primeira decisão
+crítica verificada ainda está sem medição.
+
+Um experimento de parada em modo sombra observou 696 buscas em 12 execuções
+(Partida Imortal, Larsen–Spassky e Carlsen–Ernst, Fast e Deep, três workers,
+cache frio), comparando os dois arranjos de fila antes desta troca. A política
+exigia evidência das avaliações vizinhas já concluídas no despacho, MultiPV
+completo e estabilidade da classificação. Com a fila posição a posição, 1 de 350
+buscas foi elegível; com blocos, 9 de 346. Nenhuma atingiu todos os critérios
+para sugerir parada. Um vizinho pendente no despacho foi o veto mais frequente,
+com 272 casos na fila e 234 nos blocos. A busca automática continua até
+`bestmove` com o orçamento do perfil.
+
+O exemplo de benchmark mede o tempo até o primeiro par de triagem e a conclusão
+da revisão. De `experimental/`:
+
+```sh
+ENGINE_ROOM_STOCKFISH="$PWD/resources/stockfish" \
+  cargo run --release --locked -p engineroom-backend --example strobe_review -- native-auto
+```
+
+Para escolher a partida e a configuração do teste, use `STROBE_REVIEW_PGN`,
+`STROBE_REVIEW_PROFILE` (`fast` ou `deep`) e `STROBE_REVIEW_THREADS`.
 
 ### Perfil da interface
 

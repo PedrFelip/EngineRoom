@@ -3,6 +3,8 @@ pub use engineroom_application::review::{
 };
 pub use engineroom_uci::native_engine;
 pub mod repository {
-    pub use engineroom_application::review::repository::{Repository, normalize, validate_review};
+    pub use engineroom_application::review::repository::{
+        BypassCacheRepository, CacheMode, Repository, normalize, validate_review,
+    };
     pub use engineroom_sqlite::review::repository::{SqliteRepository, shape};
 }

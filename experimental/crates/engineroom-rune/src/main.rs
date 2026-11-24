@@ -515,7 +515,19 @@ fn spec() -> AppSpec<State> {
                 })
             {
                 s.setup_avatars(wake.clone());
-                s.setup_bridge(wake.clone());
+                use engineroom_backend::review::repository::CacheMode;
+
+                match bridge::resolve_scheduler_mode().and_then(|scheduler| {
+                    bridge::resolve_cache_mode().map(|cache| (scheduler, cache))
+                }) {
+                    Ok((scheduler, CacheMode::Enabled)) => {
+                        s.setup_bridge_with_scheduler(wake.clone(), scheduler);
+                    }
+                    Ok((scheduler, CacheMode::Bypass)) => {
+                        s.setup_bridge_with_cache_bypass(wake.clone(), scheduler);
+                    }
+                    Err(error) => s.bridge_error = Some(error),
+                }
                 s.setup_preferences(wake.clone());
                 s.setup_file_dialog(wake);
             }

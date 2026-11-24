@@ -1,6 +1,7 @@
 use super::*;
 use crate::review::pool::Pool;
 use std::sync::atomic::AtomicBool;
+use tokio::sync::Notify;
 
 #[derive(Default)]
 struct Activity {
@@ -9,6 +10,8 @@ struct Activity {
     closed: AtomicUsize,
     fail: AtomicBool,
     stall: AtomicBool,
+    hold_bestmove: AtomicBool,
+    release_bestmove: Notify,
     searches: Mutex<Vec<(String, u32)>>,
     delays: Mutex<HashMap<String, u64>>,
 }
@@ -102,6 +105,9 @@ impl EnginePort for GroupPort {
             }
             let line = self.inner.next().await?;
             if line.starts_with("bestmove") && self.searching {
+                if self.activity.hold_bestmove.load(Ordering::SeqCst) {
+                    self.activity.release_bestmove.notified().await;
+                }
                 self.searching = false;
                 self.activity.active.fetch_sub(1, Ordering::SeqCst);
             }
@@ -128,6 +134,71 @@ fn group() -> Arc<GroupFactory> {
         activity: Arc::new(Activity::default()),
         permit: Arc::new(Semaphore::new(1)),
     })
+}
+
+#[tokio::test]
+async fn pool_checkpoints_are_scoped_to_each_go_and_completion_remains_reliable() {
+    let factory = group();
+    factory.activity.hold_bestmove.store(true, Ordering::SeqCst);
+    let (close, cancel) = cancel();
+    let fen = core::fen(&shakmaty::Chess::default());
+    let mut pool = Pool::acquire(factory.as_ref(), None, 1, &cancel)
+        .await
+        .expect("acquire worker");
+    let mut first = pool
+        .submit_position(0, fen.clone(), None, 100, 1)
+        .await
+        .expect("submit first search");
+    tokio::time::timeout(Duration::from_secs(1), first.checkpoint.changed())
+        .await
+        .expect("checkpoint before bestmove")
+        .expect("checkpoint channel");
+    {
+        let latest = first.checkpoint.borrow();
+        let checkpoint = latest.as_ref().expect("first go checkpoint");
+        assert_eq!(checkpoint.depth, 12);
+        assert_eq!(checkpoint.lines.len(), 1);
+    }
+    assert!(matches!(
+        first.completed.try_recv(),
+        Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+    ));
+    factory.activity.release_bestmove.notify_one();
+    assert_eq!(first.completed.await.unwrap().unwrap().raw.depth, 12);
+
+    let mut second = pool
+        .submit_position(0, fen, None, 100, 2)
+        .await
+        .expect("reuse the same worker");
+    tokio::time::timeout(Duration::from_secs(1), second.checkpoint.changed())
+        .await
+        .expect("fresh checkpoint")
+        .expect("checkpoint channel");
+    {
+        let latest = second.checkpoint.borrow();
+        let checkpoint = latest.as_ref().expect("second go checkpoint");
+        assert_eq!(
+            checkpoint
+                .lines
+                .iter()
+                .map(|line| line.multipv)
+                .collect::<Vec<_>>(),
+            [1, 2],
+        );
+    }
+    assert!(
+        first.checkpoint.has_changed().is_err(),
+        "the prior go's sender closed"
+    );
+    close.send_replace(true);
+    let result = second.completed.await.expect("cancellation reply");
+    assert!(matches!(result, Err(error) if error.code == ReviewErrorCode::Cancelled));
+    assert!(
+        second.checkpoint.has_changed().is_err(),
+        "the cancelled go's sender closed"
+    );
+    pool.close().await.expect("drain cancelled search");
+    assert_eq!(factory.activity.closed.load(Ordering::SeqCst), 1);
 }
 
 #[tokio::test]
@@ -334,13 +405,15 @@ async fn mixed_queue_starts_critical_refinements_before_triage_finishes() {
         .rposition(|(_, value)| *value == 180)
         .unwrap();
     assert!(first_refinement < last_triage, "{searches:?}");
-    let mut first_block_starts: Vec<_> = searches[..3]
+    let mut first_dispatch: Vec<_> = searches[..3]
         .iter()
         .map(|(fen, _)| game.fens.iter().position(|f| f == fen).unwrap())
         .collect();
-    first_block_starts.sort_unstable();
-    assert_eq!(first_block_starts, vec![0, 4, 8]);
-    assert_eq!(updates[0].0, 8); // No waiting for the slower position zero.
+    first_dispatch.sort_unstable();
+    assert_eq!(first_dispatch, vec![0, 1, 2]);
+    // The shared queue hands out the next ready position, so the slow first
+    // position does not gate the first published triage result.
+    assert_ne!(updates[0].0, 0);
     assert!(
         updates
             .iter()

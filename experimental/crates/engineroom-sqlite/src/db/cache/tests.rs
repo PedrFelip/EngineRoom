@@ -327,3 +327,130 @@ fn store_many_grava_todas_as_entries_numa_única_transação() {
     assert!(hit_b.is_some(), "fen_b cobre depth 15 (reached 18)");
     assert_eq!(hit_b.unwrap().cp, 12);
 }
+
+#[test]
+fn cache_time_menor_nao_sobrescreve_time_maior_na_mesma_pk() {
+    let conn = open_memory().unwrap();
+    let cache = Cache::new(&conn);
+    cache
+        .store(FEN, Mode::Time, 2000, 1, 20, 35, LINES)
+        .unwrap();
+
+    cache.store(FEN, Mode::Time, 500, 1, 20, -10, "[]").unwrap();
+    cache
+        .store_many(
+            &[CachedPositionPut {
+                fen: FEN.to_string(),
+                reached_depth: 20,
+                cp: -20,
+                lines_json: "[]".to_string(),
+            }],
+            Mode::Time,
+            500,
+            1,
+        )
+        .unwrap();
+
+    let hit = cache.lookup(FEN, Mode::Time, 2000, 1).unwrap();
+    assert_eq!(
+        hit,
+        Some(CachedPosition {
+            cp: 35,
+            lines_json: LINES.to_string(),
+            reached_depth: 20,
+        }),
+        "escrita Mode::Time mais curta não deve rebaixar cobertura temporal existente"
+    );
+}
+
+#[test]
+fn cache_depth_nao_apaga_source_mode_time_na_mesma_pk() {
+    let conn = open_memory().unwrap();
+    let cache = Cache::new(&conn);
+    cache
+        .store(FEN, Mode::Time, 2000, 1, 20, 35, LINES)
+        .unwrap();
+
+    cache.store(FEN, Mode::Depth, 20, 1, 20, -10, "[]").unwrap();
+    cache
+        .store_many(
+            &[CachedPositionPut {
+                fen: FEN.to_string(),
+                reached_depth: 20,
+                cp: -20,
+                lines_json: "[]".to_string(),
+            }],
+            Mode::Depth,
+            20,
+            1,
+        )
+        .unwrap();
+
+    let expected = Some(CachedPosition {
+        cp: 35,
+        lines_json: LINES.to_string(),
+        reached_depth: 20,
+    });
+    assert_eq!(
+        cache.lookup(FEN, Mode::Time, 2000, 1).unwrap(),
+        expected,
+        "entrada Mode::Time existente deve continuar cobrindo pedidos de tempo"
+    );
+    assert_eq!(
+        cache.lookup(FEN, Mode::Depth, 20, 1).unwrap(),
+        expected,
+        "entrada Mode::Time preservada continua cobrindo pedidos de depth"
+    );
+}
+
+#[test]
+fn cache_time_maior_ou_sobre_depth_atualiza_entrada_na_mesma_pk() {
+    let conn = open_memory().unwrap();
+    let cache = Cache::new(&conn);
+    cache.store(FEN, Mode::Depth, 20, 1, 20, 15, "[]").unwrap();
+
+    // Escrita Mode::Time sobre entrada Mode::Depth existente promove source_mode/source_value e payload.
+    cache
+        .store(FEN, Mode::Time, 2000, 1, 20, 35, LINES)
+        .unwrap();
+    let row_after_promotion: (String, u32, i32, String) = conn
+        .query_row(
+            "SELECT source_mode, source_value, cp, lines_json FROM position_cache
+             WHERE fen = ?1 AND reached_depth = 20 AND multipv = 1",
+            [FEN],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+        )
+        .unwrap();
+    assert_eq!(
+        row_after_promotion,
+        ("time".to_string(), 2000, 35, LINES.to_string()),
+        "Mode::Time sobre Mode::Depth deve atualizar source_mode, source_value, cp e lines_json"
+    );
+
+    // Escrita Mode::Time com source_value maior (2500 >= 2000) atualiza a entrada existente.
+    let updated_lines = r#"[{"multipv":1,"cp":48,"pv":["d2d4","d7d5"],"san":"d4"}]"#;
+    cache
+        .store(FEN, Mode::Time, 2500, 1, 20, 48, updated_lines)
+        .unwrap();
+    let row_after_upgrade: (String, u32, i32, String) = conn
+        .query_row(
+            "SELECT source_mode, source_value, cp, lines_json FROM position_cache
+             WHERE fen = ?1 AND reached_depth = 20 AND multipv = 1",
+            [FEN],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+        )
+        .unwrap();
+    assert_eq!(
+        row_after_upgrade,
+        ("time".to_string(), 2500, 48, updated_lines.to_string()),
+        "Mode::Time com source_value maior deve atualizar source_mode, source_value, cp e lines_json"
+    );
+    assert_eq!(
+        cache.lookup(FEN, Mode::Time, 2500, 1).unwrap(),
+        Some(CachedPosition {
+            cp: 48,
+            lines_json: updated_lines.to_string(),
+            reached_depth: 20,
+        })
+    );
+}
