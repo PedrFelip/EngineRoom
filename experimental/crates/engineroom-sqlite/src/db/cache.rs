@@ -17,11 +17,20 @@
 use crate::db::mode::Mode;
 use rusqlite::Connection;
 
-/// `INSERT OR REPLACE` compartilhado entre [`Cache::store`] e
-/// [`Cache::store_many`] — a PK `(fen, reached_depth, multipv)` coalesce.
-const INSERT_SQL: &str = "INSERT OR REPLACE INTO position_cache
+/// Upsert condicional compartilhado entre [`Cache::store`] e
+/// [`Cache::store_many`] — a PK `(fen, reached_depth, multipv)` coalesce, mas
+/// preserva entradas `source_mode = 'time'` contra escritas `depth` ou `time`
+/// com `source_value` menor.
+const INSERT_SQL: &str = "INSERT INTO position_cache
     (fen, reached_depth, multipv, source_mode, source_value, cp, lines_json)
-    VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)";
+    VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+ON CONFLICT(fen, reached_depth, multipv) DO UPDATE SET
+    source_mode = excluded.source_mode,
+    source_value = excluded.source_value,
+    cp = excluded.cp,
+    lines_json = excluded.lines_json
+WHERE position_cache.source_mode != 'time'
+   OR (excluded.source_mode = 'time' AND excluded.source_value >= position_cache.source_value)";
 
 /// Avaliação cacheada de uma posição. A chave (fen, reached_depth, multipv) é
 /// conhecida por quem consulta, então só o payload volta — incluindo
@@ -152,9 +161,9 @@ impl<'a> Cache<'a> {
     }
 
     /// Grava N entries numa única transação, com o statement preparado uma vez.
-    /// Mesma semântica de [`Cache::store`] (`INSERT OR REPLACE` na PK
-    /// `(fen, reached_depth, multipv)`), mas num commit só — bem menos fsync
-    /// que N comandos separados, e atômico.
+    /// Mesma semântica de [`Cache::store`] (upsert condicional na PK
+    /// `(fen, reached_depth, multipv)` que preserva cobertura temporal maior),
+    /// mas num commit só — bem menos fsync que N comandos separados, e atômico.
     pub fn store_many(
         &self,
         entries: &[CachedPositionPut],
