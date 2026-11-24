@@ -130,6 +130,8 @@ pub struct State {
     pub preference_error: Option<String>,
     pub bridge: Option<crate::bridge::Bridge>,
     pub bridge_error: Option<String>,
+    export_pending: Option<u64>,
+    export_outcome: Option<(u64, Result<(), String>)>,
     pub real_result: Option<engineroom_backend::review::types::ReviewResult>,
     pub real_progress: Option<(usize, usize)>,
     session: crate::review_session::ReviewSession,
@@ -219,6 +221,8 @@ impl Default for State {
             preference_error: None,
             bridge: None,
             bridge_error: None,
+            export_pending: None,
+            export_outcome: None,
             real_result: None,
             real_progress: None,
             session: crate::review_session::ReviewSession::default(),
@@ -481,6 +485,42 @@ impl State {
         self.live_error = None;
         self.live_key = None;
     }
+    pub fn can_export_pgn(&self) -> bool {
+        self.real_result.is_some() && self.active_workspace.is_some()
+    }
+
+    pub fn export_busy(&self) -> bool {
+        self.export_pending.is_some()
+    }
+
+    pub fn export_in_progress(&self) -> bool {
+        self.export_busy() && self.export_pending == self.active_workspace
+    }
+
+    pub fn export_outcome(&self) -> Option<&Result<(), String>> {
+        let (key, outcome) = self.export_outcome.as_ref()?;
+        (Some(*key) == self.active_workspace).then_some(outcome)
+    }
+
+    pub fn export_pgn(&mut self) {
+        if self.export_busy() {
+            return;
+        }
+        let Some((bridge, review)) = self.bridge.as_ref().zip(self.real_result.as_ref()) else {
+            return;
+        };
+        let Some(entry) = self
+            .workspace
+            .iter()
+            .find(|entry| Some(entry.key) == self.active_workspace)
+        else {
+            return;
+        };
+        self.export_pending = Some(entry.key);
+        self.export_outcome = None;
+        bridge.export_pgn(entry.config.pgn.clone(), review.clone());
+    }
+
     pub fn poll_bridge(&mut self) -> bool {
         self.sync_live();
         let preferences_changed = self.poll_preferences();
@@ -559,6 +599,11 @@ impl State {
         }
         for event in data {
             match event {
+                crate::bridge::DataEvent::PgnExport(result) => {
+                    if let Some(key) = self.export_pending.take() {
+                        self.export_outcome = result.transpose().map(|outcome| (key, outcome));
+                    }
+                }
                 crate::bridge::DataEvent::Probe(result) => {
                     self.engine_probe = match result {
                         Ok(name) => crate::engine_probe::Status::Success(name),

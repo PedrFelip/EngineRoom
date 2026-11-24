@@ -76,6 +76,9 @@ orienta layout, escopos de eventos, acessibilidade e testes headless.
 - Alternar Lances, Análise e Resumo; filtrar erros por cor; clicar no gráfico para navegar.
 - Visualizar barra de avaliação, selos no tabuleiro/lista, setas e resumo por fase da análise.
 - Selecionar candidatos legais, reproduzir uma linha, pausar e retornar à partida.
+- Exportar uma revisão concluída pelo botão **Exportar PGN anotado** no cabeçalho.
+  A exportação marca erros e erros graves e inclui uma linha alternativa do motor quando disponível.
+  O arquivo exportado mantém as tags e a linha principal da partida e gera suas próprias anotações.
 - Criar variações por clique ou arraste de peças, escolhendo a peça de promoção.
 - Marcar casas com clique secundário e modificadores; as marcas acompanham a posição atual. Setas por arraste secundário ainda dependem de suporte de eventos do Rune.
 - Configurar linhas, feedback, tempo, threads e memória no modal da revisão.
