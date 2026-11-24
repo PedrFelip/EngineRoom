@@ -216,6 +216,20 @@ limitações, veja [strobe-study.md](strobe-study.md).
 Para cenários Strobe com uma partida histórica, Stockfish real, cache SQLite
 isolado e abertura da janela nativa, veja [real-game-strobe.md](real-game-strobe.md).
 
+### Revisão automática rápida e profunda
+
+O Rune usa o scheduler `Native` por padrão nos dois modos automáticos. Ambos
+enviam ao Stockfish a linha principal conhecida do PGN e reaproveitam evidência
+de contexto e cobertura compatíveis. Os perfis compartilham as regras de
+classificação e de verificação crítica.
+
+O Rápido usa uma triagem menor e explora menos posições de contexto. O Profundo
+analisa mais candidatas na triagem, concede mais tempo às verificações e amplia
+a janela de contexto. A cota de refinamentos opcionais não limita as verificações
+críticas. Os orçamentos ficam em
+[`profiles.json`](crates/engineroom-domain/src/review/profiles.json) e representam
+tempo solicitado ao motor por busca, com duração total variável.
+
 ### Perfil da interface
 
 Para medir a apresentação da sidebar com 12, 128 e 512 sessões, execute:

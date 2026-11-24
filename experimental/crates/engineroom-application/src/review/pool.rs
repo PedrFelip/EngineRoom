@@ -12,12 +12,14 @@ use tokio::{
 
 pub struct Completed {
     pub raw: RawPosition,
+    pub engine: Option<String>,
     /// UCI time budget used for this search.
     pub value: u32,
 }
 pub type Evaluation = oneshot::Receiver<Result<Completed>>;
 struct Job {
     fen: String,
+    history: Option<super::core::PositionContext>,
     result: oneshot::Sender<Result<Completed>>,
     value: u32,
     multipv: u32,
@@ -29,6 +31,13 @@ pub struct Pool {
     failure: Arc<Mutex<Option<ReviewError>>>,
     cancel: Cancellation,
 }
+pub(super) fn worker_count(sizing: Option<(u32, u32)>, positions: usize) -> usize {
+    let (threads, memory) = sizing.unwrap_or((1, 16));
+    // Keep at least two threads per worker and cap process and NNUE overhead.
+    let count = (threads / 2).clamp(1, 3).min((memory / 16).max(1)) as usize;
+    count.min(positions.max(1))
+}
+
 impl Pool {
     pub async fn acquire(
         factory: &dyn EngineFactory,
@@ -37,11 +46,8 @@ impl Pool {
         cancel: &Cancellation,
     ) -> Result<Self> {
         let (threads, memory) = sizing.unwrap_or((1, 16));
-        // Keep at least two threads per worker on larger machines; cap process
-        // and NNUE overhead. Hash is a total budget, never a per-process budget.
-        let count = (threads / 2).clamp(1, 3).min((memory / 16).max(1)) as usize;
         let ports = factory
-            .acquire_pool(count.min(positions.max(1)), cancel)
+            .acquire_pool(worker_count(sizing, positions), cancel)
             .await?;
         if ports.is_empty() {
             return Err(ReviewError::new(
@@ -88,10 +94,23 @@ impl Pool {
             .map(|failure| failure.clone())
             .map_err(|_| poisoned_failure())
     }
+    #[cfg(test)]
     pub async fn submit(
         &self,
         worker: usize,
         fen: String,
+        value: u32,
+        multipv: u32,
+    ) -> Result<Evaluation> {
+        self.submit_position(worker, fen, None, value, multipv)
+            .await
+    }
+
+    pub(super) async fn submit_position(
+        &self,
+        worker: usize,
+        fen: String,
+        history: Option<super::core::PositionContext>,
         value: u32,
         multipv: u32,
     ) -> Result<Evaluation> {
@@ -110,6 +129,7 @@ impl Pool {
             })?
             .send(Job {
                 fen,
+                history,
                 result,
                 value,
                 multipv,
@@ -179,6 +199,7 @@ async fn worker(
         revision: None,
     };
     let mut configured = None;
+    let mut identity = None;
     loop {
         let job = tokio::select! {
             _ = root.cancelled() => break,
@@ -189,7 +210,7 @@ async fn worker(
             root.check()?;
             local.check()?;
             if configured.is_none() {
-                engine::configure(
+                identity = engine::configure_with_identity(
                     port.as_mut(),
                     Some(threads),
                     Some(memory),
@@ -207,18 +228,34 @@ async fn worker(
                 engine::ask(port.as_mut(), "isready", "readyok", 10000, &local).await?;
             }
             configured = Some(job.multipv);
-            let mut raw = engine::evaluate(
-                port.as_mut(),
-                &job.fen,
-                Mode::Time,
-                job.value,
-                super::pipeline::timeout(Mode::Time, job.value),
-                &local,
-            )
-            .await?;
+            let timeout = super::pipeline::timeout(Mode::Time, job.value);
+            let mut raw = if let Some(history) = &job.history {
+                engine::evaluate_position(
+                    port.as_mut(),
+                    Some(&history.initial_fen),
+                    &history.uci_path,
+                    &job.fen,
+                    Mode::Time,
+                    job.value,
+                    timeout,
+                    &local,
+                )
+                .await?
+            } else {
+                engine::evaluate(
+                    port.as_mut(),
+                    &job.fen,
+                    Mode::Time,
+                    job.value,
+                    timeout,
+                    &local,
+                )
+                .await?
+            };
             super::core::add_san(&mut raw);
             Ok(Completed {
                 raw,
+                engine: identity.clone(),
                 value: job.value,
             })
         };
@@ -355,6 +392,7 @@ mod tests {
             let (result, reply) = oneshot::channel();
             sender
                 .send(Job {
+                    history: None,
                     fen: String::new(),
                     result,
                     value: 1,

@@ -1,5 +1,6 @@
 pub use engineroom_domain::review::adaptive;
 mod automatic;
+mod contextual;
 pub use engineroom_domain::review::core;
 pub mod engine;
 pub mod pipeline;

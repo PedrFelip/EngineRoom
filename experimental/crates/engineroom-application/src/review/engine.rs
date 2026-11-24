@@ -1,5 +1,7 @@
 //! Rust owns the entire UCI exchange and exclusive process lease.
 use super::types::*;
+use crate::db::mode::Mode;
+use shakmaty::{fen::Fen, uci::UciMove};
 use std::{future::Future, ops::Range, pin::Pin, time::Duration};
 use tokio::sync::watch;
 pub type Task<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
@@ -59,6 +61,11 @@ pub trait EnginePort: Send {
 ///
 /// A group retains its exclusive lease until every process finishes teardown.
 pub trait EngineFactory: Send + Sync {
+    /// Exact engine artifact identity for contextual cache reuse.
+    fn artifact_signature(&self) -> Task<'_, Result<Option<String>>> {
+        Box::pin(async { Ok(None) })
+    }
+
     /// Acquires one process, transferring teardown responsibility to the caller.
     ///
     /// # Errors
@@ -108,6 +115,10 @@ pub async fn send(port: &mut dyn EnginePort, command: &str, cancel: &Cancellatio
         result = tokio::time::timeout(Duration::from_secs(10), port.send(command)) => result.unwrap_or_else(|_| Err(ReviewError::new(ReviewErrorCode::EngineTimeout, "engine.send", format!("A engine não aceitou '{command}'.")))),
     }
 }
+/// Configures the engine, discarding the identity reported by the UCI handshake.
+///
+/// Kept for existing callers; use [`configure_with_identity`] when the actual
+/// engine name is needed from the same handshake.
 pub async fn configure(
     port: &mut dyn EnginePort,
     threads: Option<u32>,
@@ -115,8 +126,45 @@ pub async fn configure(
     multipv: u32,
     cancel: &Cancellation,
 ) -> Result<()> {
-    ask(port, "uci", "uciok", 10000, cancel).await?;
-    ask(port, "isready", "readyok", 10000, cancel).await?;
+    configure_with_identity(port, threads, memory, multipv, cancel)
+        .await
+        .map(|_| ())
+}
+
+/// Extracts the engine name from UCI handshake lines reported by `id name`.
+///
+/// Returns `None` when the engine did not identify itself, so callers can keep
+/// the field absent rather than storing a fabricated name.
+pub fn parse_engine_identity(lines: &[String]) -> Option<String> {
+    lines.iter().find_map(|line| {
+        line.strip_prefix("id name ")
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .map(str::to_owned)
+    })
+}
+
+/// Performs the UCI handshake and captures the actual engine identity.
+pub async fn engine_identity(
+    port: &mut dyn EnginePort,
+    cancel: &Cancellation,
+) -> Result<Option<String>> {
+    let lines = ask(port, "uci", "uciok", 10_000, cancel).await?;
+    Ok(parse_engine_identity(&lines))
+}
+
+/// Configures the engine and returns the identity captured from the same
+/// UCI handshake, avoiding a second `uci` round trip.
+pub async fn configure_with_identity(
+    port: &mut dyn EnginePort,
+    threads: Option<u32>,
+    memory: Option<u32>,
+    multipv: u32,
+    cancel: &Cancellation,
+) -> Result<Option<String>> {
+    let lines = ask(port, "uci", "uciok", 10_000, cancel).await?;
+    let identity = parse_engine_identity(&lines);
+    ask(port, "isready", "readyok", 10_000, cancel).await?;
     if let Some(n) = threads.filter(|n| *n > 1) {
         send(port, &format!("setoption name Threads value {n}"), cancel).await?;
     }
@@ -129,8 +177,89 @@ pub async fn configure(
         cancel,
     )
     .await?;
-    ask(port, "isready", "readyok", 10000, cancel).await?;
-    Ok(())
+    ask(port, "isready", "readyok", 10_000, cancel).await?;
+    Ok(identity)
+}
+
+fn invalid_position(operation: &str, detail: &str) -> ReviewError {
+    ReviewError::new(
+        ReviewErrorCode::InvalidPayload,
+        operation,
+        format!("Comando de posição UCI inválido: {detail}"),
+    )
+}
+
+/// Returns true when `movement` is a syntactically valid, non-null UCI move.
+///
+/// Piece drops and the null move (`0000`) are rejected: a historical prefix
+/// for a standard chess game must contain only normal UCI moves, and a null
+/// move would silently shift the position the engine actually evaluates.
+pub fn is_valid_uci_move(movement: &str) -> bool {
+    if movement.is_empty()
+        || movement
+            .chars()
+            .any(|c| c.is_whitespace() || c.is_control())
+    {
+        return false;
+    }
+    movement.parse::<UciMove>().is_ok_and(UciMove::is_normal)
+}
+
+/// Builds a validated UCI `position` command from an optional setup FEN and a
+/// list of historical UCI moves.
+///
+/// - `base = None` produces `position startpos ...`.
+/// - `base = Some(fen)` produces `position fen <fen> ...`.
+/// - Moves are appended as `moves <m1> <m2> ...` when the prefix is non-empty.
+///
+/// Both the FEN and every move are validated before being appended, so untrusted
+/// game data cannot inject extra UCI commands through newlines or stray tokens.
+///
+/// # Errors
+/// Returns `InvalidPayload` when the FEN or any move is invalid.
+pub fn position_command(base: Option<&str>, moves: &[String]) -> Result<String> {
+    let mut command = match base {
+        None => "position startpos".to_owned(),
+        Some(fen) => {
+            if fen.is_empty() || fen.trim() != fen || fen.chars().any(char::is_control) {
+                return Err(invalid_position("engine.position_command", "FEN inválido"));
+            }
+            if fen.parse::<Fen>().is_err() {
+                return Err(invalid_position("engine.position_command", "FEN inválido"));
+            }
+            format!("position fen {fen}")
+        }
+    };
+    if !moves.is_empty() {
+        command.push_str(" moves");
+        for movement in moves {
+            if !is_valid_uci_move(movement) {
+                return Err(invalid_position(
+                    "engine.position_command",
+                    &format!("movimento UCI inválido: {movement:?}"),
+                ));
+            }
+            command.push(' ');
+            command.push_str(movement);
+        }
+    }
+    Ok(command)
+}
+
+/// Validates and sends a historical position command, returning the exact
+/// command delivered to the engine.
+///
+/// # Errors
+/// Returns `InvalidPayload` for bad history, or a transport/cancellation error.
+pub async fn send_position(
+    port: &mut dyn EnginePort,
+    base: Option<&str>,
+    moves: &[String],
+    cancel: &Cancellation,
+) -> Result<String> {
+    let command = position_command(base, moves)?;
+    send(port, &command, cancel).await?;
+    Ok(command)
 }
 pub fn parse_info(line: &str) -> Option<RawLine> {
     let info = parse_info_header(line)?;
@@ -230,26 +359,32 @@ fn parse_info_header(line: &str) -> Option<InfoHeader> {
         first_move_end,
     })
 }
-pub async fn evaluate(
-    port: &mut dyn EnginePort,
-    fen: &str,
-    mode: crate::db::mode::Mode,
-    value: u32,
-    timeout: u64,
-    cancel: &Cancellation,
-) -> Result<RawPosition> {
-    cancel.check()?;
-    let go = format!(
+fn go_command(mode: Mode, value: u32) -> String {
+    format!(
         "go {} {value}",
-        if mode == crate::db::mode::Mode::Depth {
+        if mode == Mode::Depth {
             "depth"
         } else {
             "movetime"
         }
-    );
+    )
+}
+
+/// Shared UCI search: sends the position and go commands, then consumes the
+/// evaluation lines through `bestmove`. The caller supplies the validated
+/// command strings and the FEN recorded on the result.
+async fn search(
+    port: &mut dyn EnginePort,
+    position: &str,
+    go: &str,
+    fen: &str,
+    timeout: u64,
+    cancel: &Cancellation,
+) -> Result<RawPosition> {
+    cancel.check()?;
     let read = async {
-        port.send(&format!("position fen {fen}")).await?;
-        port.send(&go).await?;
+        port.send(position).await?;
+        port.send(go).await?;
         // Stockfish supports up to 500 PVs. Keep larger ranks from custom
         // engines sparse so one rank cannot force an unbounded resize.
         const DENSE_MULTIPV: u32 = 500;
@@ -322,6 +457,67 @@ pub async fn evaluate(
         _ = cancel.cancelled() => Err(ReviewError::cancelled()),
         result = tokio::time::timeout(Duration::from_millis(timeout), read) => result.unwrap_or_else(|_| Err(ReviewError::new(ReviewErrorCode::EngineTimeout, "engine.evaluate", format!("A engine não respondeu a '{go}' em {timeout}ms.")))),
     }
+}
+
+/// Evaluates a single FEN. Preserved for existing tests and callers.
+pub async fn evaluate(
+    port: &mut dyn EnginePort,
+    fen: &str,
+    mode: crate::db::mode::Mode,
+    value: u32,
+    timeout: u64,
+    cancel: &Cancellation,
+) -> Result<RawPosition> {
+    let go = go_command(mode, value);
+    search(
+        port,
+        &format!("position fen {fen}"),
+        &go,
+        fen,
+        timeout,
+        cancel,
+    )
+    .await
+}
+
+/// Evaluates the position reached by validated historical UCI moves from the
+/// standard starting position, recording `result_fen` on the returned raw
+/// evaluation.
+pub async fn evaluate_history(
+    port: &mut dyn EnginePort,
+    moves: &[String],
+    result_fen: &str,
+    mode: crate::db::mode::Mode,
+    value: u32,
+    timeout: u64,
+    cancel: &Cancellation,
+) -> Result<RawPosition> {
+    evaluate_position(port, None, moves, result_fen, mode, value, timeout, cancel).await
+}
+
+/// General history-aware entry point: evaluates
+/// `position [startpos | fen <base>] moves ...`.
+///
+/// `result_fen` is the FEN of the position after `moves` and is stored on the
+/// result; the command itself is built from `base` and validated moves.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "UCI configuration separates search budget and position context"
+)]
+pub async fn evaluate_position(
+    port: &mut dyn EnginePort,
+    base: Option<&str>,
+    moves: &[String],
+    result_fen: &str,
+    mode: crate::db::mode::Mode,
+    value: u32,
+    timeout: u64,
+    cancel: &Cancellation,
+) -> Result<RawPosition> {
+    cancel.check()?;
+    let position = position_command(base, moves)?;
+    let go = go_command(mode, value);
+    search(port, &position, &go, result_fen, timeout, cancel).await
 }
 
 #[cfg(test)]
@@ -398,5 +594,211 @@ mod tests {
         );
         assert_eq!(result.lines[1].pv, ["d2d4", "g8f6"]);
         assert!(result.lines[2].pv.is_empty());
+    }
+
+    /// Engine port that records every sent command and replays scripted stdout lines.
+    struct Recording {
+        sent: Vec<String>,
+        lines: std::collections::VecDeque<String>,
+    }
+
+    impl Recording {
+        fn new(lines: impl IntoIterator<Item = impl Into<String>>) -> Self {
+            Self {
+                sent: Vec::new(),
+                lines: lines.into_iter().map(Into::into).collect(),
+            }
+        }
+    }
+
+    impl EnginePort for Recording {
+        fn send<'a>(&'a mut self, command: &'a str) -> Task<'a, Result<()>> {
+            self.sent.push(command.to_owned());
+            Box::pin(async { Ok(()) })
+        }
+
+        fn next(&mut self) -> Task<'_, Result<String>> {
+            let line = self.lines.pop_front().unwrap_or_default();
+            Box::pin(async { Ok(line) })
+        }
+
+        fn shutdown(&mut self) -> Task<'_, ()> {
+            Box::pin(async {})
+        }
+    }
+
+    fn cancel() -> Cancellation {
+        let (_closed, receiver) = watch::channel(false);
+        Cancellation {
+            closed: receiver,
+            revision: None,
+        }
+    }
+
+    fn moves(list: &[&str]) -> Vec<String> {
+        list.iter().map(|m| (*m).to_owned()).collect()
+    }
+
+    #[test]
+    fn parses_actual_engine_identity_from_handshake_lines() {
+        let lines = [
+            "id name Stockfish 19".to_owned(),
+            "id author The Stockfish developers".to_owned(),
+            "uciok".to_owned(),
+        ];
+        assert_eq!(
+            parse_engine_identity(&lines).as_deref(),
+            Some("Stockfish 19")
+        );
+        assert_eq!(parse_engine_identity(&[]), None);
+        assert_eq!(
+            parse_engine_identity(&["option name Hash".to_owned()]),
+            None
+        );
+    }
+
+    #[tokio::test]
+    async fn engine_identity_captures_name_from_uci_handshake() {
+        let mut port = Recording::new(["id name Stockfish 19", "uciok"]);
+        let identity = engine_identity(&mut port, &cancel())
+            .await
+            .expect("handshake succeeds");
+        assert_eq!(identity.as_deref(), Some("Stockfish 19"));
+        assert_eq!(port.sent, ["uci"]);
+    }
+
+    #[tokio::test]
+    async fn configure_with_identity_captures_name_from_one_handshake() {
+        let mut port = Recording::new(["id name Stockfish 19", "uciok", "readyok", "readyok"]);
+        let identity = configure_with_identity(&mut port, Some(4), Some(128), 3, &cancel())
+            .await
+            .expect("configuration succeeds");
+        assert_eq!(identity.as_deref(), Some("Stockfish 19"));
+        assert_eq!(
+            port.sent,
+            [
+                "uci",
+                "isready",
+                "setoption name Threads value 4",
+                "setoption name Hash value 128",
+                "setoption name MultiPV value 3",
+                "isready",
+            ]
+        );
+    }
+
+    #[test]
+    fn position_command_builds_startpos_with_validated_history() {
+        assert_eq!(
+            position_command(None, &moves(&[])).unwrap(),
+            "position startpos"
+        );
+        assert_eq!(
+            position_command(None, &moves(&["e2e4", "e7e5", "g1f3", "e7e8q"])).unwrap(),
+            "position startpos moves e2e4 e7e5 g1f3 e7e8q"
+        );
+    }
+
+    #[test]
+    fn position_command_builds_fen_base_with_validated_history() {
+        let fen = "7k/8/8/8/8/8/8/R6K w - - 0 1";
+        assert_eq!(
+            position_command(Some(fen), &moves(&["a2a6"])).unwrap(),
+            format!("position fen {fen} moves a2a6")
+        );
+    }
+
+    #[test]
+    fn position_command_rejects_invalid_history_and_fen() {
+        for bad in ["", "0000", "e2", "e2e4 extra", "e2e4\nisready", "Q@f7"] {
+            let history = moves(&[bad]);
+            assert!(!is_valid_uci_move(bad), "accepted move {bad:?}");
+            assert!(
+                position_command(None, &history).is_err(),
+                "accepted history {bad:?}"
+            );
+        }
+        for bad_fen in ["", "7k/8/8/8/8/8/8/R6K w - - 0 1\nisready", "not a fen"] {
+            assert!(
+                position_command(Some(bad_fen), &[]).is_err(),
+                "accepted FEN {bad_fen:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn send_position_delivers_validated_command() {
+        let mut port = Recording::new(Vec::<String>::new());
+        let history = moves(&["e2e4", "e7e5"]);
+        let command = send_position(&mut port, None, &history, &cancel())
+            .await
+            .expect("valid history is sent");
+        assert_eq!(command, "position startpos moves e2e4 e7e5");
+        assert_eq!(port.sent, [command]);
+    }
+
+    #[tokio::test]
+    async fn evaluate_still_sends_plain_fen_command() {
+        let fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+        let mut port = Recording::new(["info depth 2 score cp 7 pv e2e4", "bestmove e2e4"]);
+        let result = evaluate(&mut port, fen, Mode::Depth, 2, 1000, &cancel())
+            .await
+            .expect("transcript has an evaluation");
+        assert_eq!(result.fen, fen);
+        assert_eq!(result.cp, 7);
+        assert_eq!(
+            port.sent,
+            [format!("position fen {fen}"), "go depth 2".to_owned()]
+        );
+    }
+
+    #[tokio::test]
+    async fn evaluate_history_sends_historical_command_and_records_result_fen() {
+        let mut port = Recording::new(["info depth 4 score cp 35 pv g1f3", "bestmove g1f3"]);
+        let history = moves(&["e2e4", "e7e5", "g1f3"]);
+        let result_fen = "rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 1 2";
+        let result = evaluate_history(
+            &mut port,
+            &history,
+            result_fen,
+            Mode::Time,
+            100,
+            1000,
+            &cancel(),
+        )
+        .await
+        .expect("transcript has an evaluation");
+        assert_eq!(result.fen, result_fen);
+        assert_eq!(result.cp, 35);
+        assert_eq!(
+            port.sent,
+            ["position startpos moves e2e4 e7e5 g1f3", "go movetime 100",]
+        );
+    }
+
+    #[tokio::test]
+    async fn evaluate_position_sends_fen_base_with_moves() {
+        let fen = "7k/8/8/8/8/8/8/R6K w - - 0 1";
+        let mut port = Recording::new(["info depth 3 score cp 10 pv a2a6", "bestmove a2a6"]);
+        let result = evaluate_position(
+            &mut port,
+            Some(fen),
+            &moves(&["a2a6"]),
+            "result-fen",
+            Mode::Depth,
+            5,
+            1000,
+            &cancel(),
+        )
+        .await
+        .expect("transcript has an evaluation");
+        assert_eq!(result.fen, "result-fen");
+        assert_eq!(
+            port.sent,
+            [
+                format!("position fen {fen} moves a2a6"),
+                "go depth 5".to_owned()
+            ]
+        );
     }
 }

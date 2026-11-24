@@ -1,6 +1,7 @@
 use super::{
     adaptive,
-    automatic::LiveDemand,
+    automatic::{LiveDemand, scheduler::fen_key},
+    contextual::ContextualReview,
     core,
     engine::{self, Cancellation, EngineFactory},
     repository::Repository,
@@ -8,7 +9,10 @@ use super::{
     types::*,
 };
 use crate::db::mode::Mode;
-use std::sync::Arc;
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 use tokio::sync::{mpsc, oneshot, watch};
 
 mod owned_engine;
@@ -93,13 +97,47 @@ impl Pipeline {
             config.engine.depth
         };
         let multipv = config.lines;
+        let context = self
+            .engine
+            .factory()
+            .artifact_signature()
+            .await?
+            .map(|signature| ContextualReview::new(&game, &signature, sizing));
+        cancel.check()?;
+        let mut contextual_pending = Vec::new();
         let mut pending = Vec::new();
+        let mut evidence = vec![None; game.fens.len()];
         let run = async {
-            let hits = cancellable(
-                self.repository.lookup(&game.fens, mode, value, multipv),
-                cancel,
-            )
-            .await?;
+            let hits = if let Some(context) = &context {
+                let indexes: Vec<_> = (0..game.fens.len()).collect();
+                cancellable(
+                    Box::pin(context.lookup(
+                        self.repository.as_ref(),
+                        &indexes,
+                        mode,
+                        value,
+                        multipv,
+                    )),
+                    cancel,
+                )
+                .await?
+                .into_iter()
+                .enumerate()
+                .map(|(i, hit)| {
+                    hit.map(|mut hit| {
+                        hit.evidence.origin = EvidenceOrigin::Cache;
+                        evidence[i] = Some(hit.evidence);
+                        hit.raw
+                    })
+                })
+                .collect()
+            } else {
+                cancellable(
+                    self.repository.lookup(&game.fens, mode, value, multipv),
+                    cancel,
+                )
+                .await?
+            };
             if hits.len() != game.fens.len() {
                 return Err(ReviewError::new(
                     ReviewErrorCode::Cache,
@@ -112,39 +150,100 @@ impl Pipeline {
                 .iter()
                 .map(core::terminal_position)
                 .collect::<Vec<_>>();
-            let mut remaining = hits
+            let position_key = |i: usize| (context.as_ref().map(|_| i), fen_key(&game.fens[i]));
+            let mut evaluations: HashMap<_, _> = game
+                .fens
                 .iter()
                 .zip(&terminals)
-                .filter(|(h, t)| h.is_none() && t.is_none())
-                .count();
+                .zip(hits)
+                .enumerate()
+                .filter_map(|(i, ((_, terminal), hit))| {
+                    terminal
+                        .is_none()
+                        .then_some(hit)
+                        .flatten()
+                        .map(|raw| (position_key(i), raw))
+                })
+                .collect();
+            let mut remaining = game
+                .fens
+                .iter()
+                .zip(&terminals)
+                .enumerate()
+                .filter_map(|(i, (_, terminal))| terminal.is_none().then_some(position_key(i)))
+                .filter(|key| !evaluations.contains_key(key))
+                .collect::<HashSet<_>>()
+                .len();
             let mut raw = Vec::new();
             let mut cached = 0;
             let mut searched = 0;
-            for (i, (fen, hit)) in game.fens.iter().zip(hits).enumerate() {
+            for (i, fen) in game.fens.iter().enumerate() {
                 cancel.check()?;
                 let pos = if let Some(cp) = terminals[i] {
-                    core::terminal_raw(fen, cp)
-                } else if let Some(hit) = hit {
+                    let raw = core::terminal_raw(fen, cp);
+                    if context.is_some() {
+                        evidence[i] = Some(PositionEvidence::from_raw(
+                            &raw,
+                            Some(i),
+                            EvidenceOrigin::Terminal,
+                            None,
+                            None,
+                        ));
+                    }
+                    raw
+                } else if let Some(hit) = evaluations.get(&position_key(i)) {
                     cached += 1;
-                    hit
+                    let mut pos = hit.clone();
+                    pos.fen.clone_from(fen);
+                    pos
                 } else {
-                    let (threads, memory) = sizing.unwrap_or((1, 16));
+                    let (threads, memory_mb) = sizing.unwrap_or((1, 16));
                     let port = self
                         .engine
                         .ensure(
                             EngineSettings {
                                 threads,
-                                memory_mb: memory,
+                                memory_mb,
                                 multipv,
                             },
                             cancel,
                         )
                         .await?;
-                    let mut pos =
+                    let mut pos = if context.is_some() {
+                        let context = ContextualReview::position(&game, i)?;
+                        engine::evaluate_position(
+                            port,
+                            Some(&context.initial_fen),
+                            &context.uci_path,
+                            fen,
+                            mode,
+                            value,
+                            timeout(mode, value),
+                            cancel,
+                        )
+                        .await?
+                    } else {
                         engine::evaluate(port, fen, mode, value, timeout(mode, value), cancel)
-                            .await?;
+                            .await?
+                    };
                     core::add_san(&mut pos);
-                    pending.push(pos.clone());
+                    evaluations.insert(position_key(i), pos.clone());
+                    if let Some(context) = &context {
+                        let entry = context.entry(
+                            i,
+                            &pos,
+                            self.engine.identity(),
+                            EvidenceBudget {
+                                mode,
+                                value,
+                                multipv,
+                            },
+                        );
+                        evidence[i] = Some(entry.evidence.clone());
+                        contextual_pending.push(entry);
+                    } else {
+                        pending.push(pos.clone());
+                    }
                     searched += 1;
                     remaining -= 1;
                     pos
@@ -170,10 +269,22 @@ impl Pipeline {
                     },
                 });
                 raw.push(pos);
+                if contextual_pending.len() >= 8 {
+                    self.repository
+                        .put_context(&contextual_pending, mode, value)
+                        .await?;
+                    contextual_pending.clear();
+                }
                 if pending.len() >= 8 {
                     self.repository.put(&pending, mode, value, multipv).await?;
                     pending.clear();
                 }
+            }
+            if !contextual_pending.is_empty() {
+                self.repository
+                    .put_context(&contextual_pending, mode, value)
+                    .await?;
+                contextual_pending.clear();
             }
             if !pending.is_empty() {
                 self.repository.put(&pending, mode, value, multipv).await?;
@@ -193,13 +304,26 @@ impl Pipeline {
                     update: None,
                 },
             });
-            core::build(&game, &raw)
+            let mut result = core::build(&game, &raw)?;
+            for (position, evidence) in result.positions.iter_mut().zip(evidence) {
+                position.evidence = evidence;
+            }
+            Ok(result)
         }
         .await;
         self.discard().await;
         if run.is_err()
             && !pending.is_empty()
             && let Err(error) = self.repository.put(&pending, mode, value, multipv).await
+        {
+            emit(Event::Warning { error });
+        }
+        if run.is_err()
+            && !contextual_pending.is_empty()
+            && let Err(error) = self
+                .repository
+                .put_context(&contextual_pending, mode, value)
+                .await
         {
             emit(Event::Warning { error });
         }

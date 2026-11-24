@@ -9,5 +9,6 @@ publish = false
 engineroom-domain = { path = "../engineroom-domain" }
 tokio = { version = "1", features = ["sync", "macros", "time", "rt"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
+serde = { version = "1", features = ["derive"] }
 shakmaty = "0.30"
 

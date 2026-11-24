@@ -51,7 +51,7 @@ impl EvidenceNode {
     }
 }
 
-fn fen_key(fen: &str) -> &str {
+pub(in crate::review) fn fen_key(fen: &str) -> &str {
     fen.rsplit_once(' ').map_or(fen, |(prefix, _)| prefix)
 }
 
@@ -154,7 +154,7 @@ impl<'game> FenIndex<'game> {
         id
     }
 
-    fn mainline(game: &'game Game) -> Self {
+    fn mainline(game: &'game Game, contextual: bool) -> Self {
         let count = game.fens.len();
         let mut index = Self {
             ids: HashMap::with_capacity(count),
@@ -167,8 +167,13 @@ impl<'game> FenIndex<'game> {
             evidence_tail: Vec::with_capacity(count),
             evidence: Vec::new(),
         };
-        for (fen, position) in game.fens.iter().zip(&game.positions) {
-            let id = index.intern(Cow::Borrowed(fen_key(fen)), || position.legal_moves().len());
+        for (ply, (fen, position)) in game.fens.iter().zip(&game.positions).enumerate() {
+            let key = if contextual {
+                Cow::Owned(format!("mainline:{ply}"))
+            } else {
+                Cow::Borrowed(fen_key(fen))
+            };
+            let id = index.intern(key, || position.legal_moves().len());
             index.ply_ids.push(id);
         }
         for (ply, id) in index.ply_ids.iter().enumerate().rev() {
@@ -179,18 +184,27 @@ impl<'game> FenIndex<'game> {
 }
 
 pub(super) struct Scheduler<'game> {
+    contextual: bool,
     game: &'game Game,
     index: Option<FenIndex<'game>>,
 }
 
 impl<'game> Scheduler<'game> {
     pub fn new(game: &'game Game) -> Self {
-        Self { game, index: None }
+        Self {
+            game,
+            index: None,
+            contextual: false,
+        }
+    }
+
+    pub fn enable_context(&mut self) {
+        self.contextual = true;
     }
 
     fn mainline_index(&mut self) -> &mut FenIndex<'game> {
         self.index
-            .get_or_insert_with(|| FenIndex::mainline(self.game))
+            .get_or_insert_with(|| FenIndex::mainline(self.game, self.contextual))
     }
 
     pub fn prepare(&mut self) {
@@ -244,9 +258,17 @@ impl<'game> Scheduler<'game> {
     }
 
     pub fn complete(&mut self, id: FenId, demand: Demand, raw: &RawPosition) -> u32 {
+        self.index
+            .as_mut()
+            .expect("interned FEN")
+            .active
+            .remove(id.index());
+        self.record(id, demand, raw)
+    }
+
+    pub fn record(&mut self, id: FenId, demand: Demand, raw: &RawPosition) -> u32 {
         let index = self.index.as_mut().expect("interned FEN");
         let slot = id.index();
-        index.active.remove(slot);
         let mut raw = raw.clone();
         raw.lines.sort_by_key(|line| line.multipv);
         let covered = raw

@@ -657,7 +657,10 @@ fn real_stockfish_bridge_completion_live_cancel_and_reopen() {
     std::fs::create_dir_all(&dir).unwrap();
     let repo = Arc::new(SqliteRepository::new(dir.join("test.db")));
     let (b, wake) = bridge(Arc::new(NativeEngineFactory::new(engine)), repo.clone());
-    b.open("real", config(false)).unwrap();
+    let mut review = config(false);
+    review.pgn = "1. Nf3 Nf6 2. Ng1 Ng8".into();
+    review.meta = core::extract(&review.pgn).unwrap().meta;
+    b.open("real", review.clone()).unwrap();
     let mut result = None;
     until(&b, &wake, |events, lifecycle| {
         assert!(
@@ -676,6 +679,21 @@ fn real_stockfish_bridge_completion_live_cancel_and_reopen() {
         result.is_some()
     });
     let result = result.unwrap();
+    for (ply, position) in result.positions.iter().enumerate() {
+        let evidence = position.evidence.as_ref().expect("mainline evidence");
+        assert_eq!(evidence.scope, EvidenceScope::Mainline);
+        assert_eq!(evidence.history_ply, Some(ply));
+        if evidence.origin == EvidenceOrigin::Engine {
+            assert!(
+                evidence
+                    .engine
+                    .as_deref()
+                    .is_some_and(|name| name.contains("Stockfish"))
+            );
+            assert!(evidence.engine_build.is_some());
+            assert!(evidence.observed_lines > 0);
+        }
+    }
     b.analyze(
         "real",
         1,
@@ -721,6 +739,23 @@ fn real_stockfish_bridge_completion_live_cancel_and_reopen() {
         events
             .iter()
             .any(|e| matches!(e.event, Event::Completed { .. }))
+    });
+    b.open("warm", review).unwrap();
+    until(&b, &wake, |events, _| {
+        events.into_iter().any(|envelope| match envelope.event {
+            Event::Completed { result } => {
+                assert_eq!(result.positions.len(), 5);
+                assert!(result.positions.iter().enumerate().all(|(ply, position)| {
+                    position.evidence.as_ref().is_some_and(|evidence| {
+                        evidence.origin == EvidenceOrigin::Cache
+                            && evidence.history_ply == Some(ply)
+                    })
+                }));
+                true
+            }
+            Event::Error { error, .. } => panic!("warm review failed: {error}"),
+            _ => false,
+        })
     });
     drop(b);
     std::fs::remove_dir_all(dir).unwrap();
@@ -1007,14 +1042,13 @@ fn real_stockfish_bridge_resumes_interrupted_review_from_cache() {
             .iter()
             .any(|e| matches!(e,BridgeLifecycle::Opened{id} if id=="other"))
     });
-    let hits = b
-        .runtime
-        .block_on(repo.lookup(&game.fens, Mode::Time, 200, 1))
+    let cached: usize = engineroom_backend::db::open_file(&dir.join("review.db"))
+        .unwrap()
+        .query_row("SELECT COUNT(*) FROM evidence_cache", [], |row| row.get(0))
         .unwrap();
-    let cached = hits.iter().filter(|h| h.is_some()).count();
     assert!(
         cached >= 8 && cached < game.fens.len(),
-        "expected partial persisted cache, got {cached}"
+        "expected partial persisted contextual cache, got {cached}"
     );
     b.open("resumed", review).unwrap();
     let mut reused = false;
@@ -1034,6 +1068,12 @@ fn real_stockfish_bridge_resumes_interrupted_review_from_cache() {
                 Event::Progress { progress } => reused |= progress.cached_positions > 0,
                 Event::Completed { result } => {
                     assert_eq!(result.positions.len(), game.fens.len());
+                    assert!(result.positions.iter().any(|position| {
+                        position
+                            .evidence
+                            .as_ref()
+                            .is_some_and(|evidence| evidence.origin == EvidenceOrigin::Cache)
+                    }));
                     return true;
                 }
                 Event::Error { error, .. } => panic!("resume failed: {error}"),
@@ -1560,4 +1600,81 @@ fn real_stockfish_native_scheduler_serves_navigation_before_review_completion() 
             .iter()
             .any(|event| matches!(event, BridgeLifecycle::Closed { id } if id == "native"))
     });
+}
+
+#[test]
+#[ignore = "requires ENGINE_ROOM_STOCKFISH; verifies critical decision evidence"]
+fn real_stockfish_default_scheduler_uses_contextual_evidence_in_both_profiles() {
+    let engine = PathBuf::from(
+        std::env::var_os("ENGINE_ROOM_STOCKFISH").expect("set ENGINE_ROOM_STOCKFISH"),
+    );
+    let (tx, wake) = mpsc::channel();
+    let bridge = Bridge::with_ports(
+        Arc::new(NativeEngineFactory::new(engine)),
+        Arc::new(MemoryRepo::default()),
+        Arc::new(move || {
+            let _ = tx.send(());
+        }),
+    )
+    .unwrap();
+    let pgn =
+        "[FEN \"rnbqkbnr/pppp1ppp/8/4p3/6P1/5P2/PPPPP2P/RNBQKBNR b KQkq - 0 2\"]\n\n2... Qh4# 0-1";
+    let mut review = config(false);
+    review.pgn = pgn.into();
+    review.meta = core::extract(pgn).unwrap().meta;
+    assert_eq!(bridge.scheduler(), SchedulerMode::Native);
+    for (id, kind, expected_ms) in [
+        ("mate-fast", AnalysisKind::Fast, 2000),
+        ("mate-deep", AnalysisKind::Deep, 6000),
+    ] {
+        review.analysis_kind = kind;
+        bridge.open(id, review.clone()).unwrap();
+        until(&bridge, &wake, |events, lifecycle| {
+            assert!(
+                !lifecycle
+                    .iter()
+                    .any(|event| matches!(event, BridgeLifecycle::Error { .. })),
+                "bridge failure: {lifecycle:?}"
+            );
+            events.into_iter().any(|envelope| match envelope.event {
+                Event::Completed { result } => {
+                    let decision = result.moves.last().expect("checkmating move");
+                    let verification = decision
+                        .critical_verification
+                        .as_ref()
+                        .expect("mate verification");
+                    assert!(
+                        verification
+                            .reasons
+                            .contains(&engineroom_backend::review::adaptive::Reason::Mate)
+                    );
+                    assert!(verification.pending_plies.is_empty(), "{verification:?}");
+                    assert_eq!(
+                        result
+                            .positions
+                            .last()
+                            .unwrap()
+                            .evidence
+                            .as_ref()
+                            .unwrap()
+                            .origin,
+                        EvidenceOrigin::Terminal
+                    );
+                    let evidence = result.positions[0]
+                        .evidence
+                        .as_ref()
+                        .expect("refinement evidence");
+                    assert_eq!(evidence.scope, EvidenceScope::Mainline);
+                    assert_eq!(evidence.history_ply, Some(0));
+                    assert_eq!(
+                        evidence.requested.expect("chosen search budget").value,
+                        expected_ms
+                    );
+                    true
+                }
+                Event::Error { error, .. } => panic!("analysis failed: {error}"),
+                _ => false,
+            })
+        });
+    }
 }

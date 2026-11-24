@@ -34,6 +34,10 @@ async fn closed_worker_reply_requires_actual_cancellation_and_preserves_failure(
 fn missing_baseline_is_an_error_even_with_a_refinement() {
     let game = core::extract("1. e4").unwrap();
     let state = State {
+        context: None,
+        baseline_evidence: Vec::new(),
+        refined_evidence: Vec::new(),
+        contextual_pending: Vec::new(),
         game: &game,
         profile: adaptive::profile(AnalysisKind::Fast).unwrap().unwrap(),
         sizing: None,
@@ -84,70 +88,75 @@ async fn native_review_reuses_exact_fen_before_flush_and_publishes_both_plies() 
             san: None,
         })
         .collect();
-    let mut raw_different_clock = raw.clone();
-    raw_different_clock.fen = game.fens[2].clone();
-    let factory = factory(FakeState {
-        scores: [
-            (fen.clone(), raw),
-            (game.fens[2].clone(), raw_different_clock),
-        ]
-        .into(),
-        ..FakeState::default()
-    });
-    let repo = MemoryRepo::default();
-    let (_closed, receiver) = tokio::sync::watch::channel(false);
-    let cancel = Cancellation {
-        closed: receiver,
-        revision: None,
-    };
-    let mut published = Vec::new();
-    let (_live_tx, mut demands) = mpsc::channel(1);
-    let live = NativeLive {
-        cancel: &cancel,
-        demands: &mut demands,
-    };
-    let result = review_native(
-        factory.as_ref(),
-        &repo,
-        &game,
-        profile,
-        None,
-        live,
-        &mut |event| {
-            if let Event::Progress { progress } = event
-                && progress.stage == "triage"
-                && let Some(update) = progress.update
-            {
-                if update.index == 4 {
-                    assert!(repo.writes.lock().unwrap().is_empty());
+    for warm in [false, true] {
+        let mut raw_different_clock = raw.clone();
+        raw_different_clock.fen = game.fens[2].clone();
+        let factory = factory(FakeState {
+            scores: [
+                (fen.clone(), raw.clone()),
+                (game.fens[2].clone(), raw_different_clock),
+            ]
+            .into(),
+            ..FakeState::default()
+        });
+        let repo = MemoryRepo::default();
+        if warm {
+            repo.hits.lock().unwrap().insert(fen.clone(), raw.clone());
+        }
+        let (_closed, receiver) = tokio::sync::watch::channel(false);
+        let cancel = Cancellation {
+            closed: receiver,
+            revision: None,
+        };
+        let mut published = Vec::new();
+        let (_live_tx, mut demands) = mpsc::channel(1);
+        let live = NativeLive {
+            cancel: &cancel,
+            demands: &mut demands,
+        };
+        let result = review_native(
+            factory.as_ref(),
+            &repo,
+            &game,
+            profile,
+            None,
+            live,
+            &mut |event| {
+                if let Event::Progress { progress } = event
+                    && progress.stage == "triage"
+                    && let Some(update) = progress.update
+                {
+                    if update.index == 4 {
+                        assert!(repo.writes.lock().unwrap().is_empty());
+                    }
+                    published.push(update.index);
                 }
-                published.push(update.index);
-            }
-        },
-    )
-    .await
-    .unwrap();
-    assert_eq!(result.positions.len(), 5);
-    for (index, position) in result.positions.iter().enumerate() {
-        assert_eq!(position.fen, game.fens[index], "ply {index}");
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(result.positions.len(), 5);
+        for (index, position) in result.positions.iter().enumerate() {
+            assert_eq!(position.fen, game.fens[index], "ply {index}");
+        }
+        published.sort_unstable();
+        assert_eq!(published, [0, 1, 2, 3, 4]);
+        let state = factory.state.lock().unwrap();
+        let go_command = format!("go movetime {}", profile.triage_ms);
+        for (expected_fen, count) in [(&game.fens[0], usize::from(!warm)), (&game.fens[2], 1)] {
+            let fen_command = format!("position fen {expected_fen}");
+            assert_eq!(
+                state
+                    .sent
+                    .windows(2)
+                    .filter(|pair| pair[0] == fen_command && pair[1] == go_command)
+                    .count(),
+                count,
+            );
+        }
+        let shared_fen_command = format!("position fen {}", game.fens[4]);
+        assert!(state.sent.iter().all(|cmd| cmd != &shared_fen_command));
     }
-    published.sort_unstable();
-    assert_eq!(published, [0, 1, 2, 3, 4]);
-    let state = factory.state.lock().unwrap();
-    let go_command = format!("go movetime {}", profile.triage_ms);
-    for expected_fen in [&game.fens[0], &game.fens[2]] {
-        let fen_command = format!("position fen {expected_fen}");
-        assert_eq!(
-            state
-                .sent
-                .windows(2)
-                .filter(|pair| pair[0] == fen_command && pair[1] == go_command)
-                .count(),
-            1,
-        );
-    }
-    let shared_fen_command = format!("position fen {}", game.fens[4]);
-    assert!(state.sent.iter().all(|cmd| cmd != &shared_fen_command));
 }
 
 #[tokio::test]
@@ -717,6 +726,10 @@ fn attempted_refinement_blocks_equal_budget_but_allows_stronger_target() {
     let game = core::extract("1. e4").unwrap();
     let profile = adaptive::profile(AnalysisKind::Fast).unwrap().unwrap();
     let mut state = State {
+        context: None,
+        baseline_evidence: Vec::new(),
+        refined_evidence: Vec::new(),
+        contextual_pending: Vec::new(),
         game: &game,
         profile,
         sizing: None,

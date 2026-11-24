@@ -1,11 +1,12 @@
 //! Mixed automatic queue. Baseline scores remain immutable for adaptive ranking.
 use super::{
     adaptive::{self, Profile, SearchBudget, Target},
+    contextual::ContextualReview,
     core::{self, Game},
     engine::{Cancellation, EngineFactory},
     pipeline::cancellable,
     pool::{Completed, Pool},
-    repository::Repository,
+    repository::{ContextualEvaluation, Repository},
     scoring,
     types::*,
 };
@@ -17,7 +18,7 @@ use tokio::{
     task::JoinSet,
 };
 
-mod scheduler;
+pub(super) mod scheduler;
 use scheduler::{BitSet, Demand, FenId, Scheduler};
 
 pub(super) struct LiveDemand {
@@ -161,6 +162,10 @@ impl Job {
     }
 }
 struct State<'a> {
+    context: Option<ContextualReview>,
+    baseline_evidence: Vec<Option<PositionEvidence>>,
+    refined_evidence: Vec<Option<PositionEvidence>>,
+    contextual_pending: Vec<ContextualEvaluation>,
     game: &'a Game,
     profile: Profile,
     sizing: Option<(u32, u32)>,
@@ -179,6 +184,66 @@ struct State<'a> {
     ready_targets: Vec<Target>,
 }
 impl State<'_> {
+    async fn lookup(
+        &self,
+        repository: &dyn Repository,
+        indexes: &[usize],
+        budget: SearchBudget,
+        cancel: &Cancellation,
+    ) -> Result<Vec<(Option<RawPosition>, Option<PositionEvidence>)>> {
+        if let Some(context) = &self.context {
+            let hits = cancellable(
+                Box::pin(context.lookup(
+                    repository,
+                    indexes,
+                    Mode::Time,
+                    budget.ms,
+                    budget.multipv,
+                )),
+                cancel,
+            )
+            .await?;
+            return Ok(hits
+                .into_iter()
+                .map(|hit| {
+                    hit.map_or((None, None), |mut hit| {
+                        hit.evidence.origin = EvidenceOrigin::Cache;
+                        (Some(hit.raw), Some(hit.evidence))
+                    })
+                })
+                .collect());
+        }
+        let fens: Vec<_> = indexes.iter().map(|&i| self.game.fens[i].clone()).collect();
+        let hits = cancellable(
+            repository.lookup(&fens, Mode::Time, budget.ms, budget.multipv),
+            cancel,
+        )
+        .await?;
+        if hits.len() != indexes.len() {
+            return Err(invalid_cache_count());
+        }
+        Ok(hits.into_iter().map(|raw| (raw, None)).collect())
+    }
+
+    async fn flush_context(&mut self, repository: &dyn Repository) -> Result<()> {
+        while let Some(entry) = self.contextual_pending.last() {
+            let budget = entry
+                .evidence
+                .requested
+                .expect("completed search has a budget");
+            let start = self
+                .contextual_pending
+                .iter()
+                .rposition(|entry| entry.evidence.requested != Some(budget))
+                .map_or(0, |i| i + 1);
+            repository
+                .put_context(&self.contextual_pending[start..], budget.mode, budget.value)
+                .await?;
+            self.contextual_pending.truncate(start);
+        }
+        Ok(())
+    }
+
     fn complete(&self) -> bool {
         self.baseline.iter().all(Option::is_some)
     }
@@ -243,12 +308,43 @@ impl State<'_> {
             }
         }
     }
+    fn reuse_refinements(
+        &mut self,
+        scheduler: &Scheduler<'_>,
+        refining: &BitSet,
+        emit: &mut (dyn FnMut(Event) + Send),
+    ) -> Result<()> {
+        if self.context.is_some() {
+            return Ok(());
+        }
+        for slot in 0..self.targets().len() {
+            let target = &self.targets()[slot];
+            let i = target.position_index;
+            let budget = target.search;
+            if !self.satisfied(target)
+                && !refining.contains(i)
+                && let Some(id) = scheduler.ply_id(i)
+                && let Some(mut raw) = scheduler.lookup(id, Demand::time(budget.ms, budget.multipv))
+            {
+                raw.fen.clone_from(&self.game.fens[i]);
+                self.budgets[i] = Some(budget);
+                self.refined[i] = Some(raw);
+                self.cached += 1;
+                self.progress(i, Some(self.evaluation(i)?), emit);
+            }
+        }
+        Ok(())
+    }
+
     fn share_triage(
         &mut self,
         id: FenId,
         scheduler: &Scheduler<'_>,
         emit: &mut (dyn FnMut(Event) + Send),
     ) -> Result<()> {
+        if self.context.is_some() {
+            return Ok(());
+        }
         let demand = Demand::time(self.profile.triage_ms, self.profile.triage_multipv);
         let mut plies = scheduler.plies(id);
         if let Some(index) = plies.find(|&index| self.baseline[index].is_none())
@@ -385,10 +481,22 @@ async fn run_review(
     profile: Profile,
     sizing: Option<(u32, u32)>,
     emit: &mut (dyn FnMut(Event) + Send),
-    native: Option<&mut Native<'_, '_>>,
+    mut native: Option<&mut Native<'_, '_>>,
 ) -> Result<ReviewResult> {
     let count = game.fens.len();
+    let signature = resources.factory.artifact_signature().await?;
+    resources.cancel.check()?;
+    let context = signature.map(|signature| {
+        if let Some(native) = &mut native {
+            native.scheduler.enable_context();
+        }
+        ContextualReview::automatic(game, &signature, sizing)
+    });
     let mut state = State {
+        context,
+        baseline_evidence: vec![None; count],
+        refined_evidence: vec![None; count],
+        contextual_pending: Vec::new(),
         game,
         profile,
         sizing,
@@ -431,6 +539,11 @@ async fn run_review(
     {
         emit(Event::Warning { error });
     }
+    if run.is_err()
+        && let Err(error) = state.flush_context(resources.repository).await
+    {
+        emit(Event::Warning { error });
+    }
     run
 }
 async fn execute(
@@ -449,25 +562,25 @@ async fn execute(
     let profile = state.profile;
     let count = game.fens.len();
 
-    let mut hits = cancellable(
-        repository.lookup(
-            &game.fens,
-            Mode::Time,
-            profile.triage_ms,
-            profile.triage_multipv,
-        ),
-        cancel,
-    )
-    .await?;
-    if hits.len() != count {
-        return Err(invalid_cache_count());
-    }
+    let indexes: Vec<_> = (0..count).collect();
+    let hits = state
+        .lookup(
+            repository,
+            &indexes,
+            SearchBudget {
+                ms: profile.triage_ms,
+                multipv: profile.triage_multipv,
+            },
+            cancel,
+        )
+        .await?;
     let mut queue = VecDeque::new();
-    for (i, hit) in hits.iter_mut().enumerate() {
+    for (i, (hit, evidence)) in hits.into_iter().enumerate() {
         cancel.check()?;
         state.baseline[i] = if let Some(cp) = state.terminals[i] {
             Some(core::terminal_raw(&game.fens[i], cp))
-        } else if let Some(hit) = hit.take() {
+        } else if let Some(hit) = hit {
+            state.baseline_evidence[i] = evidence;
             state.cached += 1;
             Some(hit)
         } else {
@@ -483,6 +596,22 @@ async fn execute(
         && let Some(native) = &mut native
     {
         native.scheduler.prepare();
+        let demand = Demand::time(profile.triage_ms, profile.triage_multipv);
+        for (i, raw) in state.baseline.iter().enumerate() {
+            if let Some(raw) = raw.as_ref().filter(|_| state.terminals[i].is_none()) {
+                let id = native.scheduler.intern_ply(i);
+                if native.scheduler.lookup(id, demand).is_none() {
+                    native.scheduler.record(id, demand, raw);
+                }
+            }
+        }
+        for &i in &queue {
+            if state.baseline[i].is_none() {
+                let id = native.scheduler.intern_ply(i);
+                state.share_triage(id, &native.scheduler, emit)?;
+            }
+        }
+        queue.retain(|&i| state.baseline[i].is_none());
     }
     let mut waiters = JoinSet::new();
     let mut blocks: Vec<VecDeque<usize>> = vec![];
@@ -510,6 +639,9 @@ async fn execute(
                 state.progress(target.position_index, None, emit);
             }
         }
+        if let Some(native) = &native {
+            state.reuse_refinements(&native.scheduler, &refining, emit)?;
+        }
         // Query selected positions in budget groups, skipping requests
         // already ruled out by a miss at an equal or broader lookup.
         let mut groups: Vec<(SearchBudget, Vec<usize>)> = vec![];
@@ -520,18 +652,6 @@ async fn execute(
                 continue;
             }
             let search = target.search;
-            let demand = Demand::time(search.ms, search.multipv);
-            if let Some(mut raw) = native
-                .as_ref()
-                .and_then(|n| n.scheduler.lookup(n.scheduler.ply_id(i)?, demand))
-            {
-                raw.fen = game.fens[i].clone();
-                state.budgets[i] = Some(search);
-                state.refined[i] = Some(raw);
-                state.cached += 1;
-                state.progress(i, Some(state.evaluation(i)?), emit);
-                continue;
-            }
             if cache_misses.rules_out(i, search) {
                 continue;
             }
@@ -544,18 +664,19 @@ async fn execute(
                 });
             groups[slot].1.push(i);
         }
+        let mut cache_evidence = Vec::new();
         for (budget, indexes) in groups {
-            let fens: Vec<_> = indexes.iter().map(|&i| game.fens[i].clone()).collect();
-            let hits = cancellable(
-                repository.lookup(&fens, Mode::Time, budget.ms, budget.multipv),
-                cancel,
-            )
-            .await?;
-            if hits.len() != indexes.len() {
-                return Err(invalid_cache_count());
-            }
-            for (i, hit) in indexes.into_iter().zip(hits) {
+            let hits = state.lookup(repository, &indexes, budget, cancel).await?;
+            for (i, (hit, evidence)) in indexes.into_iter().zip(hits) {
                 if let Some(raw) = hit {
+                    state.refined_evidence[i] = evidence;
+                    if let Some(native) = &mut native {
+                        let id = native.scheduler.intern_ply(i);
+                        native
+                            .scheduler
+                            .record(id, Demand::time(budget.ms, budget.multipv), &raw);
+                        cache_evidence.push(id);
+                    }
                     state.budgets[i] = Some(budget);
                     state.refined[i] = Some(raw);
                     state.cached += 1;
@@ -564,6 +685,19 @@ async fn execute(
                     cache_misses.record(i, budget, count);
                 }
             }
+        }
+        if let Some(native) = &mut native
+            && !cache_evidence.is_empty()
+        {
+            for id in cache_evidence {
+                // An active triage still owns its immutable baseline.
+                if native.scheduler.available(id) {
+                    state.share_triage(id, &native.scheduler, emit)?;
+                }
+            }
+            // Reconcile aliases against the new cache evidence before dispatch.
+            native.resolve_live();
+            state.reuse_refinements(&native.scheduler, &refining, emit)?;
         }
         let needs_refinement = state
             .targets()
@@ -663,8 +797,16 @@ async fn execute(
                     if let (Some(native), Some(id)) = (&mut native, fen_id) {
                         native.scheduler.reserve(id);
                     }
+                    let history = match job.purpose {
+                        Purpose::Triage(index) | Purpose::Refinement(index)
+                            if state.context.is_some() =>
+                        {
+                            Some(ContextualReview::position(game, index)?)
+                        }
+                        _ => None,
+                    };
                     let receiver = pool
-                        .submit(worker, fen, job.demand.value, job.demand.multipv)
+                        .submit_position(worker, fen, history, job.demand.value, job.demand.multipv)
                         .await?;
                     busy.insert(worker);
                     if let Purpose::Refinement(index) = job.purpose {
@@ -683,6 +825,9 @@ async fn execute(
             >= 8
         {
             flush(repository, pending).await?;
+        }
+        if state.contextual_pending.len() >= 8 {
+            state.flush_context(repository).await?;
         }
         if waiters.is_empty() {
             if !state.complete() || state.targets().iter().any(|t| !state.satisfied(t)) {
@@ -732,16 +877,34 @@ async fn execute(
             None
         };
         // Both stages use unrestricted searches and can populate the FEN cache.
-        let buffer = pending
-            .iter()
-            .position(|(value, multipv, _)| {
-                *value == completed.value && *multipv == job.demand.multipv
-            })
-            .unwrap_or_else(|| {
-                pending.push((completed.value, job.demand.multipv, vec![]));
-                pending.len() - 1
-            });
-        pending[buffer].2.push(raw.clone());
+        if let Some(context) = &state.context {
+            let budget = EvidenceBudget {
+                mode: Mode::Time,
+                value: completed.value,
+                multipv: job.demand.multipv,
+            };
+            let slot = match job.purpose {
+                Purpose::Triage(index) => Some((index, &mut state.baseline_evidence[index])),
+                Purpose::Refinement(index) => Some((index, &mut state.refined_evidence[index])),
+                Purpose::Live => None,
+            };
+            if let Some((index, slot)) = slot {
+                let entry = context.entry(index, &raw, completed.engine, budget);
+                *slot = Some(entry.evidence.clone());
+                state.contextual_pending.push(entry);
+            }
+        } else {
+            let buffer = pending
+                .iter()
+                .position(|(value, multipv, _)| {
+                    *value == completed.value && *multipv == job.demand.multipv
+                })
+                .unwrap_or_else(|| {
+                    pending.push((completed.value, job.demand.multipv, vec![]));
+                    pending.len() - 1
+                });
+            pending[buffer].2.push(raw.clone());
+        }
         match job.purpose {
             Purpose::Refinement(index) => {
                 let covered_multipv = covered_multipv.unwrap_or_else(|| {
@@ -751,11 +914,25 @@ async fn execute(
                         game.positions[index].legal_moves().len(),
                     )
                 });
+                let covered_multipv = if state.context.is_some() {
+                    core::observed_coverage(&raw, job.demand.multipv as usize).map_or(
+                        0,
+                        |(lines, _, legal)| {
+                            if lines == legal {
+                                job.demand.multipv
+                            } else {
+                                lines as u32
+                            }
+                        },
+                    )
+                } else {
+                    covered_multipv
+                };
                 state.searched += 1;
                 refining.remove(index);
-                state.budgets[index] = Some(SearchBudget {
+                state.budgets[index] = (covered_multipv > 0).then_some(SearchBudget {
                     ms: completed.value,
-                    multipv: covered_multipv.max(1),
+                    multipv: covered_multipv,
                 });
                 state.attempted[index] = Some(SearchBudget {
                     ms: completed.value,
@@ -782,6 +959,7 @@ async fn execute(
         }
     }
     flush(repository, pending).await?;
+    state.flush_context(repository).await?;
     cancel.check()?;
     emit(Event::Progress {
         progress: Progress {
@@ -801,6 +979,21 @@ async fn execute(
         .collect::<Result<_>>()?;
     let mut result = core::build(game, &raw)?;
     for (i, position) in result.positions.iter_mut().enumerate() {
+        if state.context.is_some() {
+            position.evidence = if state.terminals[i].is_some() {
+                Some(PositionEvidence::from_raw(
+                    &raw[i],
+                    Some(i),
+                    EvidenceOrigin::Terminal,
+                    None,
+                    None,
+                ))
+            } else if state.refinement(i)?.is_some() {
+                state.refined_evidence[i].clone()
+            } else {
+                state.baseline_evidence[i].clone()
+            };
+        }
         if let (Some(budget), Some(_)) = (state.budgets[i], state.refinement(i)?) {
             position.triage_lines =
                 Some(core::position_analysis(state.baseline(i)?, i, state.phases[i]).lines);
@@ -809,6 +1002,31 @@ async fn execute(
                 movetime_ms: budget.ms,
                 multipv: budget.multipv,
             });
+        }
+    }
+    if state.context.is_some() {
+        for (i, decision) in result.moves.iter_mut().enumerate() {
+            if let Some(critical) = state.critical[i].as_ref().filter(|critical| critical.hard) {
+                let requested = profile.budget(adaptive::refinement_kind(critical));
+                let pending_plies = [i, i + 1]
+                    .into_iter()
+                    .filter(|&ply| {
+                        state.terminals[ply].is_none()
+                            && !state.budgets[ply].is_some_and(|actual| covers(actual, requested))
+                    })
+                    .collect();
+                let before = state.baseline(i)?.cp;
+                let after = state.baseline(i + 1)?.cp;
+                let screening_loss =
+                    (scoring::win_pct(before) + scoring::win_pct(after) - 100.0).max(0.0);
+                decision.critical_verification = Some(CriticalVerification {
+                    screening_classification: scoring::classify(screening_loss, decision.is_book),
+                    screening_before_cp: before,
+                    screening_after_cp: after,
+                    reasons: critical.reasons.clone(),
+                    pending_plies,
+                });
+            }
         }
     }
     Ok(result)

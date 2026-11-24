@@ -10,6 +10,14 @@ mod saved_review;
 
 pub use saved_review::{normalize, validate_review};
 
+/// Completed contextual evaluation and its provenance.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ContextualEvaluation {
+    pub key: String,
+    pub raw: RawPosition,
+    pub evidence: super::types::PositionEvidence,
+}
+
 /// Stores analysis results and owns outstanding persistence work until drained.
 pub trait Repository: Send + Sync {
     /// Returns one entry per FEN, in input order, satisfying the requested budget.
@@ -36,6 +44,27 @@ pub trait Repository: Send + Sync {
         value: u32,
         multipv: u32,
     ) -> Task<'a, Result<()>>;
+    /// Looks up contextual evaluations without consulting the legacy FEN cache.
+    fn lookup_context<'a>(
+        &'a self,
+        keys: &'a [String],
+        _mode: Mode,
+        _value: u32,
+        _multipv: u32,
+    ) -> Task<'a, Result<Vec<Option<ContextualEvaluation>>>> {
+        Box::pin(async move { Ok(vec![None; keys.len()]) })
+    }
+
+    /// Stores contextual evaluations independently from legacy FEN entries.
+    fn put_context<'a>(
+        &'a self,
+        _entries: &'a [ContextualEvaluation],
+        _mode: Mode,
+        _value: u32,
+    ) -> Task<'a, Result<()>> {
+        Box::pin(async { Ok(()) })
+    }
+
     /// Saves a completed review, deriving game metadata from its PGN.
     ///
     /// The caller publishes completion first and reports history failure best-effort.

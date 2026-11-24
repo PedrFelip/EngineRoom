@@ -16,6 +16,7 @@ pub(super) struct OwnedEngine {
     factory: Arc<dyn EngineFactory>,
     port: Option<Box<dyn EnginePort>>,
     settings: Option<EngineSettings>,
+    identity: Option<String>,
 }
 
 impl OwnedEngine {
@@ -24,6 +25,7 @@ impl OwnedEngine {
             factory,
             port: None,
             settings: None,
+            identity: None,
         }
     }
 
@@ -40,6 +42,11 @@ impl OwnedEngine {
             port.shutdown().await;
         }
         self.settings = None;
+        self.identity = None;
+    }
+
+    pub(super) fn identity(&self) -> Option<String> {
+        self.identity.clone()
     }
 
     pub(super) async fn ensure(
@@ -80,7 +87,7 @@ impl OwnedEngine {
             // Retain ownership before setup so a failed handshake is still
             // closed by the caller's acknowledged teardown.
             let port = self.port.insert(self.factory.acquire(cancel).await?);
-            engine::configure(
+            self.identity = engine::configure_with_identity(
                 port.as_mut(),
                 Some(next.threads),
                 Some(next.memory_mb),

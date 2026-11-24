@@ -929,6 +929,7 @@ name = "engineroom-application"
 version = "0.1.0"
 dependencies = [
  "engineroom-domain",
+ "serde",
  "serde_json",
  "shakmaty",
  "tokio",
@@ -1000,6 +1001,7 @@ dependencies = [
 name = "engineroom-uci"
 version = "0.1.0"
 dependencies = [
+ "blake3",
  "engineroom-application",
  "engineroom-domain",
  "shakmaty",
