@@ -5,7 +5,7 @@ use shakmaty::{Chess, Position, Square};
 use std::{collections::HashMap, io::Cursor, ops::ControlFlow};
 
 // Share the strict token check with core::extract without replaying its mainline.
-#[path = "../../engineroom-domain/src/review/core/pgn_tokens.rs"]
+#[path = "../../engineroom-application/src/review/core/pgn_tokens.rs"]
 mod pgn_tokens;
 
 pub const DEMO_PGN: &str = "[Event \"Estudo de abertura\"]\n[White \"Jogador de brancas\"]\n[Black \"Jogador de pretas\"]\n[Result \"*\"]\n\n1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6 5. O-O Be7 6. Re1 b5 7. Bb3 d6 8. c3 O-O *";

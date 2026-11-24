@@ -118,7 +118,7 @@ Só quando os 5 critérios da seção anterior estiverem satisfeitos:
 - **Empacotamento nativo sem Tauri** é trabalho não trivial e é o maior risco
   de cronograma do plano.
 - **Dois pipelines de revisão em Rust** (`app/src-tauri/src/review/` e
-  `experimental/crates/engineroom-{domain,application,...}`) já existem
+  `experimental/crates/engineroom-{application,uci,sqlite,...}`) já existem
   separados; mesmo depois do corte, avaliar se vale extrair um crate único
   compartilhado em vez de manter a duplicação que a migração herdar.
 - **Usuários existentes do app Tauri** perdem o instalador antigo no corte;

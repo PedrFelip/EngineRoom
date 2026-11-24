@@ -1,4 +1,4 @@
-pub use engineroom_domain::db::mode::Mode;
+pub use engineroom_application::db::mode::Mode;
 
 pub(crate) struct SqlMode(pub Mode);
 

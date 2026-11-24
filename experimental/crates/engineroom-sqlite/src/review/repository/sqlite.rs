@@ -6,8 +6,8 @@ use crate::db::{
     games::{NewGame, Store, StoredGame},
     mode::Mode,
 };
-use crate::review::{core, engine::Task, types::*};
 use engineroom_application::review::repository::ContextualEvaluation;
+use engineroom_application::review::{core, engine::Task, types::*};
 use shakmaty::Position;
 use std::path::PathBuf;
 
@@ -307,7 +307,7 @@ impl Repository for SqliteRepository {
     ) -> Task<'a, Result<()>> {
         Box::pin(async move {
             let game = core::extract(&config.pgn)?;
-            let profile = crate::review::adaptive::profile(config.analysis_kind)?;
+            let profile = engineroom_application::review::adaptive::profile(config.analysis_kind)?;
             let value = profile.map(|p| p.high_ms).unwrap_or_else(|| {
                 if config.mode == Mode::Time {
                     config.movetime_ms.unwrap_or(DEFAULT_MOVETIME_MS)

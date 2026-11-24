@@ -27,8 +27,9 @@ O workspace separa a aplicação desktop, os componentes reutilizáveis e o back
 - `crates/engineroom-rune`: aplicação desktop, estado, navegação e telas Rune.
 - `crates/engineroom-ui`: tema, fontes e primitivas de interface compartilháveis.
 
-- `crates/engineroom-domain`: tipos de análise, modo, transformações de xadrez, pontuação e perfis adaptativos.
-- `crates/engineroom-application`: portas de motor e repositório, pipeline, pool, sessões e normalização de revisões.
+- `crates/engineroom-application`: tipos de análise, modo, transformações de xadrez,
+  pontuação e perfis adaptativos, além das portas de motor e repositório,
+  pipeline, pool, sessões e normalização de revisões.
 - `crates/engineroom-uci`: adaptador do processo Stockfish via UCI.
 - `crates/engineroom-sqlite`: cache, histórico, migrações e estatísticas em SQLite.
 - `crates/engineroom-backend`: fachada de revisão e importações HTTP nativas.
@@ -75,6 +76,9 @@ orienta layout, escopos de eventos, acessibilidade e testes headless.
 - Alternar Lances, Análise e Resumo; filtrar erros por cor; clicar no gráfico para navegar.
 - Visualizar barra de avaliação, selos no tabuleiro/lista, setas e resumo por fase da análise.
 - Selecionar candidatos legais, reproduzir uma linha, pausar e retornar à partida.
+- Exportar uma revisão concluída pelo botão **Exportar PGN anotado** no cabeçalho.
+  A exportação marca erros e erros graves e inclui uma linha alternativa do motor quando disponível.
+  O arquivo exportado mantém as tags e a linha principal da partida e gera suas próprias anotações.
 - Criar variações por clique ou arraste de peças, escolhendo a peça de promoção.
 - Marcar casas com clique secundário e modificadores; as marcas acompanham a posição atual. Setas por arraste secundário ainda dependem de suporte de eventos do Rune.
 - Configurar linhas, feedback, tempo, threads e memória no modal da revisão.

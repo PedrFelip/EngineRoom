@@ -87,6 +87,7 @@ pub enum DataEvent {
     ),
     Deleted(i64, Result<(), String>),
     Probe(Result<Option<String>, String>),
+    PgnExport(Result<Option<()>, String>),
     Storage(Result<engineroom_backend::db::stats::StorageStats, String>),
     Cleared(Result<(), String>, bool),
     Game(Result<Option<Box<ReviewConfig>>, String>, bool, u64),
@@ -108,8 +109,8 @@ pub struct Bridge {
     probe_cancel: tokio::sync::watch::Sender<bool>,
     probe_task: std::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
     probe_factory: Arc<dyn EngineFactory>,
-    probe_events: mpsc::Sender<DataEvent>,
-    probe_wake: Arc<dyn Fn() + Send + Sync>,
+    data_sender: mpsc::Sender<DataEvent>,
+    data_wake: Arc<dyn Fn() + Send + Sync>,
 }
 impl Bridge {
     pub fn new_with_scheduler(wake: rune::Waker, scheduler: SchedulerMode) -> Result<Self, String> {
@@ -240,8 +241,8 @@ impl Bridge {
         let (intents, mut receiver) = tokio::sync::mpsc::unbounded_channel();
         let generation = Arc::new(AtomicU64::new(0));
         let current_generation = generation.clone();
-        let probe_wake = wake.clone();
-        let probe_events = data_tx.clone();
+        let data_wake = wake.clone();
+        let data_sender = data_tx.clone();
         let (probe_cancel, _) = tokio::sync::watch::channel(false);
         let actor = runtime.spawn(async move {
             let mut active: Option<String> = None;
@@ -450,8 +451,8 @@ impl Bridge {
             probe_cancel,
             probe_task: std::sync::Mutex::new(None),
             probe_factory: factory,
-            probe_events,
-            probe_wake,
+            data_sender,
+            data_wake,
         })
     }
 
@@ -530,6 +531,35 @@ impl Bridge {
     pub fn delete_game(&self, id: i64) -> Result<(), String> {
         self.send(Intent::DeleteGame(id))
     }
+    pub fn export_pgn(&self, pgn: String, review: engineroom_backend::review::types::ReviewResult) {
+        let events = self.data_sender.clone();
+        let wake = self.data_wake.clone();
+        self.runtime.spawn(async move {
+            let result = async {
+                let Some(file) = rfd::AsyncFileDialog::new()
+                    .add_filter("PGN", &["pgn"])
+                    .set_file_name("revisao-anotada.pgn")
+                    .save_file()
+                    .await
+                else {
+                    return Ok(None);
+                };
+                let path = file.path().to_owned();
+                tokio::task::spawn_blocking(move || {
+                    let annotated = crate::pgn_export::annotated_pgn(&pgn, &review)?;
+                    crate::pgn_export::save_pgn(&path, &annotated)
+                        .map_err(|error| error.to_string())?;
+                    Ok(Some(()))
+                })
+                .await
+                .map_err(|error| error.to_string())?
+            }
+            .await;
+            let _ = events.send(DataEvent::PgnExport(result));
+            wake();
+        });
+    }
+
     pub fn start_probe(&self) {
         // Lock the slot before spawning: a second start while one is in flight
         // must be rejected, otherwise its JoinHandle would replace (detach) the
@@ -543,8 +573,8 @@ impl Bridge {
             closed: self.probe_cancel.subscribe(),
             revision: None,
         };
-        let events = self.probe_events.clone();
-        let wake = self.probe_wake.clone();
+        let events = self.data_sender.clone();
+        let wake = self.data_wake.clone();
         let task = self.runtime.spawn(async move {
             let result = crate::engine_probe::run(factory.as_ref(), &cancel).await;
             let _ = events.send(DataEvent::Probe(result));

@@ -1,9 +1,14 @@
 //! Deterministic Strobe harness for the review pipeline and `ReviewSessions`.
 //!
-//! Covers both single-pipeline scenarios (`pgn`, `manual`, `manual-warm`,
-//! `live`, `automatic`) and paired session scheduler comparisons
-//! (`automatic-pipeline` vs `automatic-native`) using the public `EnginePort`,
-//! `EngineFactory`, `Repository`, and `ReviewSessions` interfaces.
+//! It drives the production `Pipeline` and `ReviewSessions` through the public
+//! `EnginePort`, `EngineFactory`, `Repository` and session seams. The fake engine
+//! makes the scenarios reproducible without Stockfish; the real-engine scenarios
+//! live in `strobe_review.rs`. Covers single-pipeline cases (`pgn`, `manual`,
+//! `manual-warm`, `live`, `automatic`) and paired scheduler comparisons
+//! (`automatic-pipeline` vs `automatic-native`). Each scenario prints
+//! `strobe:metric` lines so Strobe's `cli()` target can read counters alongside
+//! CPU and time.
+use engineroom_application::db::mode::Mode;
 use engineroom_backend::review::{
     core,
     engine::{Cancellation, EngineFactory, EnginePort, Task},
@@ -15,7 +20,6 @@ use engineroom_backend::review::{
         ReviewError, ReviewErrorCode,
     },
 };
-use engineroom_domain::db::mode::Mode;
 use std::{
     collections::VecDeque,
     path::{Path, PathBuf},

@@ -1,4 +1,5 @@
 //! Strobe-only harness for the production manual and automatic review pipelines.
+use engineroom_application::db::mode::Mode;
 use engineroom_backend::review::{
     core,
     engine::Cancellation,
@@ -8,7 +9,6 @@ use engineroom_backend::review::{
     session::{Resources, ReviewSessions, SchedulerMode},
     types::{AnalysisKind, EngineTier, Event, LiveRequest, LiveSettings, ReviewConfig},
 };
-use engineroom_domain::db::mode::Mode;
 use std::{
     path::PathBuf,
     sync::Arc,

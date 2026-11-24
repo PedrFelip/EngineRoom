@@ -1,7 +1,6 @@
 [workspace]
 members = [
     "crates/engineroom-backend",
-    "crates/engineroom-domain",
     "crates/engineroom-application",
     "crates/engineroom-rune",
     "crates/engineroom-ui",

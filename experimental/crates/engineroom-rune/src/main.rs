@@ -9,6 +9,7 @@ mod file_dialog;
 mod fixtures;
 mod game;
 mod layout;
+mod pgn_export;
 mod preferences;
 mod review_data;
 mod review_session;
