@@ -238,6 +238,36 @@ críticas. Os orçamentos ficam em
 [`profiles.json`](crates/engineroom-domain/src/review/profiles.json) e representam
 tempo solicitado ao motor por busca, com duração total variável.
 
+#### Decisão sobre a fila e a parada antecipada
+
+O Native mantém blocos de até quatro posições consecutivas por worker. A fila
+compartilhada antecipou o primeiro par de triagem em todos os 11 pares do A/B
+com Stockfish 19, cache frio e a Partida Imortal. No Fast (dois e três workers),
+o par chegou 164–192 ms antes e a revisão inteira demorou mais em 7 de 8 pares.
+No Deep (três workers), o par chegou 436–444 ms antes e o tempo total variou de
+0,9 s a menos a 6,6 s a mais. O teste mediu o primeiro par de triagem. A latência
+até a primeira decisão crítica verificada ainda ficou sem medição.
+
+Um experimento de parada em modo sombra observou 696 buscas em 12 execuções
+(Partida Imortal, Larsen–Spassky e Carlsen–Ernst, Fast e Deep, três workers,
+cache frio). A política exigia evidência das avaliações vizinhas já concluídas
+no despacho, MultiPV completo e estabilidade da classificação. Com FIFO,
+1 de 350 buscas foi elegível. Com blocos, 9 de 346. Nenhuma atingiu todos os
+critérios para sugerir parada. Um vizinho pendente no despacho foi o veto mais
+frequente, com 272 casos na FIFO e 234 nos blocos. A busca automática continua
+até `bestmove` com o orçamento do perfil.
+
+O exemplo de benchmark mede o tempo até o primeiro par de triagem e a conclusão
+da revisão. De `experimental/`:
+
+```sh
+ENGINE_ROOM_STOCKFISH="$PWD/resources/stockfish" \
+  cargo run --release --locked -p engineroom-backend --example strobe_review -- native-auto
+```
+
+Para escolher a partida e a configuração do teste, use `STROBE_REVIEW_PGN`,
+`STROBE_REVIEW_PROFILE` (`fast` ou `deep`) e `STROBE_REVIEW_THREADS`.
+
 ### Perfil da interface
 
 Para medir a apresentação da sidebar com 12, 128 e 512 sessões, execute:
