@@ -1,5 +1,6 @@
 pub mod adaptive;
 mod automatic;
+mod contextual;
 pub mod core;
 pub mod engine;
 pub mod pipeline;

@@ -30,8 +30,11 @@ impl<'a> Stats<'a> {
     /// `db_bytes` (resolvido pelo comando a partir do arquivo em disco).
     pub fn compute(&self) -> rusqlite::Result<StorageStats> {
         let cache_bytes: u64 = self.conn.query_row(
-            "SELECT COALESCE(SUM(LENGTH(fen) + LENGTH(source_mode) + LENGTH(lines_json)), 0)
-                 FROM position_cache",
+            "SELECT
+                (SELECT COALESCE(SUM(LENGTH(fen) + LENGTH(source_mode) + LENGTH(lines_json)), 0)
+                    FROM position_cache)
+              + (SELECT COALESCE(SUM(LENGTH(context_key) + LENGTH(source_mode)
+                    + LENGTH(lines_json) + LENGTH(payload_json)), 0) FROM evidence_cache)",
             [],
             |row| row.get(0),
         )?;

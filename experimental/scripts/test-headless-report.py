@@ -42,7 +42,13 @@ class DiagnosticsTests(unittest.TestCase):
     def test_scene_specific_content_is_required(self):
         for scene in ("review", "review-light", "demo-analysis", "demo-summary", "review-light-variation", "review-white-variation", "demo-progress", "demo-error", "preview"):
             self.assertTrue(matrix.scene_errors(tree(), scene, True), scene)
-            self.assertEqual(matrix.scene_errors(tree(), scene, False), [])
+            sample = tree()
+            if scene in ("review", "review-light"):
+                self.assertIn("Missing accessible annotated PGN export button", matrix.scene_errors(sample, scene, False))
+                key = "export-annotated-pgn"
+                sample["elements"].append(element(key, [900, 20, 38, 38]))
+                sample["accessibility"]["children"].append({"key": key, "role": "button", "name": "Exportar PGN anotado"})
+            self.assertEqual(matrix.scene_errors(sample, scene, False), [])
 
     def test_timeout_keeps_partial_output_and_collects_all_cases(self):
         with tempfile.TemporaryDirectory() as directory:

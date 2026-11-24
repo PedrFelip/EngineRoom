@@ -27,6 +27,9 @@ impl EngineFactory for NoEngine {
 #[derive(Default)]
 pub(crate) struct MemoryRepo {
     drains: AtomicUsize,
+    cache_reads: AtomicUsize,
+    cache_writes: AtomicUsize,
+    saves: AtomicUsize,
 }
 impl Repository for MemoryRepo {
     fn lookup<'a>(
@@ -36,12 +39,15 @@ impl Repository for MemoryRepo {
         _: u32,
         _: u32,
     ) -> Task<'a, Result<Vec<Option<RawPosition>>>> {
+        self.cache_reads.fetch_add(1, Ordering::SeqCst);
         Box::pin(async move { Ok(vec![None; fens.len()]) })
     }
     fn put<'a>(&'a self, _: &'a [RawPosition], _: Mode, _: u32, _: u32) -> Task<'a, Result<()>> {
+        self.cache_writes.fetch_add(1, Ordering::SeqCst);
         Box::pin(async { Ok(()) })
     }
     fn save<'a>(&'a self, _: &'a ReviewConfig, _: &'a ReviewResult) -> Task<'a, Result<()>> {
+        self.saves.fetch_add(1, Ordering::SeqCst);
         Box::pin(async { Ok(()) })
     }
     fn drain(&self) -> Task<'_, ()> {
@@ -135,6 +141,8 @@ fn data_bridge_with_engine(
         }),
         Arc::new(FakeImports),
         Some(db),
+        None,
+        SchedulerMode::Pipeline,
     )
     .expect("create test runtime");
     (bridge, repo, rx)
@@ -649,7 +657,10 @@ fn real_stockfish_bridge_completion_live_cancel_and_reopen() {
     std::fs::create_dir_all(&dir).unwrap();
     let repo = Arc::new(SqliteRepository::new(dir.join("test.db")));
     let (b, wake) = bridge(Arc::new(NativeEngineFactory::new(engine)), repo.clone());
-    b.open("real", config(false)).unwrap();
+    let mut review = config(false);
+    review.pgn = "1. Nf3 Nf6 2. Ng1 Ng8".into();
+    review.meta = core::extract(&review.pgn).unwrap().meta;
+    b.open("real", review.clone()).unwrap();
     let mut result = None;
     until(&b, &wake, |events, lifecycle| {
         assert!(
@@ -668,6 +679,21 @@ fn real_stockfish_bridge_completion_live_cancel_and_reopen() {
         result.is_some()
     });
     let result = result.unwrap();
+    for (ply, position) in result.positions.iter().enumerate() {
+        let evidence = position.evidence.as_ref().expect("mainline evidence");
+        assert_eq!(evidence.scope, EvidenceScope::Mainline);
+        assert_eq!(evidence.history_ply, Some(ply));
+        if evidence.origin == EvidenceOrigin::Engine {
+            assert!(
+                evidence
+                    .engine
+                    .as_deref()
+                    .is_some_and(|name| name.contains("Stockfish"))
+            );
+            assert!(evidence.engine_build.is_some());
+            assert!(evidence.observed_lines > 0);
+        }
+    }
     b.analyze(
         "real",
         1,
@@ -713,6 +739,23 @@ fn real_stockfish_bridge_completion_live_cancel_and_reopen() {
         events
             .iter()
             .any(|e| matches!(e.event, Event::Completed { .. }))
+    });
+    b.open("warm", review).unwrap();
+    until(&b, &wake, |events, _| {
+        events.into_iter().any(|envelope| match envelope.event {
+            Event::Completed { result } => {
+                assert_eq!(result.positions.len(), 5);
+                assert!(result.positions.iter().enumerate().all(|(ply, position)| {
+                    position.evidence.as_ref().is_some_and(|evidence| {
+                        evidence.origin == EvidenceOrigin::Cache
+                            && evidence.history_ply == Some(ply)
+                    })
+                }));
+                true
+            }
+            Event::Error { error, .. } => panic!("warm review failed: {error}"),
+            _ => false,
+        })
     });
     drop(b);
     std::fs::remove_dir_all(dir).unwrap();
@@ -796,6 +839,8 @@ fn import_bridge_search_cancel_and_replace() {
         }),
         Arc::new(FakeImports),
         None,
+        None,
+        SchedulerMode::Pipeline,
     )
     .expect("test bridge");
     let request = |id: &str| SearchRequest {
@@ -880,6 +925,8 @@ fn chess_controller_fetches_next_page() {
         }),
         Arc::new(PagedImports),
         None,
+        None,
+        SchedulerMode::Pipeline,
     )
     .expect("test bridge");
     let mut state = crate::state::State::default();
@@ -995,14 +1042,13 @@ fn real_stockfish_bridge_resumes_interrupted_review_from_cache() {
             .iter()
             .any(|e| matches!(e,BridgeLifecycle::Opened{id} if id=="other"))
     });
-    let hits = b
-        .runtime
-        .block_on(repo.lookup(&game.fens, Mode::Time, 200, 1))
+    let cached: usize = engineroom_backend::db::open_file(&dir.join("review.db"))
+        .unwrap()
+        .query_row("SELECT COUNT(*) FROM evidence_cache", [], |row| row.get(0))
         .unwrap();
-    let cached = hits.iter().filter(|h| h.is_some()).count();
     assert!(
         cached >= 8 && cached < game.fens.len(),
-        "expected partial persisted cache, got {cached}"
+        "expected partial persisted contextual cache, got {cached}"
     );
     b.open("resumed", review).unwrap();
     let mut reused = false;
@@ -1022,6 +1068,12 @@ fn real_stockfish_bridge_resumes_interrupted_review_from_cache() {
                 Event::Progress { progress } => reused |= progress.cached_positions > 0,
                 Event::Completed { result } => {
                     assert_eq!(result.positions.len(), game.fens.len());
+                    assert!(result.positions.iter().any(|position| {
+                        position
+                            .evidence
+                            .as_ref()
+                            .is_some_and(|evidence| evidence.origin == EvidenceOrigin::Cache)
+                    }));
                     return true;
                 }
                 Event::Error { error, .. } => panic!("resume failed: {error}"),
@@ -1221,4 +1273,408 @@ fn history_keyboard_retry_recovers_initial_and_paginated_failures() {
     drop(rt);
     drop(repo);
     std::fs::remove_dir_all(dir).expect("remove temporary database");
+}
+
+#[test]
+fn scheduler_selection_defaults_to_native_and_honors_pipeline_overrides() {
+    assert_eq!(
+        parse_scheduler_mode([], None).unwrap(),
+        SchedulerMode::Native
+    );
+    assert_eq!(
+        parse_scheduler_mode(["--scheduler=native"], None).unwrap(),
+        SchedulerMode::Native
+    );
+    assert_eq!(
+        parse_scheduler_mode([], Some("native")).unwrap(),
+        SchedulerMode::Native
+    );
+    assert_eq!(
+        parse_scheduler_mode(["--scheduler", "pipeline"], Some("native")).unwrap(),
+        SchedulerMode::Pipeline
+    );
+    assert_eq!(
+        parse_scheduler_mode(["--scheduler=pipeline"], None).unwrap(),
+        SchedulerMode::Pipeline
+    );
+    assert_eq!(
+        parse_scheduler_mode(["--pipeline-scheduler"], Some("native")).unwrap(),
+        SchedulerMode::Pipeline
+    );
+    assert_eq!(
+        parse_scheduler_mode([], Some("pipeline")).unwrap(),
+        SchedulerMode::Pipeline
+    );
+    assert!(parse_scheduler_mode(["--scheduler"], None).is_err());
+    assert!(parse_scheduler_mode(["--scheduler=invalid"], None).is_err());
+}
+
+#[test]
+fn cache_mode_defaults_to_enabled_and_cli_overrides_environment() {
+    assert_eq!(parse_cache_mode([], None).unwrap(), CacheMode::Enabled);
+    assert_eq!(
+        parse_cache_mode([], Some("off")).unwrap(),
+        CacheMode::Bypass
+    );
+    assert_eq!(
+        parse_cache_mode(["--scheduler=native", "--cache=off"], Some("on")).unwrap(),
+        CacheMode::Bypass
+    );
+    assert_eq!(
+        parse_cache_mode(["--no-cache"], None).unwrap(),
+        CacheMode::Bypass
+    );
+    assert_eq!(
+        parse_cache_mode(["--no-cache"], Some("on")).unwrap(),
+        CacheMode::Bypass
+    );
+    assert_eq!(
+        parse_cache_mode(["--no-cache", "--cache=on"], Some("off")).unwrap(),
+        CacheMode::Enabled
+    );
+    assert_eq!(
+        parse_cache_mode(["--cache=on", "--no-cache"], Some("on")).unwrap(),
+        CacheMode::Bypass
+    );
+    assert_eq!(
+        parse_cache_mode(["--cache", "on"], Some("off")).unwrap(),
+        CacheMode::Enabled
+    );
+    assert!(parse_cache_mode(["--cache"], None).is_err());
+    assert!(parse_cache_mode([], Some("invalid")).is_err());
+}
+
+#[test]
+fn cpuinfo_physical_cores_deduplicates_smt_and_handles_socket_fallbacks() {
+    let smt_dual_socket = "\
+processor\t: 0
+physical id\t: 0
+core id\t\t: 0
+cpu cores\t: 2
+
+processor\t: 1
+physical id\t: 0
+core id\t\t: 4
+cpu cores\t: 2
+
+processor\t: 2
+physical id\t: 0
+core id\t\t: 0
+cpu cores\t: 2
+
+processor\t: 3
+physical id\t: 0
+core id\t\t: 4
+cpu cores\t: 2
+
+processor\t: 4
+physical id\t: 1
+core id\t\t: 0
+cpu cores\t: 2
+
+processor\t: 5
+physical id\t: 1
+core id\t\t: 8
+cpu cores\t: 2
+";
+    assert_eq!(parse_cpuinfo_physical_cores(smt_dual_socket), Some(4));
+
+    let without_core_id = "\
+processor\t: 0
+physical id\t: 0
+cpu cores\t: 4
+
+processor\t: 1
+physical id\t: 0
+cpu cores\t: 4
+
+processor\t: 2
+physical id\t: 1
+cpu cores\t: 2
+";
+    assert_eq!(parse_cpuinfo_physical_cores(without_core_id), Some(6));
+
+    let single_socket_cpu_cores_only = "\
+processor\t: 0
+cpu cores\t: 6
+
+processor\t: 1
+cpu cores\t: 6
+";
+    assert_eq!(
+        parse_cpuinfo_physical_cores(single_socket_cpu_cores_only),
+        Some(6)
+    );
+
+    let hybrid_sockets = "\
+processor\t: 0
+physical id\t: 0
+core id\t\t: 0
+
+processor\t: 1
+physical id\t: 0
+core id\t\t: 1
+
+processor\t: 2
+physical id\t: 1
+cpu cores\t: 4
+";
+    assert_eq!(parse_cpuinfo_physical_cores(hybrid_sockets), Some(6));
+
+    let no_topology = "\
+processor\t: 0
+BogoMIPS\t: 108.00
+
+processor\t: 1
+BogoMIPS\t: 108.00
+";
+    assert_eq!(parse_cpuinfo_physical_cores(no_topology), None);
+    assert_eq!(parse_cpuinfo_physical_cores(""), None);
+}
+
+#[test]
+fn meminfo_mb_converts_kilobytes_and_saturates_overflow() {
+    let meminfo = "\
+MemFree:          512000 kB
+MemTotal:       16777216 kB
+MemAvailable:   12000000 kB
+";
+    assert_eq!(parse_meminfo_mb(meminfo), Some(16384));
+    assert_eq!(parse_meminfo_mb("MemTotal: 2097152\n"), Some(2048));
+    assert_eq!(parse_meminfo_mb("MemTotal: 8192 kB\n"), Some(8));
+    assert_eq!(
+        parse_meminfo_mb(&format!("MemTotal: {} kB\n", u64::MAX)),
+        Some(u32::MAX)
+    );
+    assert_eq!(parse_meminfo_mb(""), None);
+    assert_eq!(parse_meminfo_mb("MemFree: 1024 kB\n"), None);
+    assert_eq!(parse_meminfo_mb("MemTotal: invalid kB\n"), None);
+    assert_eq!(parse_meminfo_mb("MemTotal: 16 MB\n"), None);
+}
+
+#[test]
+fn detect_resources_returns_bounded_threads_and_memory() {
+    let resources = detect_resources().expect("host resources should be detected");
+    assert!(
+        (1..=256).contains(&resources.threads),
+        "threads out of bounds: {}",
+        resources.threads
+    );
+    assert!(
+        resources.memory_mb >= 16,
+        "memory_mb below minimum: {}",
+        resources.memory_mb
+    );
+}
+
+#[tokio::test]
+async fn bypass_skips_cache_and_delegates_history_and_cleanup() {
+    let inner = Arc::new(MemoryRepo::default());
+    let repository = BypassCacheRepository::new(inner.clone());
+    let fens = core::extract("1. e4 e5 *").unwrap().fens;
+    let misses = repository.lookup(&fens, Mode::Time, 100, 2).await.unwrap();
+    assert_eq!(misses.len(), fens.len());
+    assert!(misses.iter().all(Option::is_none));
+    repository.put(&[], Mode::Time, 100, 2).await.unwrap();
+    let review = config(true);
+    repository
+        .save(&review, review.initial_result.as_ref().unwrap())
+        .await
+        .unwrap();
+    repository.drain().await;
+    assert_eq!(inner.cache_reads.load(Ordering::SeqCst), 0);
+    assert_eq!(inner.cache_writes.load(Ordering::SeqCst), 0);
+    assert_eq!(inner.saves.load(Ordering::SeqCst), 1);
+    assert_eq!(inner.drains.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn cancelling_navigation_does_not_delay_closing_a_busy_pipeline_review() {
+    let (started, received) = mpsc::channel();
+    let stopped = Arc::new(AtomicUsize::new(0));
+    let (wake_tx, wake) = mpsc::channel();
+    let bridge = Bridge::with_ports_and_scheduler(
+        Arc::new(WaitingProbe {
+            started,
+            stopped: stopped.clone(),
+        }),
+        Arc::new(MemoryRepo::default()),
+        None,
+        SchedulerMode::Pipeline,
+        Arc::new(move || {
+            let _ = wake_tx.send(());
+        }),
+    )
+    .unwrap();
+    bridge.open("busy", config(false)).unwrap();
+    received
+        .recv_timeout(Duration::from_secs(3))
+        .expect("the review should acquire its engine");
+
+    bridge.cancel_live("busy".into(), 1);
+    bridge.close("busy".into());
+    let deadline = Instant::now() + Duration::from_secs(3);
+    loop {
+        if bridge
+            .drain_lifecycle()
+            .iter()
+            .any(|event| matches!(event, BridgeLifecycle::Closed { id } if id == "busy"))
+        {
+            break;
+        }
+        wake.recv_timeout(deadline.saturating_duration_since(Instant::now()))
+            .expect("close should run before the stalled engine handshake times out");
+    }
+    assert_eq!(stopped.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+#[ignore = "requires ENGINE_ROOM_STOCKFISH; verifies live navigation through the shared review pool"]
+fn real_stockfish_native_scheduler_serves_navigation_before_review_completion() {
+    let engine = PathBuf::from(
+        std::env::var_os("ENGINE_ROOM_STOCKFISH").expect("set ENGINE_ROOM_STOCKFISH"),
+    );
+    let (tx, wake) = mpsc::channel();
+    let bridge = Bridge::with_ports(
+        Arc::new(NativeEngineFactory::new(engine)),
+        Arc::new(MemoryRepo::default()),
+        Arc::new(move || {
+            let _ = tx.send(());
+        }),
+    )
+    .unwrap();
+    assert_eq!(bridge.scheduler(), SchedulerMode::Native);
+    let pgn = "1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6 5. O-O Be7 6. Re1 b5 7. Bb3 d6 *";
+    let mut review = config(false);
+    review.pgn = pgn.into();
+    review.meta = core::extract(pgn).unwrap().meta;
+    review.analysis_kind = AnalysisKind::Fast;
+    bridge.open("native", review).unwrap();
+
+    let fen = core::extract("1. d4 *").unwrap().fens.pop().unwrap();
+    bridge
+        .analyze(
+            "native",
+            1,
+            LiveRequest {
+                fen: fen.clone(),
+                variation_node_id: None,
+                source_fen: None,
+                source_analysis: None,
+            },
+            LiveSettings {
+                search_seconds: 1,
+                lines: 1,
+                threads_auto: false,
+                threads: 1,
+                memory_mb: 16,
+                move_feedback_enabled: false,
+                fast_pass: true,
+            },
+        )
+        .unwrap();
+    until(&bridge, &wake, |events, lifecycle| {
+        assert!(
+            !lifecycle
+                .iter()
+                .any(|e| matches!(e, BridgeLifecycle::Error { .. })),
+            "bridge failure: {lifecycle:?}"
+        );
+        for envelope in events {
+            match envelope.event {
+                Event::LiveCompleted { fen: analyzed, .. } => {
+                    assert_eq!(envelope.request_id, Some(1));
+                    assert_eq!(analyzed, fen);
+                    return true;
+                }
+                Event::Completed { .. } => panic!("review completed before live navigation"),
+                Event::Error { error, .. } => panic!("analysis failed: {error}"),
+                _ => {}
+            }
+        }
+        false
+    });
+    bridge.close("native".into());
+    until(&bridge, &wake, |_, lifecycle| {
+        lifecycle
+            .iter()
+            .any(|event| matches!(event, BridgeLifecycle::Closed { id } if id == "native"))
+    });
+}
+
+#[test]
+#[ignore = "requires ENGINE_ROOM_STOCKFISH; verifies critical decision evidence"]
+fn real_stockfish_default_scheduler_uses_contextual_evidence_in_both_profiles() {
+    let engine = PathBuf::from(
+        std::env::var_os("ENGINE_ROOM_STOCKFISH").expect("set ENGINE_ROOM_STOCKFISH"),
+    );
+    let (tx, wake) = mpsc::channel();
+    let bridge = Bridge::with_ports(
+        Arc::new(NativeEngineFactory::new(engine)),
+        Arc::new(MemoryRepo::default()),
+        Arc::new(move || {
+            let _ = tx.send(());
+        }),
+    )
+    .unwrap();
+    let pgn =
+        "[FEN \"rnbqkbnr/pppp1ppp/8/4p3/6P1/5P2/PPPPP2P/RNBQKBNR b KQkq - 0 2\"]\n\n2... Qh4# 0-1";
+    let mut review = config(false);
+    review.pgn = pgn.into();
+    review.meta = core::extract(pgn).unwrap().meta;
+    assert_eq!(bridge.scheduler(), SchedulerMode::Native);
+    for (id, kind, expected_ms) in [
+        ("mate-fast", AnalysisKind::Fast, 2000),
+        ("mate-deep", AnalysisKind::Deep, 6000),
+    ] {
+        review.analysis_kind = kind;
+        bridge.open(id, review.clone()).unwrap();
+        until(&bridge, &wake, |events, lifecycle| {
+            assert!(
+                !lifecycle
+                    .iter()
+                    .any(|event| matches!(event, BridgeLifecycle::Error { .. })),
+                "bridge failure: {lifecycle:?}"
+            );
+            events.into_iter().any(|envelope| match envelope.event {
+                Event::Completed { result } => {
+                    let decision = result.moves.last().expect("checkmating move");
+                    let verification = decision
+                        .critical_verification
+                        .as_ref()
+                        .expect("mate verification");
+                    assert!(
+                        verification
+                            .reasons
+                            .contains(&engineroom_backend::review::adaptive::Reason::Mate)
+                    );
+                    assert!(verification.pending_plies.is_empty(), "{verification:?}");
+                    assert_eq!(
+                        result
+                            .positions
+                            .last()
+                            .unwrap()
+                            .evidence
+                            .as_ref()
+                            .unwrap()
+                            .origin,
+                        EvidenceOrigin::Terminal
+                    );
+                    let evidence = result.positions[0]
+                        .evidence
+                        .as_ref()
+                        .expect("refinement evidence");
+                    assert_eq!(evidence.scope, EvidenceScope::Mainline);
+                    assert_eq!(evidence.history_ply, Some(0));
+                    assert_eq!(
+                        evidence.requested.expect("chosen search budget").value,
+                        expected_ms
+                    );
+                    true
+                }
+                Event::Error { error, .. } => panic!("analysis failed: {error}"),
+                _ => false,
+            })
+        });
+    }
 }

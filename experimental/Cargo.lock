@@ -929,6 +929,7 @@ checksum = "66b7e2430c6dff6a955451e2cfc438f09cea1965a9d6f87f7e3b90decc014099"
 name = "engineroom-application"
 version = "0.1.0"
 dependencies = [
+ "fixedbitset",
  "pgn-reader",
  "serde",
  "serde_json",
@@ -969,6 +970,7 @@ dependencies = [
  "serde",
  "serde_json",
  "shakmaty",
+ "tempfile",
  "tokio",
  "unicode-normalization",
 ]
@@ -989,6 +991,7 @@ dependencies = [
 name = "engineroom-uci"
 version = "0.1.0"
 dependencies = [
+ "blake3",
  "engineroom-application",
  "shakmaty",
  "tokio",

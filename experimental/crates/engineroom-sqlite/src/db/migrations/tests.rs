@@ -1,5 +1,7 @@
 use super::*;
-use crate::db::{cache::Cache, games::Store, mode::Mode, open_memory, stats::Stats};
+use crate::db::{
+    cache::Cache, evidence::EvidenceCache, games::Store, mode::Mode, open_memory, stats::Stats,
+};
 use rusqlite::Connection;
 
 const FEN: &str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
@@ -237,5 +239,75 @@ fn migrate_em_schema_atual_eh_noop() {
             .unwrap()
             .games
             .is_empty()
+    );
+}
+
+#[test]
+fn migracao_cria_evidencia_contextual_sem_alterar_cache_legado() {
+    // Banco totalmente antigo: position_cache pré-modição, sem tabela alguma
+    // de evidência. A migração deve preservar o dado antigo e criar a nova.
+    let conn = Connection::open_in_memory().unwrap();
+    conn.execute_batch(
+        "CREATE TABLE position_cache (
+            fen TEXT NOT NULL,
+            depth INTEGER NOT NULL,
+            multipv INTEGER NOT NULL,
+            cp INTEGER NOT NULL,
+            lines_json TEXT NOT NULL,
+            PRIMARY KEY (fen, depth, multipv)
+         );",
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO position_cache (fen, depth, multipv, cp, lines_json)
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+        (FEN, 20, 1, 35, LINES),
+    )
+    .unwrap();
+
+    migrate(&conn).unwrap();
+
+    // Cache legado segue legível.
+    let legacy = Cache::new(&conn).lookup(FEN, Mode::Depth, 20, 1).unwrap();
+    assert_eq!(
+        legacy,
+        Some(crate::db::cache::CachedPosition {
+            cp: 35,
+            lines_json: LINES.to_string(),
+            reached_depth: 20,
+        })
+    );
+
+    // Nova tabela existe, é utilizável e está vazia.
+    let evidence = EvidenceCache::new(&conn);
+    assert_eq!(
+        evidence.lookup("contexto", Mode::Depth, 20, 1).unwrap(),
+        None
+    );
+    evidence
+        .store("contexto", Mode::Depth, 20, 1, 20, 42, LINES, "{}")
+        .unwrap();
+    assert_eq!(
+        evidence
+            .lookup("contexto", Mode::Depth, 20, 1)
+            .unwrap()
+            .unwrap()
+            .cp,
+        42
+    );
+
+    // Idempotente: rodar de novo não apaga nada nem duplica o dado antigo.
+    migrate(&conn).unwrap();
+    assert_eq!(
+        Cache::new(&conn).lookup(FEN, Mode::Depth, 20, 1).unwrap(),
+        legacy
+    );
+    assert_eq!(
+        evidence
+            .lookup("contexto", Mode::Depth, 20, 1)
+            .unwrap()
+            .unwrap()
+            .cp,
+        42
     );
 }

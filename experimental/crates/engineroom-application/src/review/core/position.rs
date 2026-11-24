@@ -1,7 +1,9 @@
 //! FEN, terminal positions and SAN conversion.
 use super::invalid;
 use crate::review::types::*;
-use shakmaty::{CastlingMode, Chess, EnPassantMode, Position, fen::Fen, san, uci::UciMove};
+use shakmaty::{
+    Bitboard, CastlingMode, Chess, EnPassantMode, Position, fen::Fen, san, uci::UciMove,
+};
 
 pub fn position(fen: &str) -> Result<Chess> {
     let fen: Fen = fen
@@ -27,26 +29,40 @@ pub fn terminal_position(p: &Chess) -> Option<i32> {
 }
 // Match chess.js (same-color bishops only; K+NN is not automatically a draw).
 fn insufficient(p: &Chess) -> bool {
-    let pieces: Vec<_> = p
-        .board()
-        .iter()
-        .filter(|(_, piece)| piece.role != shakmaty::Role::King)
-        .collect();
-    if pieces.is_empty() {
-        return true;
+    let board = p.board();
+    let pieces = board.occupied() & !board.kings();
+    match pieces.count() {
+        0 => true,
+        1 => pieces.intersects(board.bishops() | board.knights()),
+        _ => {
+            pieces == board.bishops()
+                && (pieces.is_subset(Bitboard::LIGHT_SQUARES)
+                    || pieces.is_subset(Bitboard::DARK_SQUARES))
+        }
     }
-    if pieces.len() == 1 {
-        return matches!(
-            pieces[0].1.role,
-            shakmaty::Role::Bishop | shakmaty::Role::Knight
-        );
+}
+/// Returns the contiguous legal, distinct MultiPV prefix and its minimum depth.
+pub fn observed_coverage(raw: &RawPosition, limit: usize) -> Option<(usize, u32, usize)> {
+    let position = position(&raw.fen).ok()?;
+    let mut roots = Vec::new();
+    let mut depth = u32::MAX;
+    for (index, line) in raw.lines.iter().take(limit).enumerate() {
+        if line.multipv as usize != index + 1 {
+            break;
+        }
+        let Some(root) = line
+            .pv
+            .first()
+            .and_then(|uci| uci.parse::<UciMove>().ok())
+            .and_then(|uci| uci.to_move(&position).ok())
+            .filter(|root| !roots.contains(root))
+        else {
+            break;
+        };
+        roots.push(root);
+        depth = depth.min(line.depth.unwrap_or(raw.depth));
     }
-    pieces
-        .iter()
-        .all(|(_, piece)| piece.role == shakmaty::Role::Bishop)
-        && pieces
-            .iter()
-            .all(|(s, _)| s.is_light() == pieces[0].0.is_light())
+    (!roots.is_empty()).then(|| (roots.len(), depth, position.legal_moves().len()))
 }
 pub fn add_san(raw: &mut RawPosition) {
     let Ok(position) = position(&raw.fen) else {

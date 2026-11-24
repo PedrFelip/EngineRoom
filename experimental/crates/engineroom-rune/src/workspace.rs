@@ -182,6 +182,7 @@ impl State {
     fn resume_review(&mut self, mut config: ReviewConfig) {
         config.initial_result = self.real_result.clone();
         if let Some(bridge) = &self.bridge {
+            let live_during_review = State::allows_live_during_review(bridge, &config);
             let id = format!(
                 "workspace-{}-{}",
                 self.active_workspace.unwrap_or(0),
@@ -194,11 +195,15 @@ impl State {
                 Ok(()) => {
                     self.session.open(id);
                     self.bridge_error = None;
+                    self.live_during_review = live_during_review;
                     if self.real_result.is_none() {
                         self.real_progress = Some((0, self.game.moves.len() + 1));
                     }
                 }
-                Err(error) => self.bridge_error = Some(error),
+                Err(error) => {
+                    self.live_during_review = false;
+                    self.bridge_error = Some(error);
+                }
             }
         }
     }

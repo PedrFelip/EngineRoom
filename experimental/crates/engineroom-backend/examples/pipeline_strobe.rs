@@ -1,16 +1,20 @@
-//! Deterministic Strobe harness for selected stages of the review pipeline.
+//! Deterministic Strobe harness for the review pipeline and `ReviewSessions`.
 //!
-//! It drives the production `Pipeline` through the public `EnginePort`,
-//! `EngineFactory` and `Repository` seams. The fake engine makes the scenarios
-//! reproducible without Stockfish; the real-engine scenarios live in the
-//! existing `strobe_review.rs` example. Each scenario prints `strobe:metric`
-//! lines so Strobe's `cli()` target can read counters alongside CPU and time.
+//! It drives the production `Pipeline` and `ReviewSessions` through the public
+//! `EnginePort`, `EngineFactory`, `Repository` and session seams. The fake engine
+//! makes the scenarios reproducible without Stockfish; the real-engine scenarios
+//! live in `strobe_review.rs`. Covers single-pipeline cases (`pgn`, `manual`,
+//! `manual-warm`, `live`, `automatic`) and paired scheduler comparisons
+//! (`automatic-pipeline` vs `automatic-native`). Each scenario prints
+//! `strobe:metric` lines so Strobe's `cli()` target can read counters alongside
+//! CPU and time.
 use engineroom_application::db::mode::Mode;
 use engineroom_backend::review::{
     core,
     engine::{Cancellation, EngineFactory, EnginePort, Task},
     pipeline::Pipeline,
     repository::{Repository, SqliteRepository},
+    session::{Resources, ReviewSessions, SchedulerMode},
     types::{
         AnalysisKind, EngineTier, Event, LiveRequest, LiveSettings, Result, ReviewConfig,
         ReviewError, ReviewErrorCode,
@@ -21,13 +25,22 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         Arc,
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     },
+    time::Duration,
 };
-use tokio::sync::watch;
+use tokio::sync::{Notify, mpsc, watch};
 
 const DEFAULT_PGN: &str = "perf/data/immortal.pgn";
-const SCENARIOS: &[&str] = &["pgn", "manual", "manual-warm", "live", "automatic"];
+const SCENARIOS: &[&str] = &[
+    "pgn",
+    "manual",
+    "manual-warm",
+    "live",
+    "automatic",
+    "automatic-pipeline",
+    "automatic-native",
+];
 
 #[derive(Default)]
 struct Counters {
@@ -38,12 +51,12 @@ struct Counters {
     searches: usize,
     live: usize,
     classifications: usize,
+    searches_before_live: Option<usize>,
+    live_before_completed: Option<usize>,
 }
 
 impl Counters {
     fn print(&self) {
-        // Strobe reads these lines from a cli() process. `higher` marks counters
-        // where growth is the useful direction; the rest default to `lower`.
         for (name, value, higher) in [
             ("positions", self.positions, true),
             ("moves", self.moves, true),
@@ -59,6 +72,12 @@ impl Counters {
                 println!("strobe:metric {name}={value}");
             }
         }
+        if let Some(value) = self.searches_before_live {
+            println!("strobe:metric searches_before_live={value}");
+        }
+        if let Some(value) = self.live_before_completed {
+            println!("strobe:metric live_before_completed={value} higher");
+        }
     }
 }
 
@@ -73,6 +92,9 @@ fn deterministic_cp(fen: &str) -> i32 {
 #[derive(Default)]
 struct FakeState {
     searches: AtomicUsize,
+    entered: AtomicUsize,
+    gate_open: AtomicBool,
+    gate: Notify,
 }
 
 struct FakePort {
@@ -80,6 +102,7 @@ struct FakePort {
     queue: VecDeque<String>,
     fen: String,
     multipv: u32,
+    gated: bool,
 }
 
 impl EnginePort for FakePort {
@@ -98,6 +121,13 @@ impl EnginePort for FakePort {
                 })?;
                 self.multipv = parsed;
             } else if command.starts_with("go ") {
+                if self.gated {
+                    self.gated = false;
+                    self.state.entered.fetch_add(1, Ordering::SeqCst);
+                    if !self.state.gate_open.load(Ordering::SeqCst) {
+                        self.state.gate.notified().await;
+                    }
+                }
                 self.state.searches.fetch_add(1, Ordering::SeqCst);
                 let cp = deterministic_cp(&self.fen);
                 for index in 1..=self.multipv {
@@ -131,6 +161,7 @@ impl EnginePort for FakePort {
 #[derive(Default)]
 struct FakeFactory {
     state: Arc<FakeState>,
+    gated: bool,
 }
 
 impl EngineFactory for FakeFactory {
@@ -141,8 +172,23 @@ impl EngineFactory for FakeFactory {
                 queue: VecDeque::new(),
                 fen: String::new(),
                 multipv: 1,
+                gated: self.gated,
             });
             Ok(port)
+        })
+    }
+
+    fn acquire_pool<'a>(
+        &'a self,
+        count: usize,
+        cancel: &'a Cancellation,
+    ) -> Task<'a, Result<Vec<Box<dyn EnginePort>>>> {
+        Box::pin(async move {
+            let mut ports = Vec::with_capacity(count.max(1));
+            for _ in 0..count.max(1) {
+                ports.push(self.acquire(cancel).await?);
+            }
+            Ok(ports)
         })
     }
 }
@@ -159,7 +205,6 @@ impl TempDb {
             "engineroom-strobe-{}-{scenario}",
             std::process::id()
         ));
-        // A stale directory from an interrupted run would change the counters.
         let _ = std::fs::remove_dir_all(&directory);
         let _ = std::fs::create_dir_all(&directory);
         Self {
@@ -274,6 +319,132 @@ async fn live(config: &ReviewConfig, db: &TempDb, counters: &mut Counters) -> Re
     Ok(())
 }
 
+async fn session_compare(
+    config: ReviewConfig,
+    db: &TempDb,
+    mode: SchedulerMode,
+) -> Result<Counters> {
+    let game = core::extract(&config.pgn)?;
+    // Use a late mainline position with a modified fullmove counter to measure
+    // live priority and 5-field FenId sharing during active automatic review.
+    let target_ply = game.fens.len().saturating_sub(4);
+    let target_fen = &game.fens[target_ply];
+    let live_fen = match target_fen.rsplit_once(' ') {
+        Some((prefix, _)) => format!("{prefix} 99"),
+        None => target_fen.clone(),
+    };
+    let factory = Arc::new(FakeFactory {
+        state: Arc::new(FakeState::default()),
+        gated: true,
+    });
+    let repository: Arc<dyn Repository> = Arc::new(SqliteRepository::new(db.path.clone()));
+    let sessions = ReviewSessions::new(
+        factory.clone(),
+        repository,
+        Some(Resources {
+            threads: 4,
+            memory_mb: 2048,
+        }),
+    )
+    .with_scheduler(mode);
+
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    sessions.open("strobe", "main", config, move |envelope| {
+        tx.send(envelope.event).is_ok()
+    })?;
+
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while factory.state.entered.load(Ordering::SeqCst) == 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .map_err(|_| ReviewError::new(ReviewErrorCode::EngineTimeout, "strobe", "worker timeout"))?;
+
+    sessions.analyze_position(
+        "strobe",
+        "main",
+        1,
+        LiveRequest {
+            fen: live_fen,
+            variation_node_id: None,
+            source_fen: None,
+            source_analysis: None,
+        },
+        LiveSettings {
+            search_seconds: 1,
+            lines: 3,
+            threads_auto: false,
+            threads: 2,
+            memory_mb: 256,
+            move_feedback_enabled: false,
+            fast_pass: false,
+        },
+    )?;
+
+    if mode == SchedulerMode::Native {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while let Some(event) = rx.recv().await {
+                if matches!(event, Event::LiveStarted { .. }) {
+                    break;
+                }
+            }
+        })
+        .await
+        .map_err(|_| ReviewError::new(ReviewErrorCode::EngineTimeout, "strobe", "live timeout"))?;
+        for _ in 0..8 {
+            tokio::task::yield_now().await;
+        }
+    }
+
+    factory.state.gate_open.store(true, Ordering::SeqCst);
+    factory.state.gate.notify_waiters();
+
+    let mut counters = Counters::default();
+    let mut completed = false;
+    let mut live_done = false;
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while !completed || !live_done {
+            let Some(event) = rx.recv().await else {
+                break;
+            };
+            match event {
+                Event::Progress { progress } => {
+                    counters.cached = progress.cached_positions;
+                    counters.searched = progress.engine_positions;
+                }
+                Event::Completed { result } => {
+                    counters.positions = result.positions.len();
+                    counters.moves = result.moves.len();
+                    if counters.live_before_completed.is_none() {
+                        counters.live_before_completed = Some(0);
+                    }
+                    completed = true;
+                }
+                Event::LiveCompleted { .. } => {
+                    counters.live += 1;
+                    counters.searches_before_live =
+                        Some(factory.state.searches.load(Ordering::SeqCst));
+                    if counters.live_before_completed.is_none() {
+                        counters.live_before_completed = Some(1);
+                    }
+                    live_done = true;
+                }
+                Event::Error { error, .. } => return Err(error),
+                _ => {}
+            }
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|_| ReviewError::new(ReviewErrorCode::EngineTimeout, "strobe", "session timeout"))??;
+
+    sessions.close("strobe", "main").await?;
+    sessions.shutdown().await;
+    counters.searches = factory.state.searches.load(Ordering::SeqCst);
+    Ok(counters)
+}
+
 async fn run(scenario: &str, pgn_path: &Path) -> Result<Counters> {
     let pgn = std::fs::read_to_string(pgn_path).map_err(|error| {
         ReviewError::with_source(ReviewErrorCode::InvalidPgn, "pgn.read", error)
@@ -300,6 +471,14 @@ async fn run(scenario: &str, pgn_path: &Path) -> Result<Counters> {
             let config = config(pgn, AnalysisKind::Fast, Mode::Time)?;
             counters.searches = review(&config, &db, 1, &mut counters).await?;
         }
+        "automatic-pipeline" => {
+            let config = config(pgn, AnalysisKind::Fast, Mode::Time)?;
+            counters = session_compare(config, &db, SchedulerMode::Pipeline).await?;
+        }
+        "automatic-native" => {
+            let config = config(pgn, AnalysisKind::Fast, Mode::Time)?;
+            counters = session_compare(config, &db, SchedulerMode::Native).await?;
+        }
         _ => unreachable!("scenario validado antes do despacho"),
     }
     Ok(counters)
@@ -312,7 +491,7 @@ async fn main() -> Result<()> {
         ReviewError::new(
             ReviewErrorCode::InvalidPayload,
             "args",
-            "use: pipeline_strobe <pgn|manual|manual-warm|live|automatic> [pgn]",
+            "use: pipeline_strobe <pgn|manual|manual-warm|live|automatic|automatic-pipeline|automatic-native> [pgn]",
         )
     })?;
     if !SCENARIOS.contains(&scenario.as_str()) {

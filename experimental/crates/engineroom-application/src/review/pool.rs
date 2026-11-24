@@ -1,6 +1,6 @@
 //! Persistent workers under one session lease. Every worker owns its UCI stream.
 use super::{
-    engine::{self, Cancellation, EngineFactory, EnginePort},
+    engine::{self, Cancellation, EngineFactory, EnginePort, SearchCheckpoint, SearchCheckpoints},
     types::*,
 };
 use crate::db::mode::Mode;
@@ -12,13 +12,20 @@ use tokio::{
 
 pub struct Completed {
     pub raw: RawPosition,
+    pub engine: Option<String>,
     /// UCI time budget used for this search.
     pub value: u32,
 }
-pub type Evaluation = oneshot::Receiver<Result<Completed>>;
+pub(super) struct Evaluation {
+    pub(super) completed: oneshot::Receiver<Result<Completed>>,
+    pub(super) checkpoint: watch::Receiver<Option<SearchCheckpoint>>,
+}
+
 struct Job {
     fen: String,
+    history: Option<super::core::PositionContext>,
     result: oneshot::Sender<Result<Completed>>,
+    checkpoints: SearchCheckpoints,
     value: u32,
     multipv: u32,
 }
@@ -29,6 +36,13 @@ pub struct Pool {
     failure: Arc<Mutex<Option<ReviewError>>>,
     cancel: Cancellation,
 }
+pub(super) fn worker_count(sizing: Option<(u32, u32)>, positions: usize) -> usize {
+    let (threads, memory) = sizing.unwrap_or((1, 16));
+    // Keep at least two threads per worker and cap process and NNUE overhead.
+    let count = (threads / 2).clamp(1, 3).min((memory / 16).max(1)) as usize;
+    count.min(positions.max(1))
+}
+
 impl Pool {
     pub async fn acquire(
         factory: &dyn EngineFactory,
@@ -37,11 +51,8 @@ impl Pool {
         cancel: &Cancellation,
     ) -> Result<Self> {
         let (threads, memory) = sizing.unwrap_or((1, 16));
-        // Keep at least two threads per worker on larger machines; cap process
-        // and NNUE overhead. Hash is a total budget, never a per-process budget.
-        let count = (threads / 2).clamp(1, 3).min((memory / 16).max(1)) as usize;
         let ports = factory
-            .acquire_pool(count.min(positions.max(1)), cancel)
+            .acquire_pool(worker_count(sizing, positions), cancel)
             .await?;
         if ports.is_empty() {
             return Err(ReviewError::new(
@@ -88,14 +99,30 @@ impl Pool {
             .map(|failure| failure.clone())
             .map_err(|_| poisoned_failure())
     }
+    #[cfg(test)]
     pub async fn submit(
         &self,
         worker: usize,
         fen: String,
         value: u32,
         multipv: u32,
+    ) -> Result<oneshot::Receiver<Result<Completed>>> {
+        Ok(self
+            .submit_position(worker, fen, None, value, multipv)
+            .await?
+            .completed)
+    }
+
+    pub(super) async fn submit_position(
+        &self,
+        worker: usize,
+        fen: String,
+        history: Option<super::core::PositionContext>,
+        value: u32,
+        multipv: u32,
     ) -> Result<Evaluation> {
-        let (result, receiver) = oneshot::channel();
+        let (result, completed) = oneshot::channel();
+        let (checkpoints, checkpoint) = SearchCheckpoints::channel(multipv);
         if let Some(error) = self.failure()? {
             return Err(error);
         }
@@ -110,7 +137,9 @@ impl Pool {
             })?
             .send(Job {
                 fen,
+                history,
                 result,
+                checkpoints,
                 value,
                 multipv,
             })
@@ -125,7 +154,10 @@ impl Pool {
                     )
                 }),
             })?;
-        Ok(receiver)
+        Ok(Evaluation {
+            completed,
+            checkpoint,
+        })
     }
     pub async fn close(&mut self) -> Result<()> {
         let mut cleanup_error = None;
@@ -179,8 +211,16 @@ async fn worker(
         revision: None,
     };
     let mut configured = None;
+    let mut identity = None;
     loop {
-        let job = tokio::select! {
+        let Job {
+            fen,
+            history,
+            result: reply,
+            checkpoints,
+            value,
+            multipv,
+        } = tokio::select! {
             _ = root.cancelled() => break,
             _ = local.cancelled() => break,
             job = jobs.recv() => match job { Some(job) => job, None => break },
@@ -189,37 +229,40 @@ async fn worker(
             root.check()?;
             local.check()?;
             if configured.is_none() {
-                engine::configure(
+                identity = engine::configure_with_identity(
                     port.as_mut(),
                     Some(threads),
                     Some(memory),
-                    job.multipv,
+                    multipv,
                     &local,
                 )
                 .await?;
-            } else if configured != Some(job.multipv) {
+            } else if configured != Some(multipv) {
                 engine::send(
                     port.as_mut(),
-                    &format!("setoption name MultiPV value {}", job.multipv),
+                    &format!("setoption name MultiPV value {}", multipv),
                     &local,
                 )
                 .await?;
                 engine::ask(port.as_mut(), "isready", "readyok", 10000, &local).await?;
             }
-            configured = Some(job.multipv);
-            let mut raw = engine::evaluate(
+            configured = Some(multipv);
+            let timeout = super::pipeline::timeout(Mode::Time, value);
+            let mut raw = engine::evaluate_with_checkpoints(
                 port.as_mut(),
-                &job.fen,
-                Mode::Time,
-                job.value,
-                super::pipeline::timeout(Mode::Time, job.value),
+                &fen,
+                history.as_ref(),
+                value,
+                timeout,
                 &local,
+                checkpoints,
             )
             .await?;
             super::core::add_san(&mut raw);
             Ok(Completed {
                 raw,
-                value: job.value,
+                engine: identity.clone(),
+                value,
             })
         };
         let mut result = tokio::select! {
@@ -236,7 +279,7 @@ async fn worker(
             }
             stop.send_replace(true);
         }
-        let _ = job.result.send(result);
+        let _ = reply.send(result);
         if failed {
             break;
         }
@@ -355,8 +398,10 @@ mod tests {
             let (result, reply) = oneshot::channel();
             sender
                 .send(Job {
+                    history: None,
                     fen: String::new(),
                     result,
+                    checkpoints: SearchCheckpoints::channel(1).0,
                     value: 1,
                     multipv: 1,
                 })

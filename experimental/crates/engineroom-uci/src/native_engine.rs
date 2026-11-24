@@ -27,10 +27,37 @@ impl NativeEngineFactory {
 struct NativeEngine {
     child: Option<Child>,
     stdin: ChildStdin,
+    command_buffer: Vec<u8>,
     lines: Lines<BufReader<ChildStdout>>,
     permit: Option<Arc<OwnedSemaphorePermit>>,
 }
 impl EngineFactory for NativeEngineFactory {
+    fn artifact_signature(&self) -> Task<'_, Result<Option<String>>> {
+        let path = self.path.clone();
+        Box::pin(async move {
+            let result = tokio::task::spawn_blocking(move || {
+                let file = std::fs::File::open(&path)?;
+                let mut hasher = blake3::Hasher::new();
+                hasher.update_reader(file)?;
+                Ok::<_, std::io::Error>(hasher.finalize().to_hex().to_string())
+            })
+            .await
+            .map_err(|error| {
+                ReviewError::new(ReviewErrorCode::EngineSpawn, "engine.signature", error)
+            })?;
+            result.map(Some).map_err(|error| {
+                ReviewError::new(
+                    ReviewErrorCode::EngineSpawn,
+                    "engine.signature",
+                    format!(
+                        "Stockfish indisponível em '{}': {error}",
+                        self.path.display()
+                    ),
+                )
+            })
+        })
+    }
+
     fn acquire<'a>(&'a self, cancel: &'a Cancellation) -> Task<'a, Result<Box<dyn EnginePort>>> {
         Box::pin(async move {
             self.acquire_pool(1, cancel).await?.pop().ok_or_else(|| {
@@ -114,6 +141,7 @@ fn spawn(path: &PathBuf, permit: Arc<OwnedSemaphorePermit>) -> Result<NativeEngi
     Ok(NativeEngine {
         child: Some(child),
         stdin,
+        command_buffer: Vec::new(),
         lines,
         permit: Some(permit),
     })
@@ -133,15 +161,15 @@ impl Drop for NativeEngine {
 impl EnginePort for NativeEngine {
     fn send<'a>(&'a mut self, command: &'a str) -> Task<'a, Result<()>> {
         Box::pin(async move {
+            self.command_buffer.clear();
+            self.command_buffer.extend_from_slice(command.as_bytes());
+            self.command_buffer.push(b'\n');
             self.stdin
-                .write_all(command.as_bytes())
+                .write_all(&self.command_buffer)
                 .await
                 .map_err(|e| {
                     ReviewError::with_source(ReviewErrorCode::EngineCommand, "engine.send", e)
-                })?;
-            self.stdin.write_all(b"\n").await.map_err(|e| {
-                ReviewError::with_source(ReviewErrorCode::EngineCommand, "engine.send", e)
-            })
+                })
         })
     }
     fn next(&mut self) -> Task<'_, Result<String>> {
