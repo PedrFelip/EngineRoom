@@ -6,16 +6,15 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Tag da release a retomar (por exemplo v1.0.0)
+        description: Tag da release a retomar
         type: string
         required: true
 
 permissions:
   contents: read
 
-# Serialize release preparation, uploads, publication and retries.
 concurrency:
-  group: release-main
+  group: release-rune-main
   cancel-in-progress: false
 
 jobs:
@@ -26,6 +25,8 @@ jobs:
       pull-requests: write
       issues: write
       actions: write
+    env:
+      ENGINEROOM_PRODUCT: rune
     outputs:
       should_release: ${{ steps.draft.outputs.should_release }}
       release_id: ${{ steps.draft.outputs.release_id }}
@@ -55,14 +56,16 @@ jobs:
         with:
           script: |
             await require('./.github/scripts/automation.cjs').checkReleasePRs({ github, context })
+      # The tag is derived from the root Cargo.toml on push, or supplied on a
+      # manual retry. No per-component output is needed for the root package.
       - name: Select or resume draft at its immutable commit
         id: draft
         uses: actions/github-script@v7
         env:
-          RELEASE_TAG: ${{ inputs.tag || steps.release.outputs['app--tag_name'] }}
+          RELEASE_TAG: ${{ inputs.tag }}
         with:
           script: |
-            await require('./.github/scripts/automation.cjs').selectDraft({ github, context, core }, process.env.RELEASE_TAG)
+            await require('./.github/scripts/automation.cjs').selectDraft({ github, context, core }, process.env.RELEASE_TAG || undefined)
       - name: Checkout exact release commit
         if: steps.draft.outputs.should_release == 'true'
         uses: actions/checkout@v4
@@ -73,11 +76,13 @@ jobs:
         if: steps.draft.outputs.should_release == 'true'
         with:
           python-version: '3.12'
-      - name: Validate tag, manifests and changelog
+      - name: Validate tag, root manifest and changelog
         if: steps.draft.outputs.should_release == 'true'
         env:
           RELEASE_TAG: ${{ steps.draft.outputs.tag }}
-        run: python .github/scripts/release_version.py --tag "$RELEASE_TAG"
+        run: |
+          python .github/scripts/release_version.py --product rune \
+            --manifest .release-please-manifest.json --tag "$RELEASE_TAG"
 
   checks:
     needs: prepare
@@ -91,170 +96,24 @@ jobs:
     if: needs.prepare.outputs.should_release == 'true'
     permissions:
       contents: write
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - platform: ubuntu-22.04
-            args: --bundles appimage
-          - platform: windows-latest
-            args: --bundles nsis,msi
-    runs-on: ${{ matrix.platform }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.prepare.outputs.sha }}
-          persist-credentials: false
-
-      - name: Install Linux dependencies
-        if: matrix.platform == 'ubuntu-22.04'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-alsa
-
-      - uses: actions/setup-python@v5
-        if: matrix.platform == 'ubuntu-22.04'
-        with:
-          python-version: '3.12'
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: '1.4.4'
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Rust cache
-        uses: swatinem/rust-cache@v2
-        with:
-          workspaces: app/src-tauri -> target
-
-      - name: Cache Bun packages
-        uses: actions/cache@v4
-        with:
-          path: ~/.bun/install/cache
-          key: bun-v1-${{ runner.os }}-${{ runner.arch }}-1.4.4-app-${{ hashFiles('app/bun.lock') }}
-          restore-keys: bun-v1-${{ runner.os }}-${{ runner.arch }}-1.4.4-app-
-      - name: Install frontend dependencies
-        run: bun install --frozen-lockfile
-        working-directory: app
-
-      - name: Restore Stockfish sidecar cache
-        id: stockfish-cache
-        uses: actions/cache/restore@v4
-        with:
-          path: app/src-tauri/binaries/stockfish-*
-          key: stockfish-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('app/scripts/fetch-stockfish.mjs') }}
-
-      - name: Fetch Stockfish sidecar
-        run: bun scripts/fetch-stockfish.mjs
-        working-directory: app
-
-      # Save immediately so a later app build failure does not lose the download.
-      - name: Save Stockfish sidecar cache
-        if: steps.stockfish-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: app/src-tauri/binaries/stockfish-*
-          key: ${{ steps.stockfish-cache.outputs.cache-primary-key }}
-
-      - name: Build installers
-        uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        with:
-          projectPath: app
-          args: ${{ matrix.args }} -- --locked
-
-      - name: Verify AppImage graphics and media inventory
-        if: matrix.platform == 'ubuntu-22.04'
-        run: python3 app/scripts/verify_appimage.py app/src-tauri/target/release/bundle/appimage/*.AppImage
-
-      - name: Share AppImage for startup test on a newer distribution
-        if: matrix.platform == 'ubuntu-22.04'
-        uses: actions/upload-artifact@v4
-        with:
-          name: linux-appimage
-          path: app/src-tauri/target/release/bundle/appimage/*.AppImage
-          if-no-files-found: error
-          retention-days: 1
-
-      - name: Upload verified installers to draft
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
-        run: |
-          shopt -s nullglob
-          installers=(app/src-tauri/target/release/bundle/{appimage/*.AppImage,appimage/*.AppImage.sig,nsis/*.exe,nsis/*.exe.sig,msi/*.msi,msi/*.msi.sig})
-          test "${#installers[@]}" -gt 0
-          gh release upload "$RELEASE_TAG" "${installers[@]}" --clobber
-
-  linux-smoke:
-    needs: [prepare, build]
-    if: needs.prepare.outputs.should_release == 'true'
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.prepare.outputs.sha }}
-          persist-credentials: false
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - uses: actions/download-artifact@v4
-        with:
-          name: linux-appimage
-          path: appimage
-      - name: Install headless Mesa display
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends xvfb xauth libegl1 libgles2 libegl-mesa0 libgl1-mesa-dri libglx-mesa0 libwayland-client0
-      # WebKit loads GLES dynamically; libegl1 does not pull in libgles2.
-      - name: Check host EGL and GLES runtime
-        run: |
-          python3 - <<'PYTHON'
-          import ctypes
-          for library in ("libEGL.so.1", "libGLESv2.so.2"):
-              ctypes.CDLL(library)
-              print(f"Host graphics library available: {library}")
-          PYTHON
-      - name: Verify Ubuntu 22.04 AppImage starts on Ubuntu 24.04
-        run: |
-          chmod +x appimage/*.AppImage
-          xvfb-run --auto-servernum python3 app/scripts/verify_appimage.py --smoke appimage/*.AppImage
+    uses: ./.github/workflows/rune-installers.yml
+    with:
+      ref: ${{ needs.prepare.outputs.sha }}
+      tag: ${{ needs.prepare.outputs.tag }}
 
   publish:
-    needs: [prepare, checks, build, linux-smoke]
+    needs: [prepare, checks, build]
     runs-on: ubuntu-22.04
     permissions:
       contents: write
+    env:
+      ENGINEROOM_PRODUCT: rune
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - name: Generate feed from signed installers
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
-          RELEASE_REPOSITORY: ${{ github.repository }}
-        run: |
-          mkdir -p updater-signatures
-          gh release download "$RELEASE_TAG" --pattern '*.sig' --dir updater-signatures
-          gh release view "$RELEASE_TAG" --json tagName,body,createdAt,assets > updater-release.json
-          python .github/scripts/updater_manifest.py --release updater-release.json --signatures updater-signatures --output latest.json --repository "$RELEASE_REPOSITORY" --tag "$RELEASE_TAG"
-          gh release upload "$RELEASE_TAG" latest.json --clobber
-      - name: Publish only with all installers present
+      # No latest.json: the first Rune release is a manual install.
+      - name: Publish only with both installers present
         uses: actions/github-script@v7
         env:
           RELEASE_ID: ${{ needs.prepare.outputs.release_id }}

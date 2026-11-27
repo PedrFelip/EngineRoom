@@ -6,7 +6,7 @@ const { GitHub, Manifest } = require('release-please');
 
 const root = path.join(__dirname, '../..');
 const read = file => fs.readFileSync(path.join(root, file), 'utf8');
-const current = JSON.parse(read('.release-please-manifest.json')).app;
+const current = JSON.parse(read('.release-please-manifest.json'))['.'];
 const releaseSha = 'a'.repeat(40);
 const bootstrapSha = 'b'.repeat(40);
 const logger = { info() {}, warn() {}, debug() {}, error() {}, trace() {} };
@@ -20,16 +20,16 @@ function fixture({ forceTag = true, freshCommit } = {}) {
   const visitedCommits = [];
   const config = JSON.parse(read('release-please-config.json'));
   config['bootstrap-sha'] = bootstrapSha;
-  if (!forceTag) delete config.packages.app['force-tag-creation'];
+  if (!forceTag) delete config.packages['.']['force-tag-creation'];
   const pr = {
     number: 34,
     title: `chore(main): release ${current}`,
     body: `:robot: I have created a release *beep* *boop*\n---\n\n## [${current}](https://example.com/compare)\n\n### Correções\n\n* correção já lançada\n\n---\nThis PR was generated with Release Please.`,
-    headBranchName: 'release-please--branches--main--components--app',
+    headBranchName: 'release-please--branches--main--components--engineroom-rune',
     baseBranchName: 'main',
     sha: releaseSha,
     labels: ['autorelease: pending'],
-    files: ['app/package.json', 'app/CHANGELOG.md'],
+    files: ['Cargo.toml', 'CHANGELOG.md'],
   };
   const github = new GitHub({
     repository: { owner: 'PedrFelip', repo: 'EngineRoom', defaultBranch: 'main' },
@@ -73,9 +73,9 @@ function fixture({ forceTag = true, freshCommit } = {}) {
   };
   github.mergeCommitIterator = async function* () {
     const history = [
-      ...(freshCommit ? [{ sha: 'c'.repeat(40), message: freshCommit, files: ['app/src/App.tsx'] }] : []),
+      ...(freshCommit ? [{ sha: 'c'.repeat(40), message: freshCommit, files: ['crates/engineroom-rune/src/main.rs'] }] : []),
       { sha: releaseSha, message: pr.title, files: pr.files, pullRequest: pr },
-      { sha: 'd'.repeat(40), message: 'fix: correção antiga\n\nRelease-As: 1.0.0', files: ['app/src/App.tsx'] },
+      { sha: 'd'.repeat(40), message: 'fix: correção antiga\n\nRelease-As: 1.0.0', files: ['crates/engineroom-rune/src/main.rs'] },
       { sha: bootstrapSha, message: 'chore: bootstrap', files: [] },
     ];
     for (const commit of history) {

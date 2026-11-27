@@ -17,6 +17,9 @@ permissions:
   contents: read
   pull-requests: read
 
+env:
+  ENGINEROOM_PRODUCT: rune
+
 concurrency:
   group: ci-${{ github.event.pull_request.number || github.ref }}-${{ github.event_name }}
   cancel-in-progress: true

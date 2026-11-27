@@ -5,15 +5,13 @@ const { compareVersions, checkReleaseVersion, checkPublicationVersion } = requir
 function fixture({ base = '2.1.3', next = '2.1.4', releases = [], tag = false } = {}) {
   const pr = {
     base: { ref: 'main', sha: 'base-sha' },
-    head: { ref: 'release-please--branches--main--components--app', sha: 'head-sha' },
+    head: { ref: 'release-please--branches--main--components--engineroom-rune', sha: 'head-sha' },
     user: { login: 'github-actions[bot]' },
   };
   const github = {
     rest: {
       repos: {
-        getContent: async ({ ref }) => ({ data: { content: Buffer.from(JSON.stringify({
-          version: ref === pr.base.sha ? base : next,
-        })).toString('base64') } }),
+        getContent: async ({ ref }) => ({ data: { content: Buffer.from(`[package]\nversion = "${ref === pr.base.sha ? base : next}"\n`).toString('base64') } }),
         listReleases: 'releases',
       },
       git: { getRef: async () => {
@@ -23,7 +21,7 @@ function fixture({ base = '2.1.3', next = '2.1.4', releases = [], tag = false } 
     },
     paginate: async () => releases,
   };
-  return { args: { github, context: { repo: { owner: 'owner', repo: 'app' } } }, pr };
+  return { args: { github, context: { product: 'rune', repo: { owner: 'owner', repo: 'app' } } }, pr };
 }
 
 test('release version comparison is numeric across components', () => {
@@ -79,6 +77,24 @@ test('ordinary PRs need no release API access and API failures fail closed', asy
   await assert.rejects(checkReleaseVersion(f.args, f.pr), /API unavailable/);
 });
 
+test('Rune release PR reads its version from the desktop Cargo.toml', async () => {
+  const { PRODUCTS } = require('./product.cjs');
+  const f = fixture({ base: '3.0.0', next: '3.0.1' });
+  const content = ref => Buffer.from(
+    `[package]\nname = "engineroom"\nversion = "${ref === f.pr.base.sha ? '3.0.0' : '3.0.1'}"\n`
+  ).toString('base64');
+  f.args.github.rest.repos.getContent = async ({ path, ref }) => {
+    assert.equal(path, 'Cargo.toml');
+    return { data: { content: content(ref) } };
+  };
+  await checkReleaseVersion(f.args, f.pr, PRODUCTS.rune);
+
+  f.args.github.rest.repos.getContent = async ({ ref }) => ({
+    data: { content: Buffer.from(`[package]\nversion = "${ref === f.pr.base.sha ? '3.0.0' : '3.0.0'}"\n`).toString('base64') },
+  });
+  await assert.rejects(checkReleaseVersion(f.args, f.pr, PRODUCTS.rune), /maior que/);
+});
+
 test('resuming an old draft cannot replace a newer published stable release', async () => {
   for (const tag_name of ['v2.1.4', 'v2.2.0']) {
     const f = fixture({ releases: [{ tag_name, draft: false, prerelease: false }] });
@@ -90,4 +106,13 @@ test('resuming an old draft cannot replace a newer published stable release', as
     { tag_name: 'main', prerelease: true },
   ] });
   await checkPublicationVersion(f.args, { tag_name: 'v2.1.4' });
+});
+
+test('a stable Rune release can follow its prerelease with the same core version', async () => {
+  const { PRODUCTS } = require('./product.cjs');
+  const f = fixture({ base: '3.0.0', next: '3.0.0' });
+  f.args.github.rest.repos.getContent = async ({ ref }) => ({
+    data: { content: Buffer.from(`[package]\nversion = "${ref === f.pr.base.sha ? '3.0.0-alpha.3' : '3.0.0'}"\n`).toString('base64') },
+  });
+  await checkReleaseVersion(f.args, f.pr, PRODUCTS.rune);
 });

@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "preferences": {
+    "appearance": "Light",
+    "sound": false,
+    "volume": 0.35,
+    "live_engine": false,
+    "feedback": false,
+    "reduced_motion": true,
+    "lines": 5,
+    "threads": 8,
+    "hash_mb": 1024,
+    "search_seconds": 12,
+    "threads_auto": false,
+    "chess_username": "preview_user",
+    "sessions": {
+      "folders": [
+        {
+          "id": "openings",
+          "name": "Aberturas",
+          "color": "violet"
+        }
+      ],
+      "collapsed_folders": ["openings"]
+    }
+  }
+}

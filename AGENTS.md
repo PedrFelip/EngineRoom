@@ -1,61 +1,42 @@
 # AGENTS.md
 
-Tauri 2 desktop app (Rust + React 19) that reviews chess games locally with Stockfish 19. The root `README.md` is the canonical feature/architecture overview. The Rune experiment in `experimental/` is CI-gated (`rune` job in `.github/workflows/checks.yml`: fmt, clippy, workspace tests, headless captures) and will replace the Tauri app — see `docs/rune-migration-plan.md` and `docs/rune-release-plan.md`.
+EngineRoom é um aplicativo desktop Rust/Rune para revisar partidas de xadrez
+localmente com Stockfish 19. O README raiz descreve o produto e os comandos.
 
-## Working directory and setup
+## Desenvolvimento e verificação
 
-- Run frontend/Tauri commands from `app/`; Rust commands from `app/src-tauri/`. Rune experiment commands from `experimental/` (`cargo run --locked`, `./scripts/check-headless.sh`).
-- Real-sidecar session tests call `link_sidecar_beside_test_binary()` first: Rust 1.100+ emits unittest binaries into `target/<profile>/build/<pkg>/<hash>/out/`, and the shell plugin resolves sidecars beside the executable, so the helper links the fetched `binaries/stockfish-<triple>` there at test start. Do not remove it or replace the production `.sidecar("stockfish")` spawn with a fixed path.
-- First setup: `bun install`, then `node scripts/fetch-stockfish.mjs` from `app/`.
-- The gitignored sidecar is `src-tauri/binaries/stockfish-<triple>`. The real Rust session test fails if it cannot spawn the bundled sidecar; do not report it as verified when only the old handshake test skipped.
-- `bun run tauri dev` starts Vite through `beforeDevCommand`; do not start a second Vite on strict port 1420. `bun run dev` alone is browser-only, without the Rust IPC backend.
+Execute os comandos na raiz. Baixe o motor com
+`node scripts/fetch-stockfish.mjs`, depois use `cargo run --locked`.
 
-## Required verification
+Antes de concluir alterações, execute `cargo fmt --all --check`,
+`cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`,
+`cargo test --workspace --locked`, os testes reais de Stockfish com
+`ENGINE_ROOM_STOCKFISH` e `cargo test --locked -p engineroom-rune real_stockfish -- --ignored --test-threads=1`,
+`./scripts/check-headless.sh` e `./scripts/check-responsive.sh`.
+Para automação de release execute `python -m unittest discover -s .github/scripts -p 'test_*.py'`
+e `bun install --frozen-lockfile && bun run test` em `.github/scripts/`.
 
-From `app/`: `bun run lint && bun run typecheck && bun run test`.
-From `app/src-tauri/`: `cargo test`.
+## Arquitetura
 
-- CI runs the app suite on PRs/pushes to main/develop and at the immutable release commit before building installers. Run verification locally too. `typecheck` checks the app and `tsconfig.tests.json`; Vitest transpilation alone does not type-check tests.
-- `bun run test` runs Node downloader tests before Vitest. Downloader: `node --test scripts/fetch-stockfish.test.mjs` from `app/`; real session: `cargo test real_stockfish_sidecar_cache_history_reopen_and_live_cancellation`.
-- Vitest 5 uses `node`, not jsdom, and requires Node >= 22.12 and Vite >= 6.4. Effect 4 test clocks come from `effect/testing` (`TestClock.layer()` replaces the old TestContext). Use direct Effect testing services when needed; any `@effect/vitest` adapter must match Effect 4 and support Vitest 5.
-
-## Architecture and resource ownership
-
-- **Rust owns analysis.** `src-tauri/src/review/` contains the pure chess/scoring/adaptive core, UCI transport, injected pipeline, repository and window-owned session task. Manual, adaptive, live, playback, cache and persistence decisions belong here.
-- Paths in this section are relative to `app/`. Automatic profile budgets live in `src-tauri/src/review/profiles.json`, shared by Rust and TypeScript; do not duplicate them.
-- **EngineFactory/EnginePort and Repository are Rust test seams.** Keep Rust fake-engine tests. Do not hardcode Tauri in the pure core or the pipeline. The shell and SQLite adapters are production implementations.
-- **The engine lease is exclusive.** `ReviewSessions` shares a Rust semaphore between review sessions and Settings probes. Automatic reviews use a bounded mixed queue of Stockfish workers under one shared permit; manual reviews use one process. Automatic workers take the next ready triage position from the shared queue, with one preferring ready hard refinements. Preserve profile budgets and final soft quotas; publish/cache in completion order. Refinements are unrestricted and cacheable; preserve triage lines separately as preliminary evaluations. Divide the total Threads/Hash budgets across workers. An owner holds its permit through completed teardown of every process; never stop another owner's process. After interruption/failure of a live search, kill and await termination before reuse.
-- **Sidecar framing is explicit.** Use `app.shell().sidecar("stockfish")` (basename only), with `set_raw_out(true)` before spawn. The frontend receives structured Channels, never raw UCI stdout. The shared stdout helper preserves partial chunks.
-- **Latest navigation wins.** Session intents carry monotonic request IDs. Updates/cancellations invalidate older live searches, and the session finishes their cleanup before starting the latest. Frontend events carry session ID, sequence and live request ID; reject stale events before applying them to the store.
-- **Close is acknowledged after cleanup.** `review_session_close` is idempotent. Window destruction signals cancellation; app exit waits for session cleanup. Scoped frontend acquisition must finish before honoring interruption, then close the acquired session. Track outstanding blocking DB operations and drain them at session close.
-- **UI state remains separate.** `review-store.ts` owns navigation/variation transitions. `review-session.ts` and `effect/ui-runtime.ts` are scoped IPC/store glue over the injected `AnalysisSessions` Context service. Keep I/O out of React. UI methods enqueue intent synchronously; asynchronous IPC runs inside their scope.
-- **Use Effect at frontend I/O boundaries**, tagged errors and Schema validation for IPC/settings. Execute Effects at the UI/test boundary. Cancellation must not appear as an analysis error. Critical cache errors propagate; resource sizing and history saves are best-effort.
-- **PGN is the metadata source.** Rust revalidates the mainline, respects FEN setup, derives metadata for saving and normalizes old review JSON when reopening. Keep PGN Elo/event out of new DB/settings fields. Existing historical summary fields are retained for compatibility. `chess.js` remains for import preview and board/variation interactions.
-- **Chess.com HTTP stays in Rust** (`src-tauri/src/imports/`); the webview CSP disallows external connections. Searches use window-owned tasks and Channels through `chess-com-import.ts`; `chess-com-import-controller.ts` serializes new requests behind acknowledged cancellation and rejects stale results. Keep network limits and validation in the backend, not React.
-
-## Cache and persistence
-
-- The current DB PK is `(fen, reached_depth, multipv)`, with `source_mode` and `source_value`. Depth requests accept reached depth >= requested depth (including time entries); time requests only accept time entries with budget >= requested budget. Both require sufficient MultiPV. Preserve the current covering SQL; numeric time/depth budgets are not interchangeable.
-- Cache prefetch uses bulk queries; writes flush every eight completed positions and at the end. Corrupt JSON becomes a miss; actual SQLite I/O failure remains fatal. Failure flush is best-effort and must preserve the original error.
-- The Rust session publishes completion before best-effort history save and owns that save through teardown. Preserve saved JSON compatibility and normalization on reopen.
-- `db::open_file` applies migrations every startup. Future migrations must be idempotent and gated on `PRAGMA table_info`, following existing helpers. SQLite is `engineroom.db` in `app_data_dir`.
-
-## UI/style gotchas
-
-- Theme is applied pre-paint in `app/index.html` using `localStorage["engineroom.settings.v1"]`; never move it into a React effect.
-- `bun run lint` / `format` only cover `app/src`; they do not check downloader scripts or root docs. Formatting is defined in `app/biome.json`; use `cargo fmt` for Rust.
-- Distribution is GPL-3.0-or-later, as approved for linked shakmaty/pgn-reader dependencies. Preserve `LICENSE` and third-party notices in bundled resources.
-
-## Tauri IPC
-
-Session commands: `review_session_open`, `review_session_analyze_position`, `review_session_cancel_live`, `review_session_close`, `engine_probe`, `games_get_review_config`.
-Existing cache/history/storage/system commands remain registered for administration and compatibility. Raw engine spawn/send/stop commands are no longer public. UCI benchmark commands are restricted to `--bench-uci-ipc` and describe the historical transport, not the new session.
-`bun run bench:rust` measures the Rust fake-engine pipeline in release mode. It excludes Stockfish, IPC and rendering; do not present those figures as end-to-end game speedups.
+- O domínio, os perfis, a pontuação, o pipeline, as portas, as sessões e o
+  controle de recursos ficam em `crates/engineroom-application`. Use engines
+  falsas nos testes.
+- `crates/engineroom-uci` gerencia Stockfish e seu ciclo de vida.
+  O lease é exclusivo e só é liberado após encerrar e aguardar os processos.
+  A navegação mais recente invalida buscas ao vivo anteriores.
+- `crates/engineroom-sqlite` mantém cache, histórico e migrações idempotentes.
+  Preserve consultas de cobertura, tratamento de corrupção e erros de I/O.
+- O aplicativo Rune fica em `crates/engineroom-rune/src`, com manifesto na raiz.
+  I/O e tarefas pertencem às portas e à bridge, não aos componentes visuais.
+  Chess.com usa HTTP nativo com limites e cancelamento no backend.
+- O sidecar baixado fica em `binaries/stockfish-<triple>`. Os pacotes o
+  colocam ao lado do executável. Não inclua binários baixados no Git.
+- Preserve `LICENSE`, `RUNE-LICENSE.txt` e avisos de terceiros nos pacotes.
 
 ## Releases
 
-- Keep versions synchronized in package.json, tauri.conf.json, Cargo.toml and the local app entry in Cargo.lock. `.github/scripts/release_version.py` enforces this; Release Please updates all four in its version PR.
-- Use feature/fix PRs into `develop` with Conventional Commit titles and squash merges. Promote `develop` to `main` with merge commits; preserve history when merging the automatic `main` → `develop` synchronization PR. Hotfix PRs may target main directly.
-- Merging the Release Please PR creates a draft; tests and all Linux/Windows installer builds must pass before automatic publication. Manual dispatch from main resumes an existing tag; tag pushes and manual version bumps do not independently publish releases. See `docs/releases.md`.
-- Workflows use `GITHUB_TOKEN` and explicitly dispatch CI for bot PRs. Keep the `CI passed` branch-protection check and its terminal gate that fails on skipped/failed dependencies.
-- From the root: `python -m unittest discover -s .github/scripts -p 'test_*.py'` (Python 3.11+). From `.github/scripts/`: `bun install --frozen-lockfile && bun run test`; the pinned Release Please library must match the pinned action.
+Use PRs Conventional Commit para `develop` e squash merge. Promova `develop`
+para `main` com merge commit. O Release Please cria um draft e a publicação
+exige checks e instaladores AppImage e NSIS verificados no commit da tag.
+Mantenha o gate terminal `CI passed`. A retomada manual usa uma tag existente.
+Detalhes em `docs/releases.md`.
