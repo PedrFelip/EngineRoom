@@ -1,4 +1,4 @@
-// Strobe cases for the deterministic parts of the review pipeline.
+// Strobe cases for the deterministic review pipeline and ReviewSessions schedulers.
 //   bunx strobe bench perf/pipeline.bench.ts --head . --check
 //   bunx strobe bench perf/pipeline.bench.ts --aa --head . --pairs 8
 // The harnesses use the production Pipeline / ReviewSessions with the fake
@@ -165,6 +165,34 @@ export default bench({
       primary: "cpu.work",
       metrics: sessionsMetrics,
       run: (ctx) => ctx.exec(sessionsCmd("session-lifecycle")),
+    },
+    "automatic-pipeline": {
+      targets: ["pipeline"],
+      primary: "cpu.work",
+      metrics: [
+        "run.duration",
+        "metric.positions",
+        "metric.cached",
+        "metric.searched",
+        "metric.searches",
+        "metric.searches_before_live",
+        "metric.live_before_completed",
+      ],
+      run: (ctx) => ctx.exec(command("automatic-pipeline")),
+    },
+    "automatic-native": {
+      targets: ["pipeline"],
+      primary: "cpu.work",
+      metrics: [
+        "run.duration",
+        "metric.positions",
+        "metric.cached",
+        "metric.searched",
+        "metric.searches",
+        "metric.searches_before_live",
+        "metric.live_before_completed",
+      ],
+      run: (ctx) => ctx.exec(command("automatic-native")),
     },
   },
 })

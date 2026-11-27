@@ -34,6 +34,14 @@ async fn unrestricted_refinement_discovers_new_root_and_keeps_triage_separate() 
             .review(&config(pgn, AnalysisKind::Fast), None, &cancel, &mut |_| {})
             .await
             .unwrap();
+        let evidence = review.moves[0].decision_evidence.unwrap();
+        assert_eq!(evidence.before_ply, 0);
+        assert!(evidence.best_move_available);
+        assert_eq!(evidence.played_move_value_ply, 1);
+        assert_eq!(
+            review.moves[0].best_uci.as_ref(),
+            review.positions[0].pv.first()
+        );
         if refined_depth < 10 {
             assert_eq!(review.moves[0].best_uci.as_deref(), Some("a1a2"));
             assert_eq!(review.positions[0].depth, 10);

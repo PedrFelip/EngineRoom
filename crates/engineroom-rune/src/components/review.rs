@@ -618,6 +618,20 @@ fn moves_panel(s: &State, k: &Kit) -> El {
     if s.real_result.is_some() {
         content = content.child(learning(s, k));
     }
+    if s.active_variation.is_none()
+        && let Some(verification) = s
+            .ply
+            .checked_sub(1)
+            .and_then(|index| s.real_result.as_ref()?.moves.get(index))
+            .and_then(|decision| decision.critical_verification.as_ref())
+        && !verification.pending_plies.is_empty()
+    {
+        content = content.child(
+            rune::text("Verificação crítica incompleta para este lance.")
+                .font(k.ty.ui_medium)
+                .color(k.c.text_base),
+        );
+    }
     content = content.child(move_list(s, k));
     content
 }
@@ -797,6 +811,27 @@ fn toolbar(s: &State, k: &Kit, compact: bool) -> El {
         .children(compact.then_some(tabs))
         .child(engine_toggle(s, k))
 }
+static DOWNLOAD: Icon = Icon {
+    name: "download",
+    view: 16.0,
+    body: r#"<path d="M8 2v8m-3-3 3 3 3-3M3 11v2h10v-2" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>"#,
+};
+
+fn export_button(s: &State, k: &Kit) -> El {
+    ui::icon_feedback(
+        IconButton::new(&DOWNLOAD)
+            .variant(IconButtonVariant::GhostMuted)
+            .control_size(ControlSize::ExtraLarge)
+            .label("Exportar PGN anotado")
+            .help("Exportar PGN anotado")
+            .disabled(s.bridge.is_none() || s.export_busy())
+            .build(k),
+        k,
+    )
+    .key("export-annotated-pgn")
+    .on_press(State::export_pgn)
+}
+
 pub fn view(s: &State, k: &Kit, layout: Layout, layers: &mut Vec<El>) -> El {
     review_analysis::dialog(s, k, layers);
     let mut choices = col().gap(8.0);
@@ -838,6 +873,17 @@ pub fn view(s: &State, k: &Kit, layout: Layout, layers: &mut Vec<El>) -> El {
         .on_close(|s: &mut State| s.promotion_pending = None)
         .child(choices.padding(16.0))
         .build(k, layers);
+    let subtitle = if s.export_in_progress() {
+        ui::label("Exportando PGN…", 12.0, k.c.text_muted).role("status")
+    } else if matches!(s.export_outcome(), Some(Ok(()))) {
+        ui::label("PGN anotado salvo.", 12.0, k.c.success.fg).role("status")
+    } else {
+        ui::label(
+            format!("{} · {} meios-lances", s.game.event, s.game.moves.len()),
+            12.0,
+            k.c.text_muted,
+        )
+    };
     let header = row()
         .min_h(layout.header_height())
         .px(16.0)
@@ -857,19 +903,12 @@ pub fn view(s: &State, k: &Kit, layout: Layout, layers: &mut Vec<El>) -> El {
                     .truncate()
                     .w_full(),
                 )
-                .child(
-                    ui::label(
-                        format!("{} · {} meios-lances", s.game.event, s.game.moves.len()),
-                        12.0,
-                        k.c.text_muted,
-                    )
-                    .truncate()
-                    .w_full(),
-                ),
+                .child(subtitle.truncate().w_full()),
         )
         .children(
             (layout.stacked_review() || !s.review_sidebar.is_open()).then(|| panel_toggle(s, k)),
         )
+        .children(s.can_export_pgn().then(|| export_button(s, k)))
         .child(
             ui::button("review-settings", "⋯", k)
                 .label("Configurar análise")
@@ -923,6 +962,21 @@ pub fn view(s: &State, k: &Kit, layout: Layout, layers: &mut Vec<El>) -> El {
         .min_h(0.0)
         .w_full()
         .child(header)
+        .children(s.export_outcome().and_then(|outcome| {
+            let error = outcome.as_ref().err()?;
+            Some(
+                ui::label(
+                    format!("Não foi possível salvar o PGN. {error}"),
+                    12.0,
+                    k.c.danger.fg,
+                )
+                .key("pgn-export-error")
+                .role("alert")
+                .wrap()
+                .px(16.0)
+                .py(4.0),
+            )
+        }))
         .children(
             (layout.stacked_review() || !s.review_sidebar.is_open())
                 .then(|| toolbar(s, k, layout.stacked_review() && s.review_sidebar.is_open())),

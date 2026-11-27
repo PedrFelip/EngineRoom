@@ -1,15 +1,40 @@
 use super::{
-    adaptive, core,
+    adaptive,
+    automatic::{LiveDemand, scheduler::fen_key},
+    contextual::ContextualReview,
+    core,
     engine::{self, Cancellation, EngineFactory},
     repository::Repository,
     scoring,
     types::*,
 };
 use crate::db::mode::Mode;
-use std::sync::Arc;
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
+use tokio::sync::{mpsc, oneshot, watch};
 
 mod owned_engine;
 use owned_engine::{EngineSettings, OwnedEngine};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum NativePhase {
+    Running,
+    Ready,
+    Failed,
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct NativeLiveClient<'a> {
+    pub demands: &'a mpsc::Sender<LiveDemand>,
+    pub phase: &'a watch::Receiver<NativePhase>,
+}
+
+enum NativeOutcome {
+    Evaluated(RawPosition),
+    FallbackToOwnedEngine,
+}
 
 pub struct Pipeline {
     engine: OwnedEngine,
@@ -23,6 +48,12 @@ impl Pipeline {
             repository,
             detected: None,
         }
+    }
+    pub(super) fn factory_arc(&self) -> Arc<dyn EngineFactory> {
+        self.engine.factory_arc()
+    }
+    pub(super) fn repository_arc(&self) -> Arc<dyn Repository> {
+        self.repository.clone()
     }
     /// Awaits engine teardown without draining repository work.
     pub async fn discard(&mut self) {
@@ -66,13 +97,47 @@ impl Pipeline {
             config.engine.depth
         };
         let multipv = config.lines;
+        let context = self
+            .engine
+            .factory()
+            .artifact_signature()
+            .await?
+            .map(|signature| ContextualReview::new(&game, &signature, sizing));
+        cancel.check()?;
+        let mut contextual_pending = Vec::new();
         let mut pending = Vec::new();
+        let mut evidence = vec![None; game.fens.len()];
         let run = async {
-            let hits = cancellable(
-                self.repository.lookup(&game.fens, mode, value, multipv),
-                cancel,
-            )
-            .await?;
+            let hits = if let Some(context) = &context {
+                let indexes: Vec<_> = (0..game.fens.len()).collect();
+                cancellable(
+                    Box::pin(context.lookup(
+                        self.repository.as_ref(),
+                        &indexes,
+                        mode,
+                        value,
+                        multipv,
+                    )),
+                    cancel,
+                )
+                .await?
+                .into_iter()
+                .enumerate()
+                .map(|(i, hit)| {
+                    hit.map(|mut hit| {
+                        hit.evidence.origin = EvidenceOrigin::Cache;
+                        evidence[i] = Some(hit.evidence);
+                        hit.raw
+                    })
+                })
+                .collect()
+            } else {
+                cancellable(
+                    self.repository.lookup(&game.fens, mode, value, multipv),
+                    cancel,
+                )
+                .await?
+            };
             if hits.len() != game.fens.len() {
                 return Err(ReviewError::new(
                     ReviewErrorCode::Cache,
@@ -85,39 +150,100 @@ impl Pipeline {
                 .iter()
                 .map(core::terminal_position)
                 .collect::<Vec<_>>();
-            let mut remaining = hits
+            let position_key = |i: usize| (context.as_ref().map(|_| i), fen_key(&game.fens[i]));
+            let mut evaluations: HashMap<_, _> = game
+                .fens
                 .iter()
                 .zip(&terminals)
-                .filter(|(h, t)| h.is_none() && t.is_none())
-                .count();
+                .zip(hits)
+                .enumerate()
+                .filter_map(|(i, ((_, terminal), hit))| {
+                    terminal
+                        .is_none()
+                        .then_some(hit)
+                        .flatten()
+                        .map(|raw| (position_key(i), raw))
+                })
+                .collect();
+            let mut remaining = game
+                .fens
+                .iter()
+                .zip(&terminals)
+                .enumerate()
+                .filter_map(|(i, (_, terminal))| terminal.is_none().then_some(position_key(i)))
+                .filter(|key| !evaluations.contains_key(key))
+                .collect::<HashSet<_>>()
+                .len();
             let mut raw = Vec::new();
             let mut cached = 0;
             let mut searched = 0;
-            for (i, (fen, hit)) in game.fens.iter().zip(hits).enumerate() {
+            for (i, fen) in game.fens.iter().enumerate() {
                 cancel.check()?;
                 let pos = if let Some(cp) = terminals[i] {
-                    core::terminal_raw(fen, cp)
-                } else if let Some(hit) = hit {
+                    let raw = core::terminal_raw(fen, cp);
+                    if context.is_some() {
+                        evidence[i] = Some(PositionEvidence::from_raw(
+                            &raw,
+                            Some(i),
+                            EvidenceOrigin::Terminal,
+                            None,
+                            None,
+                        ));
+                    }
+                    raw
+                } else if let Some(hit) = evaluations.get(&position_key(i)) {
                     cached += 1;
-                    hit
+                    let mut pos = hit.clone();
+                    pos.fen.clone_from(fen);
+                    pos
                 } else {
-                    let (threads, memory) = sizing.unwrap_or((1, 16));
+                    let (threads, memory_mb) = sizing.unwrap_or((1, 16));
                     let port = self
                         .engine
                         .ensure(
                             EngineSettings {
                                 threads,
-                                memory_mb: memory,
+                                memory_mb,
                                 multipv,
                             },
                             cancel,
                         )
                         .await?;
-                    let mut pos =
+                    let mut pos = if context.is_some() {
+                        let context = ContextualReview::position(&game, i)?;
+                        engine::evaluate_position(
+                            port,
+                            Some(&context.initial_fen),
+                            &context.uci_path,
+                            fen,
+                            mode,
+                            value,
+                            timeout(mode, value),
+                            cancel,
+                        )
+                        .await?
+                    } else {
                         engine::evaluate(port, fen, mode, value, timeout(mode, value), cancel)
-                            .await?;
+                            .await?
+                    };
                     core::add_san(&mut pos);
-                    pending.push(pos.clone());
+                    evaluations.insert(position_key(i), pos.clone());
+                    if let Some(context) = &context {
+                        let entry = context.entry(
+                            i,
+                            &pos,
+                            self.engine.identity(),
+                            EvidenceBudget {
+                                mode,
+                                value,
+                                multipv,
+                            },
+                        );
+                        evidence[i] = Some(entry.evidence.clone());
+                        contextual_pending.push(entry);
+                    } else {
+                        pending.push(pos.clone());
+                    }
                     searched += 1;
                     remaining -= 1;
                     pos
@@ -143,10 +269,22 @@ impl Pipeline {
                     },
                 });
                 raw.push(pos);
+                if contextual_pending.len() >= 8 {
+                    self.repository
+                        .put_context(&contextual_pending, mode, value)
+                        .await?;
+                    contextual_pending.clear();
+                }
                 if pending.len() >= 8 {
                     self.repository.put(&pending, mode, value, multipv).await?;
                     pending.clear();
                 }
+            }
+            if !contextual_pending.is_empty() {
+                self.repository
+                    .put_context(&contextual_pending, mode, value)
+                    .await?;
+                contextual_pending.clear();
             }
             if !pending.is_empty() {
                 self.repository.put(&pending, mode, value, multipv).await?;
@@ -166,7 +304,11 @@ impl Pipeline {
                     update: None,
                 },
             });
-            core::build(&game, &raw)
+            let mut result = core::build(&game, &raw)?;
+            for (position, evidence) in result.positions.iter_mut().zip(evidence) {
+                position.evidence = evidence;
+            }
+            Ok(result)
         }
         .await;
         self.discard().await;
@@ -176,13 +318,65 @@ impl Pipeline {
         {
             emit(Event::Warning { error });
         }
+        if run.is_err()
+            && !contextual_pending.is_empty()
+            && let Err(error) = self
+                .repository
+                .put_context(&contextual_pending, mode, value)
+                .await
+        {
+            emit(Event::Warning { error });
+        }
         run
+    }
+    async fn evaluate_owned_live(
+        &mut self,
+        fen: &str,
+        value: u32,
+        multipv: u32,
+        settings: &LiveSettings,
+        cancel: &Cancellation,
+    ) -> Result<RawPosition> {
+        let (threads, memory) = if settings.threads_auto {
+            self.detected
+                .unwrap_or((settings.threads, settings.memory_mb))
+        } else {
+            (settings.threads, settings.memory_mb)
+        };
+        let port = self
+            .engine
+            .ensure(
+                EngineSettings {
+                    threads,
+                    memory_mb: memory,
+                    multipv,
+                },
+                cancel,
+            )
+            .await?;
+        let mut result =
+            engine::evaluate(port, fen, Mode::Time, value, value as u64 + 10000, cancel).await;
+        if result
+            .as_ref()
+            .is_err_and(|e| e.code == ReviewErrorCode::MissingEvaluation)
+        {
+            engine::ask(port, "isready", "readyok", 10000, cancel).await?;
+            result =
+                engine::evaluate(port, fen, Mode::Time, value, value as u64 + 10000, cancel).await;
+        }
+        let mut raw = result?;
+        core::add_san(&mut raw);
+        self.repository
+            .put(std::slice::from_ref(&raw), Mode::Time, value, multipv)
+            .await?;
+        Ok(raw)
     }
     async fn analyze_fen(
         &mut self,
         fen: &str,
         settings: &LiveSettings,
         cancel: &Cancellation,
+        native: Option<NativeLiveClient<'_>>,
     ) -> Result<PositionAnalysis> {
         cancel.check()?;
         let value = if settings.fast_pass {
@@ -204,43 +398,45 @@ impl Pipeline {
         cancel.check()?;
         let raw = if let Some(hit) = hits.into_iter().next().flatten() {
             hit
+        } else if fen.contains(['\r', '\n']) {
+            return Err(ReviewError::new(
+                ReviewErrorCode::InvalidPgn,
+                "review.live",
+                "FEN inválido.",
+            ));
         } else if let Some(cp) = core::terminal(fen)? {
             core::terminal_raw(fen, cp)
-        } else {
-            let (threads, memory) = if settings.threads_auto {
-                self.detected
-                    .unwrap_or((settings.threads, settings.memory_mb))
-            } else {
-                (settings.threads, settings.memory_mb)
-            };
-            let port = self
-                .engine
-                .ensure(
-                    EngineSettings {
-                        threads,
-                        memory_mb: memory,
-                        multipv,
-                    },
-                    cancel,
-                )
-                .await?;
-            let mut result =
-                engine::evaluate(port, fen, Mode::Time, value, value as u64 + 10000, cancel).await;
-            if result
-                .as_ref()
-                .is_err_and(|e| e.code == ReviewErrorCode::MissingEvaluation)
-            {
-                engine::ask(port, "isready", "readyok", 10000, cancel).await?;
-                result =
-                    engine::evaluate(port, fen, Mode::Time, value, value as u64 + 10000, cancel)
-                        .await;
+        } else if let Some(client) = native {
+            match request_native_live(client, fen, value, multipv, cancel).await? {
+                NativeOutcome::Evaluated(mut raw) => {
+                    if raw
+                        .lines
+                        .iter()
+                        .any(|line| line.san.is_none() && !line.pv.is_empty())
+                    {
+                        core::add_san(&mut raw);
+                    }
+                    raw
+                }
+                NativeOutcome::FallbackToOwnedEngine => {
+                    let flushed = cancellable(
+                        self.repository
+                            .lookup(&[fen.into()], Mode::Time, value, multipv),
+                        cancel,
+                    )
+                    .await?;
+                    cancel.check()?;
+                    if let Some(hit) = flushed.into_iter().next().flatten() {
+                        hit
+                    } else {
+                        self.evaluate_owned_live(fen, value, multipv, settings, cancel)
+                            .await?
+                    }
+                }
             }
-            let mut raw = result?;
-            core::add_san(&mut raw);
-            self.repository
-                .put(std::slice::from_ref(&raw), Mode::Time, value, multipv)
-                .await?;
-            raw
+        } else {
+            self.evaluate_owned_live(fen, value, multipv, settings, cancel)
+                .await?
         };
         cancel.check()?;
         let mut analysis = core::position_analysis(&raw, 0, core::phase(fen));
@@ -266,12 +462,25 @@ impl Pipeline {
         cancel: &Cancellation,
         emit: &mut (dyn FnMut(Event) + Send),
     ) -> Result<()> {
+        self.live_with_native(request, settings, cancel, None, emit)
+            .await
+    }
+    pub(super) async fn live_with_native(
+        &mut self,
+        request: &LiveRequest,
+        settings: &LiveSettings,
+        cancel: &Cancellation,
+        native: Option<NativeLiveClient<'_>>,
+        emit: &mut (dyn FnMut(Event) + Send),
+    ) -> Result<()> {
         let run = async {
             cancel.check()?;
             emit(Event::LiveStarted {
                 fen: request.fen.clone(),
             });
-            let after = self.analyze_fen(&request.fen, settings, cancel).await?;
+            let after = self
+                .analyze_fen(&request.fen, settings, cancel, native)
+                .await?;
             let after_cp = after.cp;
             if settings.move_feedback_enabled
                 && let (Some(id), Some(source_fen)) =
@@ -286,7 +495,11 @@ impl Pipeline {
                 } else if *source_fen == request.fen {
                     Some(after_cp)
                 } else if !settings.fast_pass {
-                    Some(self.analyze_fen(source_fen, settings, cancel).await?.cp)
+                    Some(
+                        self.analyze_fen(source_fen, settings, cancel, native)
+                            .await?
+                            .cp,
+                    )
                 } else {
                     None
                 };
@@ -333,4 +546,50 @@ pub(super) async fn cancellable<T>(
     cancel: &Cancellation,
 ) -> Result<T> {
     tokio::select! { _ = cancel.cancelled() => Err(ReviewError::cancelled()), result = task => result }
+}
+
+async fn request_native_live(
+    client: NativeLiveClient<'_>,
+    fen: &str,
+    value: u32,
+    multipv: u32,
+    cancel: &Cancellation,
+) -> Result<NativeOutcome> {
+    match *client.phase.borrow() {
+        NativePhase::Ready => return Ok(NativeOutcome::FallbackToOwnedEngine),
+        NativePhase::Failed => return Err(ReviewError::cancelled()),
+        NativePhase::Running => {}
+    }
+    let (reply, rx) = oneshot::channel();
+    let demand = LiveDemand {
+        fen: fen.to_owned(),
+        value,
+        multipv,
+        reply,
+    };
+    let sent = tokio::select! {
+        _ = cancel.cancelled() => return Err(ReviewError::cancelled()),
+        result = client.demands.send(demand) => result.is_ok(),
+    };
+    if sent {
+        let received = tokio::select! {
+            _ = cancel.cancelled() => return Err(ReviewError::cancelled()),
+            result = rx => result,
+        };
+        if let Ok(result) = received {
+            return result.map(NativeOutcome::Evaluated);
+        }
+    }
+    cancel.check()?;
+    let mut phase = client.phase.clone();
+    let settled = tokio::select! {
+        _ = cancel.cancelled() => return Err(ReviewError::cancelled()),
+        result = phase.wait_for(|current| *current != NativePhase::Running) => {
+            result.map(|current| *current).unwrap_or(NativePhase::Failed)
+        }
+    };
+    match settled {
+        NativePhase::Ready => Ok(NativeOutcome::FallbackToOwnedEngine),
+        NativePhase::Failed | NativePhase::Running => Err(ReviewError::cancelled()),
+    }
 }

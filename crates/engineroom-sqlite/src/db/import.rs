@@ -74,7 +74,15 @@ pub fn import_legacy(
                 (fen, reached_depth, multipv, source_mode, source_value, cp, lines_json)
              SELECT fen, reached_depth, multipv, source_mode, source_value, cp, lines_json
              FROM legacy.position_cache WHERE true
-             ON CONFLICT(fen, reached_depth, multipv) DO NOTHING;",
+             ON CONFLICT(fen, reached_depth, multipv) DO NOTHING;
+
+             INSERT INTO main.evidence_cache
+                (context_key, reached_depth, multipv, source_mode, source_value,
+                 cp, lines_json, payload_json, created_at)
+             SELECT context_key, reached_depth, multipv, source_mode, source_value,
+                    cp, lines_json, payload_json, created_at
+             FROM legacy.evidence_cache WHERE true
+             ON CONFLICT(context_key, reached_depth, multipv) DO NOTHING;",
         )?;
     }
     transaction.commit()?;
@@ -86,8 +94,9 @@ mod tests {
     use super::*;
     use crate::{
         db::{cache::Cache, games::Store, mode::Mode},
-        review::{core, repository::SqliteRepository},
+        review::repository::SqliteRepository,
     };
+    use engineroom_application::review::core;
 
     #[tokio::test]
     async fn imports_committed_wal_and_legacy_schema_without_replacing_preview_history() {
@@ -104,6 +113,16 @@ mod tests {
                     PRIMARY KEY (fen, depth, multipv)
                  );
                  INSERT INTO position_cache VALUES ('legacy-fen', 20, 1, 35, '[]');
+                 CREATE TABLE evidence_cache (
+                    context_key TEXT NOT NULL, reached_depth INTEGER NOT NULL,
+                    multipv INTEGER NOT NULL, source_mode TEXT NOT NULL,
+                    source_value INTEGER NOT NULL, cp INTEGER NOT NULL,
+                    lines_json TEXT NOT NULL, payload_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    PRIMARY KEY (context_key, reached_depth, multipv)
+                 );
+                 INSERT INTO evidence_cache VALUES
+                    ('context', 20, 1, 'depth', 20, 35, '[]', '{}', '2025-01-01');
                  CREATE TABLE games (
                     id INTEGER PRIMARY KEY AUTOINCREMENT, pgn TEXT NOT NULL,
                     white TEXT NOT NULL, black TEXT NOT NULL, result TEXT NOT NULL,
@@ -175,6 +194,14 @@ mod tests {
             .expect("reopen the imported analysis")
             .expect("imported analysis exists");
         assert_eq!(reopened.pgn, pgn);
+        let evidence_count: i64 = destination
+            .query_row(
+                "SELECT count(*) FROM evidence_cache WHERE context_key = 'context'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("read migrated evidence");
+        assert_eq!(evidence_count, 1);
         assert!(legacy.prepare("SELECT depth FROM position_cache").is_ok());
 
         Store::new(&destination).clear().expect("clear history");

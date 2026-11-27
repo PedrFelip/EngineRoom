@@ -24,7 +24,7 @@ static CHECK: Icon = Icon {
     ),
 };
 pub fn view(s: &State, k: &Kit) -> El {
-    if s.real_result.is_none() || !s.preferences.live_engine {
+    if !s.live_ready() || !s.preferences.live_engine {
         return col()
             .gap(14.0)
             .child(ui::label(

@@ -18,9 +18,9 @@ e `bun install --frozen-lockfile && bun run test` em `.github/scripts/`.
 
 ## Arquitetura
 
-- O domínio, os perfis e a pontuação ficam em `crates/engineroom-domain`.
-  Pipeline, portas, sessões e controle de recursos ficam em
-  `crates/engineroom-application`. Use engines falsas nos testes.
+- O domínio, os perfis, a pontuação, o pipeline, as portas, as sessões e o
+  controle de recursos ficam em `crates/engineroom-application`. Use engines
+  falsas nos testes.
 - `crates/engineroom-uci` gerencia Stockfish e seu ciclo de vida.
   O lease é exclusivo e só é liberado após encerrar e aguardar os processos.
   A navegação mais recente invalida buscas ao vivo anteriores.

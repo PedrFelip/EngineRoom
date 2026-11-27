@@ -3,8 +3,8 @@ use crate::db::{
     cache::{Cache, CachedPositionPut},
     mode::Mode,
 };
-use crate::review::{core, repository};
-use engineroom_application::review::{scoring, types::*};
+use crate::review::repository;
+use engineroom_application::review::{core, scoring, types::*};
 
 #[test]
 fn cache_rejects_incomplete_duplicate_or_missing_principal_slots() {

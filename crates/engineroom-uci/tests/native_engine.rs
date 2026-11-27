@@ -144,3 +144,56 @@ async fn blocked_stdin_times_out_and_cancels_without_blocking_runtime() {
     next.shutdown().await;
     std::fs::remove_file(path).expect("remove fixture");
 }
+
+#[tokio::test]
+#[ignore = "requires ENGINE_ROOM_STOCKFISH pointing to a real Stockfish executable"]
+async fn real_native_stockfish_checkpoint_precedes_completion_and_cancel_releases_lease() {
+    let path = std::env::var_os("ENGINE_ROOM_STOCKFISH")
+        .expect("set ENGINE_ROOM_STOCKFISH to an executable Stockfish path");
+    let factory = NativeEngineFactory::new(path.into());
+    let (close, active) = cancel();
+    let mut port = factory.acquire(&active).await.expect("spawn Stockfish");
+    configure(port.as_mut(), Some(1), Some(16), 3, &active)
+        .await
+        .expect("configure Stockfish");
+    let fen = core::fen(&shakmaty::Chess::default());
+    let (publish, mut observed) = SearchCheckpoints::channel(3);
+    let result = {
+        let search =
+            evaluate_with_checkpoints(port.as_mut(), &fen, None, 15_000, 20_000, &active, publish);
+        tokio::pin!(search);
+        tokio::select! {
+            biased;
+            result = &mut search => panic!("search completed before observing a checkpoint: {result:?}"),
+            changed = tokio::time::timeout(Duration::from_secs(5), observed.changed()) => {
+                changed.expect("Stockfish checkpoint deadline").expect("active checkpoint channel");
+            }
+        }
+        {
+            let latest = observed.borrow_and_update();
+            let checkpoint = latest.as_ref().expect("completed MultiPV iteration");
+            assert!(checkpoint.time_ms.is_some());
+            assert!(checkpoint.nodes.is_some_and(|nodes| nodes > 0));
+            assert_eq!(checkpoint.lines.len(), 3);
+            for (index, line) in checkpoint.lines.iter().enumerate() {
+                assert_eq!(line.multipv as usize, index + 1);
+                assert_eq!(line.depth, Some(checkpoint.depth));
+            }
+        }
+        close.send_replace(true);
+        search.await
+    };
+    assert_eq!(result.unwrap_err().code, ReviewErrorCode::Cancelled);
+    let (_close, fresh) = cancel();
+    let probe = tokio::time::timeout(Duration::from_millis(30), factory.acquire(&fresh)).await;
+    assert!(
+        probe.is_err(),
+        "acquiring must time out while the cancelled search still owns its child and lease"
+    );
+    port.shutdown().await;
+    let mut next = tokio::time::timeout(Duration::from_secs(5), factory.acquire(&fresh))
+        .await
+        .expect("release lease after shutdown")
+        .expect("spawn after cancellation");
+    next.shutdown().await;
+}

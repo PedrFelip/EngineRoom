@@ -1,4 +1,5 @@
 pub mod cache;
+pub mod evidence;
 pub mod games;
 mod import;
 mod migrations;

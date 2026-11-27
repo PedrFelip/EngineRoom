@@ -104,6 +104,13 @@ pub fn validate_review(review: &ReviewResult) -> Result<()> {
         && review.positions.iter().enumerate().all(|(i, p)| {
             p.ply == i
                 && p.win_pct.is_finite()
+                && p.evidence.as_ref().is_none_or(|evidence| {
+                    evidence.observed_lines <= p.lines.len()
+                        && match evidence.scope {
+                            EvidenceScope::Mainline => evidence.history_ply == Some(i),
+                            EvidenceScope::FenOnly => evidence.history_ply.is_none(),
+                        }
+                })
                 && p.lines
                     .iter()
                     .chain(p.triage_lines.iter().flatten())
@@ -112,6 +119,20 @@ pub fn validate_review(review: &ReviewResult) -> Result<()> {
         && review.moves.iter().enumerate().all(|(i, m)| {
             m.played.ply == i + 1
                 && matches!(m.played.color.as_str(), "w" | "b")
+                && m.decision_evidence.is_none_or(|evidence| {
+                    evidence.before_ply == i
+                        && evidence.played_move_value_ply == i + 1
+                        && evidence.best_move_available == m.best_uci.is_some()
+                        && m.best_uci
+                            .as_ref()
+                            .is_none_or(|best| review.positions[i].pv.first() == Some(best))
+                })
+                && m.critical_verification.as_ref().is_none_or(|verification| {
+                    verification
+                        .pending_plies
+                        .iter()
+                        .all(|&ply| ply == i || ply == i + 1)
+                })
                 && [m.win_pct_before, m.win_pct_after, m.win_pct_loss, m.cp_loss]
                     .iter()
                     .all(|v| v.is_finite())

@@ -6,7 +6,7 @@ license = "GPL-3.0-or-later"
 publish = false
 
 [dependencies]
-engineroom-domain = { path = "../engineroom-domain" }
+blake3 = "1"
 tokio = { version = "1", features = ["process", "io-util", "sync", "macros", "rt"] }
 engineroom-application = { path = "../engineroom-application" }
 

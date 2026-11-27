@@ -32,14 +32,15 @@ async fn cache_advertises_only_produced_lines_and_their_common_depth() {
             .is_some()
     );
     for (multipv, depth, root) in [(2, 12, "d2d4"), (3, 15, "g1f3")] {
-        raw.lines.push(crate::review::types::RawLine {
-            multipv,
-            depth: Some(depth),
-            cp: 10,
-            pv: vec![root.into()],
-            san: None,
-            unstable: false,
-        });
+        raw.lines
+            .push(engineroom_application::review::types::RawLine {
+                multipv,
+                depth: Some(depth),
+                cp: 10,
+                pv: vec![root.into()],
+                san: None,
+                unstable: false,
+            });
     }
     repo.put(&[raw.clone()], Mode::Time, 1000, 3).await.unwrap();
     assert!(
@@ -291,4 +292,129 @@ async fn legacy_manual_time_zero_budget_is_normalized_on_reopen() {
         .unwrap()
         .unwrap();
     assert_eq!(reopened.movetime_ms, None);
+}
+
+#[tokio::test]
+async fn contextual_cache_roundtrip_preserves_evidence_and_validates_key() {
+    let repo = SqliteRepository::new(temp_path());
+    let fen = core::fen(&shakmaty::Chess::default());
+    let key = "mainline-unrestricted-v1|stockfish-19|e2e4".to_string();
+    let mut raw = core::terminal_raw(&fen, 35);
+    raw.depth = 20;
+    raw.pv = vec!["e2e4".into()];
+    raw.lines[0].depth = Some(20);
+    raw.lines[0].pv = vec!["e2e4".into()];
+    for (multipv, root, depth) in [(2, "d2d4", 20), (3, "g1f3", 19)] {
+        raw.lines.push(RawLine {
+            multipv,
+            cp: 30,
+            pv: vec![root.into()],
+            san: None,
+            depth: Some(depth),
+            unstable: false,
+        });
+    }
+    let evidence = PositionEvidence {
+        history_ply: Some(0),
+        scope: EvidenceScope::Mainline,
+        origin: EvidenceOrigin::Engine,
+        completion: EvidenceCompletion::BestMove,
+        engine: Some("Stockfish 19".into()),
+        engine_build: Some("stockfish-19".into()),
+        requested: Some(EvidenceBudget {
+            mode: Mode::Time,
+            value: 1000,
+            multipv: 3,
+        }),
+        reached_depth: 19,
+        observed_lines: 3,
+    };
+    let entry = ContextualEvaluation {
+        key: key.clone(),
+        raw,
+        evidence,
+    };
+    repo.put_context(std::slice::from_ref(&entry), Mode::Time, 1000)
+        .await
+        .unwrap();
+
+    let hits = repo
+        .lookup_context(std::slice::from_ref(&key), Mode::Time, 1000, 3)
+        .await
+        .unwrap();
+    let hit = hits[0].as_ref().expect("contextual hit");
+    assert_eq!(hit.key, key);
+    assert_eq!(hit.evidence.engine_build.as_deref(), Some("stockfish-19"));
+    assert_eq!(hit.evidence.reached_depth, 19);
+    assert_eq!(hit.raw.lines.len(), 3);
+
+    let smaller = repo
+        .lookup_context(std::slice::from_ref(&key), Mode::Time, 1000, 1)
+        .await
+        .unwrap();
+    assert_eq!(smaller[0].as_ref().unwrap().raw.lines.len(), 1);
+
+    // Um orçamento maior ou uma chave diferente não podem reusar a evidência.
+    assert!(
+        repo.lookup_context(std::slice::from_ref(&key), Mode::Time, 2000, 3)
+            .await
+            .unwrap()[0]
+            .is_none()
+    );
+    assert!(
+        repo.lookup_context(&["outra-chave".into()], Mode::Time, 1000, 3)
+            .await
+            .unwrap()[0]
+            .is_none()
+    );
+}
+
+#[tokio::test]
+async fn contextual_cache_ignora_payload_corrompido_e_clear_cache_limpa_ambos() {
+    let path = temp_path();
+    let repo = SqliteRepository::new(path.clone());
+    let fen = core::fen(&shakmaty::Chess::default());
+    // O cache legado e o contextual coexistem no mesmo arquivo.
+    repo.put(&[core::terminal_raw(&fen, 15)], Mode::Depth, 20, 1)
+        .await
+        .unwrap();
+    {
+        let conn = crate::db::open_file(&path).unwrap();
+        crate::db::evidence::EvidenceCache::new(&conn)
+            .store(
+                "chave",
+                Mode::Depth,
+                20,
+                1,
+                20,
+                35,
+                "[]",
+                "{payload inválido",
+            )
+            .unwrap();
+    }
+    // Payload corrompido é miss, não erro fatal.
+    assert!(
+        repo.lookup_context(&["chave".into()], Mode::Depth, 20, 1)
+            .await
+            .unwrap()[0]
+            .is_none()
+    );
+    // Limpar o cache remove os dois namespaces.
+    repo.clear_cache().await.unwrap();
+    assert!(
+        repo.lookup(std::slice::from_ref(&fen), Mode::Depth, 20, 1)
+            .await
+            .unwrap()[0]
+            .is_none()
+    );
+    {
+        let conn = crate::db::open_file(&path).unwrap();
+        assert!(
+            crate::db::evidence::EvidenceCache::new(&conn)
+                .lookup("chave", Mode::Depth, 20, 1)
+                .unwrap()
+                .is_none()
+        );
+    }
 }

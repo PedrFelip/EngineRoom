@@ -1,10 +1,8 @@
 //! Decode cached evaluations while checking candidate coverage and principal scores.
-use crate::{
-    db::cache::CachedPosition,
-    review::{
-        core,
-        types::{RawLine, RawPosition},
-    },
+use crate::db::cache::CachedPosition;
+use engineroom_application::review::{
+    core,
+    types::{RawLine, RawPosition},
 };
 use shakmaty::Position;
 
