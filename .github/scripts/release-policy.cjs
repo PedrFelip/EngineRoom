@@ -12,22 +12,27 @@ function compareVersions(left, right) {
   return 0;
 }
 
-async function packageVersion(github, repo, ref) {
-  const { data } = await github.rest.repos.getContent({
-    ...repo, path: 'app/package.json', ref,
-  });
-  return JSON.parse(Buffer.from(data.content, 'base64').toString('utf8')).version;
+async function packageVersion(github, repo, ref, product = require('./product.cjs').resolveProduct()) {
+  const path = product.versionFile;
+  const { data } = await github.rest.repos.getContent({ ...repo, path, ref });
+  const source = Buffer.from(data.content, 'base64').toString('utf8');
+  return require('./product.cjs').versionFromCargoToml(source);
 }
 
-async function checkReleaseVersion({ github, context }, pr) {
+async function checkReleaseVersion({ github, context }, pr, product = require('./product.cjs').resolveProduct(context)) {
   if (pr.base.ref !== 'main' || pr.user.login !== 'github-actions[bot]' ||
       !pr.head.ref.startsWith('release-please--')) return;
 
   const [base, next] = await Promise.all([
-    packageVersion(github, context.repo, pr.base.sha),
-    packageVersion(github, context.repo, pr.head.sha),
+    packageVersion(github, context.repo, pr.base.sha, product),
+    packageVersion(github, context.repo, pr.head.sha, product),
   ]);
-  if (compareVersions(next, base) <= 0) {
+  const { PRERELEASE } = require('./product.cjs');
+  const baseVersion = product.name === 'rune' && PRERELEASE.test(base)
+    ? base.slice(0, base.indexOf('-'))
+    : base;
+  const comparison = compareVersions(next, baseVersion);
+  if (comparison < 0 || (comparison === 0 && base === baseVersion)) {
     throw new Error(`A versão ${next} precisa ser maior que a versão base ${base}.`);
   }
   const releases = await github.paginate(github.rest.repos.listReleases, {
@@ -65,4 +70,4 @@ async function checkPublicationVersion({ github, context }, candidate) {
   }
 }
 
-module.exports = { compareVersions, checkReleaseVersion, checkPublicationVersion };
+module.exports = { compareVersions, packageVersion, checkReleaseVersion, checkPublicationVersion };

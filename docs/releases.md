@@ -1,306 +1,47 @@
-# Desenvolvimento e releases
+# Releases
 
-Fluxo: `feature/* → develop → main → PR de versão → release pública`.
+O EngineRoom distribui AppImage Linux x86_64 e NSIS Windows x86_64. As
+atualizações são instaladas manualmente.
 
-## Trabalho diário
+## Desenvolvimento e promoção
 
-1. Crie `feature/*` ou `fix/*` a partir de `develop`.
-2. Abra um PR para `develop` com título Conventional Commits. Faça **Squash and merge**
-   usando título e descrição do PR como mensagem do commit.
-3. Para preparar uma versão, abra `develop → main`, com título
-   `chore: promove develop para main`. Use **Create a merge commit**: os commits
-   das funcionalidades e correções precisam chegar à main para gerar o changelog.
-4. O Release Please abre ou atualiza um PR de versão na main. Revise as notas e
-   faça **Squash and merge** quando quiser publicar.
-5. O Actions cria a tag junto do rascunho, valida o commit da versão, gera
-   AppImage, NSIS e MSI e publica somente depois dos checks e smoke Linux.
-6. Faça merge do PR automático `main → develop` com **Create a merge commit**.
+Use branches com títulos Conventional Commit e PRs para `develop`, com squash
+merge. Promova `develop` para `main` com merge commit. Preserve o histórico
+ao aceitar a sincronização automática de `main` para `develop`. Hotfixes
+podem direcionar PRs para `main`.
 
-O PR de sincronização acompanha a branch `main`: inclui todo o histórico ainda
-ausente em `develop`, e pode crescer enquanto estiver aberto. Ele não representa
-um snapshot de uma release. Integre-o preservando os commits; squash nessa direção
-faz o histórico já aplicado reaparecer nas próximas sincronizações. Conflitos
-precisam ser resolvidos antes de o CI de integração aprovar esse PR.
+O Release Please mantém a versão do pacote raiz, o workspace, `Cargo.lock` e
+o changelog. O merge de seu PR cria uma tag e um draft. O workflow executa os
+checks no commit imutável, constrói ambos os instaladores e publica somente se
+todos os jobs passarem. O AppImage também é executado em Ubuntu 24.04 depois
+do build no Ubuntu 22.04. A publicação é seguida pela sincronização de branches.
+O gate terminal `CI passed` exige sucesso de todos os checks.
 
-Para uma correção urgente, crie `hotfix/*` a partir da main e abra um PR para main.
-Use um título `fix: ...`, faça squash e siga o mesmo PR automático de versão.
-Sincronize o resultado de volta para develop.
+Para retomar uma release interrompida, execute o workflow Release manualmente
+em `main`, informando uma tag existente. Tags avulsas e mudanças manuais de
+versão não publicam uma release.
 
-Não exclua `develop` ou `main` depois dos merges. Ambas exigem PR e o check
-`CI passed`, inclusive para administradores. Como o projeto permite trabalho solo,
-não há exigência de aprovação por uma segunda pessoa.
+## Empacotamento local
 
-## Versões e changelog
-
-| Título do PR | Incremento após 1.0.0 |
-| --- | --- |
-| `fix: corrige importação` | patch, como 1.0.1 |
-| `perf: reduz tempo de análise` | patch |
-| `feat: adiciona exportação` | minor, como 1.1.0 |
-| `feat!: altera formato incompatível` | major, como 2.0.0 |
-| `docs:`, `test:`, `chore:`, `ci:`, `build:`, `refactor:` | não geram release isoladamente |
-
-Scopes são opcionais: `fix(review): corrige navegação`. Uma quebra também pode ser
-descrita no rodapé `BREAKING CHANGE: ...`; preserve esse rodapé na mensagem do squash.
-Escreva descrições úteis para quem usa o app: elas aparecem nas notas públicas.
-
-O PR de versão atualiza `app/CHANGELOG.md`, o manifest do Release Please e as quatro
-versões do app: package.json, tauri.conf.json, Cargo.toml e a entrada local no Cargo.lock.
-Não altere essas versões manualmente. O seletor TOML do Cargo.lock usa `name.value`
-porque a versão fixada do Release Please representa strings TOML como valores anotados;
-os testes exercitam os updaters reais e preservam todas as dependências.
-
-A implantação inicial contém `Release-As: 1.0.0` na mensagem do commit, após uma
-linha em branco. Esse rodapé força apenas a primeira versão. O ponto inicial do
-histórico é a tag `v0.9.1`; as releases anteriores são preservadas. Não reutilize
-`Release-As` para corrigir uma proposta regressiva: investigue primeiro a referência
-da última release. O CI do PR de versão exige uma versão estável maior que a base
-e que todas as releases estáveis existentes, inclusive drafts, e rejeita tags já usadas.
-
-`force-tag-creation` mantém a tag disponível antes de o Release Please calcular
-o próximo PR na mesma execução. Sem ela, um draft sem tag não é reconhecido como
-limite do histórico; o fallback para bootstrap relê `Release-As` e notas antigas.
-Os testes da automação cobrem esse ciclo com a biblioteca real fixada na action.
-
-Evite `BEGIN_COMMIT_OVERRIDE` em PRs que preservarão vários commits: o bloco é
-aplicado a cada commit associado e pode multiplicar entradas do changelog. O bloco
-histórico do PR #8 fica antes do limite das releases atuais e não precisa ser
-reescrito. Releases e changelogs já publicados permanecem preservados.
-
-## CI e permissões
-
-`CI` executa em PRs e pushes para main/develop. Inclui lint, typecheck, testes do
-frontend, `cargo test --locked` com Stockfish real e testes dos scripts de release.
-A política do PR é validada antes dos jobs de testes; uma falha bloqueia o gate
-`CI passed`, inclusive quando os testes são pulados. O evento `edited` revalida o
-título Conventional Commits. Pushes validam o resultado integrado em main/develop;
-a release repete os checks no seu SHA imutável antes de gerar instaladores.
-
-O cache global de pacotes Bun é separado por sistema, arquitetura, versão do Bun
-e lockfile, com reaproveitamento dos pacotes ao mudar o lockfile. A instalação
-continua usando `--frozen-lockfile`. Rust mantém o cache de dependências e compilação
-por job, separando testes (debug) dos instaladores (release). O job Rust salva
-esse cache mesmo quando um teste falha, para reaproveitar a compilação na próxima
-execução. A instalação das bibliotecas Linux dos testes usa
-`--no-install-recommends`: mantém dependências obrigatórias e evita os pacotes
-recomendados. Ayatana AppIndicator e libxdo não são instalados nesse job porque
-as features correspondentes não estão ativas no grafo Cargo atual; ao habilitar
-tray-icon ou linux-libxdo, revise essa lista. A cobertura e o setup dos instaladores
-permanecem os mesmos. Os builds usam
-`--locked` para preservar o Cargo.lock. O Stockfish usa uma chave que inclui o
-script de download e é salvo logo após o download, antes dos testes/builds.
-O sidecar é baixado antes dos testes Rust. Os testes do downloader também são
-executados quando incluídos no comando `bun run test` do app.
-
-O fluxo usa somente `GITHUB_TOKEN`, sem PAT ou GitHub App. Habilite em
-**Settings → Actions → General → Workflow permissions** a opção
-**Allow GitHub Actions to create and approve pull requests**. Os workflows concedem
-permissões de escrita apenas aos jobs que precisam delas. O bot não aprova nem faz
-merge dos seus próprios PRs.
-
-Eventos criados pelo token podem não iniciar CI automaticamente. Por isso o fluxo
-dispara `ci.yml` explicitamente na branch do PR, passando `pr_number`; o CI confere
-se o SHA executado ainda corresponde ao PR. Os checks usam o SHA imutável do
-merge sintético, verificando os pais contra a base e o head atuais; PRs com
-conflito ou merge ainda indisponível falham e precisam de nova execução.
-Para repetir manualmente:
-
-```bash
-gh workflow run ci.yml --ref NOME_DA_BRANCH -f pr_number=NUMERO_DO_PR
-```
-
-## Falhas e retomada
-
-### Recuperar uma proposta regressiva
-
-Depois de integrar a correção da automação em `main`, confira que a última tag
-publicada aponta para o commit correto e que o manifest contém essa versão.
-Feche o PR regressivo antigo (por exemplo #35, que propunha 2.1.2 sobre 2.1.3)
-sem fazer merge. O próximo push em `main` recalcula a proposta usando a última
-release reconhecida. Não mova tags publicadas, não diminua versões e não apague
-o changelog para esconder o problema. Na ausência de alterações de produto após
-a última release, nenhuma nova proposta é esperada.
-
-### Compatibilidade gráfica do AppImage
-
-O build Linux continua no Ubuntu 22.04, mas o AppImage usa a biblioteca
-`libwayland-client.so.0` do sistema de destino. A cópia antiga incluída pelo
-linuxdeploy pode impedir o carregamento do Mesa atual por símbolos ausentes
-(`wl_fixes_interface`, por exemplo), levando o WebKit a abortar com
-`Could not create default EGL display: EGL_BAD_PARAMETER`, inclusive via XWayland.
-
-O CLI Tauri está fixado em 2.12.4 no package.json e no lockfile. Essa versão
-inclui a [atualização upstream do linuxdeploy e do plugin GTK](https://github.com/tauri-apps/tauri/pull/16062)
-que corrige a inclusão dessas dependências. A correção acontece no build normal,
-inclusive localmente, sem reempacotar ou alterar o binário depois de gerado.
-
-Antes do upload, `app/scripts/verify_appimage.py` extrai uma cópia temporária
-usando o próprio runtime do AppImage, sem FUSE, e rejeita bibliotecas gráficas
-que devem vir do sistema. A política segue a
-[lista de exclusão da comunidade AppImage](https://github.com/AppImageCommunity/pkg2appimage/blob/master/excludelist).
-O verificador não modifica o artefato; uma regressão do empacotador bloqueia a
-publicação em vez de corrigir silenciosamente o pacote. Não exige squashfs-tools.
-
-O mesmo AppImage produzido no Ubuntu 22.04 também precisa iniciar no Ubuntu
-24.04 antes da publicação. Esse teste usa Xvfb e o Mesa por software, com dados
-isolados, e exige que o aplicativo e o WebKit permaneçam ativos sem erro EGL.
-Ele cobre inicialização via XWayland/X11; não substitui testes manuais de Wayland
-nativo nem dos diferentes drivers de GPU.
-
-O runner headless precisa instalar `libgles2` explicitamente, além de EGL e Mesa:
-`libegl1` não fornece nem exige `libGLESv2.so.2`, carregada dinamicamente pelo
-WebKit. O workflow verifica o carregamento de ambas antes de iniciar o AppImage.
-A ausência de GLES causa `Couldn't open libGLESv2.so.2` e aborto do aplicativo;
-essa falha de provisionamento é diferente do conflito de Wayland/EGL descrito
-acima. Não empacote uma biblioteca gráfica do host para corrigir o runner.
-
-O Linux de destino precisa fornecer `libwayland-client.so.0` (pacote
-`libwayland-client0` no Ubuntu/Debian; `wayland` no Arch). Para conferir um build
-local antes de assinar ou enviar, execute na raiz:
-
-```bash
-python3 app/scripts/verify_appimage.py app/src-tauri/target/release/bundle/appimage/*.AppImage
-```
-
-Não aplique `LD_PRELOAD` global nem desative a aceleração gráfica para contornar
-essa incompatibilidade de empacotamento.
-
-Mantenha scripts de empacotamento do aplicativo dentro de `app/`: o Release
-Please filtra commits por esse caminho antes de interpretar `fix:` e
-`Release-As`. Um hotfix que altera somente `.github/` e `docs/` não gera uma
-versão, mesmo com esse rodapé. Os testes de versão incluem esse filtro.
-
-Falhas em testes ou em qualquer plataforma mantêm a release como rascunho.
-A publicação exige os três instaladores completos. Todos são construídos no SHA
-imutável da release; uma tag apontando para outro commit causa falha.
-A retomada de um draft também falha se já houver uma versão estável igual ou
-maior publicada, evitando que uma release antiga substitua a versão mais recente.
-
-Use **Actions → Release → Run workflow**, selecione `main` e informe a tag, ou:
-
-```bash
-gh workflow run release.yml --ref main -f tag=v1.0.0
-```
-
-Se a correção é no workflow, integre-a em `main` antes de disparar essa retomada:
-o novo run usa o workflow corrigido e continua construindo no SHA imutável da
-tag. Reexecutar o job antigo mantém a definição antiga do workflow.
-
-A retomada aceita apenas uma release existente, com tag coerente e commit no
-histórico da main. Se já estiver publicada, somente retoma a sincronização com
-develop. Não move tags nem cria uma nova versão.
-
-## Verificar alterações na automação
-
-O Bun está fixado em 1.4.4 nos campos `packageManager` e nos workflows de CI e
-release. Ao atualizá-lo, mantenha também as chaves de cache na mesma versão.
-O CLI Tauri, a API JavaScript e o runtime Rust são verificados juntos: além dos
-testes, gere o AppImage e execute a verificação de inicialização descrita acima.
-
-Atualizações de dependências dentro das faixas atuais usam `bun update` em
-`app/` e `cargo update` em `app/src-tauri/`, preservando os lockfiles no PR.
-Migrações para novas versões principais de Effect, TypeScript e Vitest devem
-ter escopo e validação próprios. O Release Please continua fixado à biblioteca
-usada pela action; não atualize somente a dependência dos testes.
-
-Na raiz:
-
-```bash
-python -m unittest discover -s .github/scripts -p 'test_*.py'
-python .github/scripts/release_version.py
-```
-
-Em `.github/scripts/`:
-
-```bash
-bun install --frozen-lockfile
-bun run test
-```
-
-Execute também as verificações do app descritas no README. Ao atualizar a action
-Release Please, mantenha a dependência dos testes na mesma versão da biblioteca
-embutida na action. O CI valida a configuração usando essa implementação real.
-
-## Atualizações pelo aplicativo
-
-O updater oficial do Tauri usa o feed público
-`https://github.com/PedrFelip/EngineRoom/releases/latest/download/latest.json`.
-A chave pública de verificação fica em `app/src-tauri/tauri.conf.json`.
-Os secrets `TAURI_SIGNING_PRIVATE_KEY` e `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`
-assinam os instaladores no job de build. A chave privada original fica fora
-do repositório; mantenha um backup seguro dela. Não gere outra chave para uma
-release normal: os apps instalados só aceitam assinaturas da chave pública
-que já carregam.
-
-Os builds geram `.sig` para AppImage, NSIS e MSI. Após a verificação gráfica
-e o smoke Linux, a publicação gera `latest.json` com as URLs e assinaturas
-exatas dos instaladores. O feed identifica AppImage, NSIS e MSI separadamente,
-para que cada instalação receba uma atualização do mesmo tipo. Pacotes de tipo
-desconhecido não oferecem atualização automática. A ausência
-de qualquer instalador, assinatura ou feed bloqueia a publicação do draft.
-
-A primeira versão que inclui o updater exige instalação manual. A partir
-dela, novas versões podem ser instaladas pelo próprio app. Para gerar
-instaladores assinados localmente, forneça `TAURI_SIGNING_PRIVATE_KEY`
-(caminho do arquivo privado) e, se necessário, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`
-no ambiente antes de `bun run tauri build`.
-
-## Rune: empacotamento de pré-releases
-
-O Rune permanece integralmente em `experimental/`. Nesta etapa os alvos são
-Linux x86_64 (AppImage) e Windows x86_64 MSVC (NSIS); não há pacote macOS.
-O pipeline Tauri e o job `Rune experiment` existentes permanecem intactos.
-A versão é lida de `experimental/crates/engineroom-rune/Cargo.toml`; não se
-recria nem publica a tag `v3.0.0-alpha.1`.
-
-Instale Rust estável, Node >= 22.12 e Python >= 3.11. Instale o empacotador:
+Instale Rust estável, Node.js, Python 3.11+ e o empacotador fixado:
 
 ```sh
 cargo install cargo-packager --version 0.11.8 --locked
-```
-
-No Linux, use um ambiente de build Ubuntu 22.04/24.04 com compilador C/C++,
-pkg-config, libasound2-dev, libudev-dev, libxkbcommon-dev, libxkbcommon-x11-dev, libwayland-dev,
-libegl1-mesa-dev, libvulkan-dev, libvulkan1, mesa-vulkan-drivers, patchelf,
-file, squashfs-tools e libfuse2 (Ubuntu 24.04: libfuse2t64). Para o smoke test, mantenha um display X11/Wayland
-ativo (CI: `xvfb-run -a python3 scripts/package.py`). O driver Vulkan do host
-é obrigatório; Mesa lavapipe permite o teste sem GPU física. Compile na
-menor versão de distribuição que pretende suportar (a glibc não é portátil
-para hosts mais antigos que o build).
-
-No Windows, execute nativamente com Rust MSVC, Visual Studio Build Tools
-(C++ e Windows SDK), Node e Python no PATH. O cargo-packager provisiona as
-ferramentas NSIS. O usuário final precisa de driver com suporte a Vulkan.
-
-Comando exato em ambas as plataformas, a partir da raiz do repositório:
-
-```sh
-cd experimental
 python scripts/package.py
 ```
 
-O comando reutiliza `app/scripts/fetch-stockfish.mjs` a partir de `app/`,
-compila `engineroom-rune --release --locked` e aplica a configuração declarativa
-em `experimental/packaging/{linux,windows}.json`. Saída:
-`experimental/target/packages/`. O sidecar externo perde o sufixo do target
-no pacote: `usr/bin/stockfish` no AppImage e `stockfish.exe` ao lado de
-`engineroom-rune.exe` no diretório NSIS. A resolução prioriza esse diretório,
-depois o override `ENGINE_ROOM_STOCKFISH` e os fallbacks existentes de dev.
-Licença GPL e avisos de terceiros acompanham os pacotes.
+No Linux, instale compilador C/C++, pkg-config, bibliotecas de desenvolvimento
+ALSA, udev, XKB, Wayland, EGL e Vulkan, Mesa Vulkan, patchelf, file,
+squashfs-tools e libfuse2. Use um display ativo ou `xvfb-run` com Xauth.
+Compile no Ubuntu 22.04 para manter compatibilidade com sua glibc e versões
+posteriores. O teste extrai o AppImage, verifica as bibliotecas gráficas e o
+Stockfish e inicia o aplicativo com Vulkan.
 
-No Linux, `scripts/verify_appimage.py --smoke` é obrigatório no comando de
-empacotamento: extrai sem FUSE, rejeita bibliotecas Wayland/EGL/GLES/GL/Vulkan
-que sombreiem os drivers do host, verifica executáveis e inicia o Rune por
-10 segundos. Falha remove o AppImage da saída e encerra com erro: nunca publique
-um AppImage que falhou nessa checagem. Verificação independente:
+No Windows, execute o comando nativamente com Rust MSVC, Visual Studio Build
+Tools, Windows SDK, Node e Python. O script verifica instalação silenciosa,
+renderização inicial e handshake UCI do motor empacotado, depois desinstala a
+cópia temporária. O aplicativo requer um driver DirectX 12 ou Vulkan.
 
-```sh
-python scripts/verify_appimage.py --smoke target/packages/*.AppImage
-```
-
-Este fluxo ainda exige validação nativa de instalação/abertura no Windows
-antes de publicar. O workflow manual `Rune installers (manual)` gera e armazena os instaladores
-como artifacts, sem publicar releases e sem participar do gate de CI. Execute-o
-na branch desejada via `workflow_dispatch` (após o workflow chegar à branch
-padrão). O pipeline de release estável continua dependente da migração de dados
-prevista na Fase 4.
+Os pacotes ficam em `target/packages/` e incluem Stockfish 19, licença GPL e
+avisos de terceiros. O workflow `Rune installers` permite verificar os dois
+alvos sem publicar uma release.

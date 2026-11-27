@@ -1,5 +1,4 @@
-const fs = require('node:fs');
-const path = require('node:path');
+const products = require('./product.cjs');
 
 const TITLE = /^(feat|fix|perf|docs|refactor|test|build|ci|chore|revert)(\([^\r\n()]+\))?!?: \S[^\r\n]*$/;
 const TAG = /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
@@ -23,7 +22,7 @@ async function checkPullRequest({ github, context }) {
   if (!number) return context.sha;
   const { data: pr } = await github.rest.pulls.get({ ...context.repo, pull_number: number });
   validatePullRequest(pr);
-  await require('./release-policy.cjs').checkReleaseVersion({ github, context }, pr);
+  await require('./release-policy.cjs').checkReleaseVersion({ github, context }, pr, products.resolveProduct(context));
   if (context.eventName !== 'workflow_dispatch') return context.sha;
   if (pr.head.sha !== context.sha) {
     throw new Error('O PR mudou: execute CI novamente na branch atual.');
@@ -80,10 +79,16 @@ async function tagCommit(github, repo, tag) {
   return object.sha;
 }
 
-async function selectDraft({ github, context, core }, requestedTag) {
+async function selectDraft({ github, context, core }, requestedTag, options = {}) {
   const manual = context.eventName === 'workflow_dispatch';
   if (context.ref !== 'refs/heads/main') throw new Error('Execute Release a partir da main.');
-  const version = JSON.parse(fs.readFileSync(path.join(__dirname, '../../app/package.json'), 'utf8')).version;
+  const product = options.product || products.resolveProduct(context);
+  const readVersion = options.readVersion || (selected => selected.readVersion());
+  const version = readVersion(product);
+  if (!manual && product.name === 'rune' && products.PRERELEASE.test(version)) {
+    core.setOutput('should_release', 'false');
+    return;
+  }
   const tag = requestedTag || `v${version}`;
   if (!TAG.test(tag)) throw new Error('Informe uma tag estável no formato v1.2.3.');
   const releases = await github.paginate(github.rest.repos.listReleases, {
@@ -123,23 +128,11 @@ async function selectDraft({ github, context, core }, requestedTag) {
   core.setOutput('tag', tag);
 }
 
-function validateAssets(assets) {
-  for (const extension of ['.AppImage', '.exe', '.msi']) {
-    if (!assets.some(asset => asset.name.endsWith(extension) && asset.size > 0 && asset.state === 'uploaded')) {
-      throw new Error(`Instalador ausente ou incompleto: ${extension}`);
-    }
-  }
-  for (const installer of assets.filter(asset => /\.(AppImage|exe|msi)$/.test(asset.name))) {
-    if (!assets.some(asset => asset.name === `${installer.name}.sig` && asset.size > 0 && asset.state === 'uploaded')) {
-      throw new Error(`Assinatura ausente ou incompleta: ${installer.name}`);
-    }
-  }
-  if (!assets.some(asset => asset.name === 'latest.json' && asset.size > 0 && asset.state === 'uploaded')) {
-    throw new Error('Manifest de atualização ausente ou incompleto: latest.json');
-  }
+function validateAssets(assets, product) {
+  return products.validateAssets(assets, product);
 }
 
-async function publish({ github, context }, id, tag, sha) {
+async function publish({ github, context }, id, tag, sha, options = {}) {
   const release = (await github.rest.repos.getRelease({ ...context.repo, release_id: Number(id) })).data;
   if (release.tag_name !== tag || release.target_commitish !== sha ||
       await tagCommit(github, context.repo, tag) !== sha) {
@@ -148,7 +141,7 @@ async function publish({ github, context }, id, tag, sha) {
   const assets = await github.paginate(github.rest.repos.listReleaseAssets, {
     ...context.repo, release_id: release.id, per_page: 100,
   });
-  validateAssets(assets);
+  validateAssets(assets, options.product || products.resolveProduct(context));
   if (!release.draft) return; // A retry never republishes or changes a published release.
   await require('./release-policy.cjs').checkPublicationVersion({ github, context }, release);
   await github.rest.repos.updateRelease({

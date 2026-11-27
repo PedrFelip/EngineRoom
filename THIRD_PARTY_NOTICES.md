@@ -13,7 +13,7 @@ Bibliotecas de xadrez vinculadas ao backend:
 | pgn-reader | 0.29.1 | GPL-3.0-or-later | https://github.com/niklasf/shakmaty |
 
 As versões exatas e as demais dependências do backend estão em
-`app/src-tauri/Cargo.lock`; as do frontend estão em `app/bun.lock`.
+`Cargo.lock`.
 Dependências conservam suas próprias licenças e avisos.
 
 O Stockfish 19 é executado como sidecar separado. Seu código-fonte está em

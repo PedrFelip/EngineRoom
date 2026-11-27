@@ -1,0 +1,167 @@
+name: Rune installers (reusable)
+
+# Builds and verifies Linux AppImage and Windows NSIS at an immutable commit.
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: Immutable commit to build (defaults to the caller commit)
+        type: string
+        required: false
+        default: ''
+      tag:
+        description: Existing draft tag to upload the installers to (empty skips upload)
+        type: string
+        required: false
+        default: ''
+      source-dir:
+        description: Rust workspace directory holding Cargo.toml, packaging/ and scripts/package.py
+        type: string
+        required: false
+        default: '.'
+
+# No `permissions` here: the caller grants contents:write for release uploads
+# and a plain manual caller can stay read-only. A called workflow may only
+# downgrade the caller's token, so declaring read would break `gh release upload`.
+concurrency:
+  group: rune-installers-${{ inputs.ref || github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  installers:
+    name: Rune ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            target: Linux-AppImage
+          - os: windows-latest
+            target: Windows-NSIS
+    env:
+      SOURCE_DIR: ${{ inputs.source-dir }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Linux build and software Vulkan dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          # ubuntu-22.04 keeps the oldest glibc we support; FUSE was renamed on 24.04.
+          fuse=libfuse2
+          if [ "$(lsb_release -rs)" = "24.04" ]; then fuse=libfuse2t64; fi
+          sudo apt-get install -y --no-install-recommends build-essential pkg-config libasound2-dev libudev-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libegl1-mesa-dev libvulkan-dev mesa-vulkan-drivers patchelf file squashfs-tools xvfb xauth "$fuse"
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: ${{ inputs.source-dir }} -> target
+
+      - name: Restore Stockfish sidecar
+        id: stockfish
+        uses: actions/cache/restore@v4
+        with:
+          path: binaries/stockfish-*
+          key: rune-stockfish-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/fetch-stockfish.mjs') }}
+
+      - name: Install cargo-packager
+        run: cargo install cargo-packager --version 0.11.8 --locked
+
+      - name: Test AppImage verification policy
+        if: runner.os == 'Linux'
+        run: python scripts/test_verify_appimage.py
+        working-directory: ${{ inputs.source-dir }}
+
+      # package.py downloads the shared sidecar, builds --release --locked,
+      # packages it, runs the AppImage smoke check on Linux and the silent
+      # install/sidecar check on Windows.
+      - name: Build and verify installer
+        shell: bash
+        working-directory: ${{ inputs.source-dir }}
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            xvfb-run -a python3 scripts/package.py
+          else
+            python scripts/package.py
+          fi
+
+      - name: Save Stockfish sidecar cache
+        if: steps.stockfish.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: binaries/stockfish-*
+          key: ${{ steps.stockfish.outputs.cache-primary-key }}
+
+      - name: Verify AppImage graphics inventory
+        if: runner.os == 'Linux'
+        run: python3 "$SOURCE_DIR/scripts/verify_appimage.py" "$SOURCE_DIR"/target/packages/*.AppImage
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rune-${{ matrix.target }}
+          path: |
+            ${{ inputs.source-dir }}/target/packages/*.AppImage
+            ${{ inputs.source-dir }}/target/packages/*.exe
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Upload installers to the immutable draft
+        if: inputs.tag != ''
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          shopt -s nullglob
+          installers=("$SOURCE_DIR"/target/packages/*.AppImage "$SOURCE_DIR"/target/packages/*.exe)
+          test "${#installers[@]}" -gt 0
+          gh release upload "$RELEASE_TAG" "${installers[@]}" --clobber
+
+  smoke:
+    name: Rune AppImage on newer glibc
+    needs: installers
+    runs-on: ubuntu-24.04
+    env:
+      SOURCE_DIR: ${{ inputs.source-dir }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: rune-Linux-AppImage
+          path: appimage
+      - name: Install headless Mesa display
+        run: |
+          sudo apt-get update
+          # Rune draws through wgpu's Vulkan backend only and the AppImage keeps
+          # the host Vulkan loader/driver, so lavapipe must be present here too.
+          sudo apt-get install -y --no-install-recommends xvfb xauth libegl1 libgles2 libegl-mesa0 libgl1-mesa-dri libglx-mesa0 libwayland-client0 libvulkan1 mesa-vulkan-drivers
+      # verify_appimage.py forces WGPU_BACKEND=vulkan; without an ICD Rune fails.
+      - name: Check host Vulkan runtime
+        run: |
+          python3 - <<'PYTHON'
+          import ctypes
+          for library in ("libvulkan.so.1",):
+              ctypes.CDLL(library)
+              print(f"Host graphics library available: {library}")
+          PYTHON
+      - name: Verify Ubuntu 22.04 AppImage starts on Ubuntu 24.04
+        run: |
+          chmod +x appimage/*.AppImage
+          xvfb-run --auto-servernum python3 "$SOURCE_DIR/scripts/verify_appimage.py" --smoke appimage/*.AppImage

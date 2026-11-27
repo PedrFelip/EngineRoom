@@ -1,12 +1,14 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { validatePullRequest, checkPullRequest, checkReleasePRs, selectDraft, publish, syncDevelop } = require('./automation.cjs');
+const { PRODUCTS } = require('./product.cjs');
+PRODUCTS.rune.readVersion = () => '1.0.0';
 
 const sha = 'a'.repeat(40);
 const baseSha = 'b'.repeat(40);
 const mergeSha = 'e'.repeat(40);
 const repo = { owner: 'owner', repo: 'app' };
-const context = { repo, ref: 'refs/heads/main', sha, eventName: 'push', payload: { repository: { full_name: 'owner/app' } } };
+const context = { product: 'rune', repo, ref: 'refs/heads/main', sha, eventName: 'push', payload: { repository: { full_name: 'owner/app' } } };
 const pr = (overrides = {}) => ({
   number: 12, state: 'open', mergeable: true, merge_commit_sha: mergeSha, title: 'feat(review): adiciona exportação', user: { login: 'owner' },
   base: { ref: 'develop', sha: baseSha, repo: { full_name: 'owner/app' } },
@@ -17,7 +19,7 @@ function fixture({ draft = true, assets, tagSha = sha, tag = 'v1.0.0' } = {}) {
   const calls = [];
   const outputs = {};
   const release = { id: 1, tag_name: tag, target_commitish: sha, draft };
-  const installers = assets || ['linux.AppImage', 'setup.exe', 'setup.msi', 'linux.AppImage.sig', 'setup.exe.sig', 'setup.msi.sig', 'latest.json'].map(name => ({ name, size: 100, state: 'uploaded' }));
+  const installers = assets || ['linux.AppImage', 'setup.exe'].map(name => ({ name, size: 100, state: 'uploaded' }));
   const github = {
     rest: {
       repos: {
@@ -207,12 +209,37 @@ test('synchronization keeps the PR but fails on conflicts or a moving main', asy
   }
 });
 
-test('unsigned or incomplete updater releases stay as drafts', async () => {
-  for (const missing of ['linux.AppImage.sig', 'setup.exe.sig', 'setup.msi.sig', 'latest.json']) {
-    const assets = ['linux.AppImage', 'setup.exe', 'setup.msi', 'linux.AppImage.sig', 'setup.exe.sig', 'setup.msi.sig', 'latest.json']
-      .filter(name => name !== missing).map(name => ({ name, size: 100, state: 'uploaded' }));
-    const f = fixture({ assets });
-    await assert.rejects(publish(f, '1', 'v1.0.0', sha), /Assinatura|Manifest/);
-    assert.equal(f.release.draft, true);
-  }
+test('Rune draft selection reads the root Cargo.toml and keeps the immutable commit', async () => {
+  const f = fixture({ tagSha: undefined, tag: 'v3.0.0' });
+  f.github.rest.git.getRef = async () => { throw Object.assign(new Error('missing'), { status: 404 }); };
+  await selectDraft(f, undefined, {
+    product: PRODUCTS.rune,
+    readVersion: () => '3.0.0',
+  });
+  assert.equal(f.outputs.tag, 'v3.0.0');
+  assert.equal(f.outputs.sha, sha);
+  assert.equal(f.outputs.should_release, 'true');
+  assert.equal(f.calls.filter(([type]) => type === 'tag').length, 1);
+});
+
+test('Rune publication requires AppImage and NSIS but no feed or signatures', async () => {
+  const installers = ['EngineRoom.AppImage', 'EngineRoom.Installer.exe']
+    .map(name => ({ name, size: 100, state: 'uploaded' }));
+  const f = fixture({ assets: installers });
+  await publish(f, '1', 'v1.0.0', sha, { product: PRODUCTS.rune });
+  assert.equal(f.calls.filter(([type]) => type === 'publish').length, 1);
+
+  const stale = fixture({ assets: [...installers, { name: 'latest.json', size: 100, state: 'uploaded' }] });
+  await assert.rejects(publish(stale, '1', 'v1.0.0', sha, { product: PRODUCTS.rune }), /updater/);
+  assert.equal(stale.release.draft, true);
+});
+
+test('Rune prerelease does not select a draft during the transition', async () => {
+  const f = fixture();
+  await selectDraft(f, undefined, {
+    product: PRODUCTS.rune,
+    readVersion: () => '3.0.0-alpha.3',
+  });
+  assert.equal(f.outputs.should_release, 'false');
+  assert.equal(f.calls.length, 0);
 });
